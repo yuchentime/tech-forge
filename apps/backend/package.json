@@ -2,20 +2,26 @@
   "name": "@teachforge/backend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.0",
     "@nestjs/common": "^12.3.3",
     "@nestjs/core": "^12.3.3",
     "@nestjs/platform-fastify": "^12.3.3",
     "@nestjs/typeorm": "^12.0.2",
     "better-sqlite3": "^13.0.3",
+    "billion-context-pi": "^0.1.83",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "fastify": "^5.12.8",
+    "pi-subagents": "^0.86.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "typeorm": "^1.1.2"
