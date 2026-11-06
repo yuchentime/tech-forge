@@ -74,7 +74,11 @@ export class LlmService {
     }
   }
 
-  /** Streams text deltas and aborts the active Pi run when its signal is cancelled. */
+  /**
+   * 逐段产出模型文本，并在请求取消时中止底层 Pi run。
+   * async generator 被调用时先返回生成器对象；只有消费者调用 next() 后，函数体才开始执行。
+   * 每次 yield 会把一个文本片段交给消费者，并暂停在当前位置，等下一次 next() 再继续。
+   */
   async *stream(
     prompt: string,
     options: LlmStreamOptions = {},
@@ -82,15 +86,19 @@ export class LlmService {
     if (options.signal?.aborted) return;
 
     const session = await this.createSession(options);
+    // deltas 是生产者（模型事件回调）与消费者（下面的生成器循环）之间的缓冲队列。
     const deltas: string[] = [];
+    // 只表示 session.prompt() 整次运行已结束或失败；结束后仍要把队列里剩余片段交完。
     let runSettled = false;
     let runError: unknown;
     let hasRunError = false;
+    // 暂存当前 await 所对应的 Promise resolve；有新片段或运行结束时由 wake() 调用。
     let wakeConsumer: (() => void) | undefined;
     let unsubscribe = (): void => undefined;
     let abortPromise: Promise<void> | undefined;
 
     const wake = (): void => {
+      // wake 不传递文本，只负责解除消费者的等待；文本仍保存在 deltas 队列中。
       const wake = wakeConsumer;
       wakeConsumer = undefined;
       wake?.();
@@ -120,11 +128,14 @@ export class LlmService {
           event.type === 'message_update' &&
           event.assistantMessageEvent.type === 'text_delta'
         ) {
+          // 模型每产生一个文本片段就先入队，再唤醒正在等待的生成器循环。
           deltas.push(event.assistantMessageEvent.delta);
           wake();
         }
       });
 
+      // 先启动底层模型请求，它与下方消费队列的循环并行推进。
+      // 请求成功或失败时都设置结束状态并唤醒循环，避免最后没有新片段时一直等待。
       const run = session
         .prompt(prompt, { expandPromptTemplates: false })
         .then(
@@ -140,6 +151,7 @@ export class LlmService {
           },
         );
 
+      // 运行尚未结束，或还有未交付的片段时继续；这样能排空最后一批缓冲文本。
       while (!runSettled || deltas.length > 0) {
         if (options.signal?.aborted) {
           deltas.length = 0;
@@ -147,10 +159,14 @@ export class LlmService {
         }
 
         if (deltas.length > 0) {
+          // yield 把一个片段作为 iterator.next() 的 value 交给 Controller，随后暂停本生成器。
           yield deltas.shift()!;
           continue;
         }
 
+        // 队列暂时为空时挂起本生成器（不会阻塞 JS 线程）。
+        // Promise executor 会立即把 resolve 保存到 wakeConsumer；新片段到达后 wake() 调用它，
+        // await 才会恢复并重新检查队列。这里保存 resolve 而不调用它，所以不会立刻继续循环。
         await new Promise<void>((resolve) => {
           wakeConsumer = resolve;
         });
@@ -164,6 +180,7 @@ export class LlmService {
 
       this.readAssistantText(session);
     } finally {
+      // 无论自然结束、报错还是取消，都解除监听并释放本次请求的 session。
       options.signal?.removeEventListener('abort', abortSession);
       if (options.signal?.aborted) await abortPromise;
       unsubscribe();

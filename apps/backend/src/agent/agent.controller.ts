@@ -33,16 +33,19 @@ export class AgentController {
     });
     response.flushHeaders();
 
+    // stream() 返回异步生成器；拿到 iterator 本身还没有取出文本，第一次 next() 才会启动它。
     const stream = this.agent.stream(input.prompt, abortController.signal);
     const iterator = stream[Symbol.asyncIterator]();
 
     try {
       while (!abortController.signal.aborted) {
+        // 等待生成器交付下一段：item.value 是文本片段，item.done 表示生成器已结束。
         const item = await iterator.next();
-        // Cancellation may arrive while the provider is resolving this next delta.
+        // 等待下一段期间也可能收到断开事件，因此拿到结果后再次检查取消状态。
         if (abortController.signal.aborted) break;
         if (item.done) break;
 
+        // 每次 next() 取得一个片段后编码成 SSE 写给前端，再循环请求下一段。
         const written = await writeSseFrame(
           response,
           encodeAgentSseEvent({ event: 'delta', data: { text: item.value } }),
