@@ -19,6 +19,11 @@ export interface LlmRequestOptions {
   thinkingLevel?: PiThinkingLevel;
 }
 
+/** Adds request-scoped cancellation to streamed LLM calls. */
+export interface LlmStreamOptions extends LlmRequestOptions {
+  signal?: AbortSignal;
+}
+
 const PI_SDK_PACKAGE = '@earendil-works/pi-coding-agent';
 const BILLION_CONTEXT_PACKAGE = 'billion-context-pi';
 const PI_SUBAGENTS_PACKAGE = 'pi-subagents';
@@ -41,17 +46,20 @@ const importPiSubagents = new Function(
 ) as (specifier: string) => Promise<PiSubagents>;
 
 @Injectable()
+/** Provides shared model generation and streaming with request-scoped Pi sessions. */
 export class LlmService {
   private piSdkPromise?: Promise<PiSdk>;
   private billionContextFactoryPromise?: Promise<PiExtensionFactory>;
   private piSubagentsFactoryPromise?: Promise<PiExtensionFactory>;
   private modelRuntimePromise?: Promise<PiModelRuntime>;
 
+  /** Injects the configured provider adapters used to create model runtimes. */
   constructor(
     private readonly deepseekAdapter: DeepseekLLMAdapter,
     private readonly customAdapter: CustomLLMAdapter,
   ) {}
 
+  /** Generates a complete response for callers that do not need deltas. */
   async generate(
     prompt: string,
     options: LlmRequestOptions = {},
@@ -66,10 +74,13 @@ export class LlmService {
     }
   }
 
+  /** Streams text deltas and aborts the active Pi run when its signal is cancelled. */
   async *stream(
     prompt: string,
-    options: LlmRequestOptions = {},
+    options: LlmStreamOptions = {},
   ): AsyncGenerator<string> {
+    if (options.signal?.aborted) return;
+
     const session = await this.createSession(options);
     const deltas: string[] = [];
     let runSettled = false;
@@ -77,6 +88,7 @@ export class LlmService {
     let hasRunError = false;
     let wakeConsumer: (() => void) | undefined;
     let unsubscribe = (): void => undefined;
+    let abortPromise: Promise<void> | undefined;
 
     const wake = (): void => {
       const wake = wakeConsumer;
@@ -84,7 +96,25 @@ export class LlmService {
       wake?.();
     };
 
+    /** Aborts the Pi run once and wakes a consumer waiting for another delta. */
+    const abortSession = (): void => {
+      if (!abortPromise) {
+        try {
+          abortPromise = session.abort().catch(() => undefined);
+        } catch {
+          abortPromise = Promise.resolve();
+        }
+      }
+      wake();
+    };
+
     try {
+      options.signal?.addEventListener('abort', abortSession, { once: true });
+      if (options.signal?.aborted) {
+        abortSession();
+        return;
+      }
+
       unsubscribe = session.subscribe((event) => {
         if (
           event.type === 'message_update' &&
@@ -111,6 +141,11 @@ export class LlmService {
         );
 
       while (!runSettled || deltas.length > 0) {
+        if (options.signal?.aborted) {
+          deltas.length = 0;
+          break;
+        }
+
         if (deltas.length > 0) {
           yield deltas.shift()!;
           continue;
@@ -122,17 +157,21 @@ export class LlmService {
       }
 
       await run;
+      if (options.signal?.aborted) return;
       if (hasRunError) {
         throw runError;
       }
 
       this.readAssistantText(session);
     } finally {
+      options.signal?.removeEventListener('abort', abortSession);
+      if (options.signal?.aborted) await abortPromise;
       unsubscribe();
       session.dispose();
     }
   }
 
+  /** Creates a request-scoped Pi session with the configured model and extensions. */
   private async createSession(
     options: LlmRequestOptions,
   ): Promise<PiAgentSession> {
@@ -194,6 +233,7 @@ export class LlmService {
     return session;
   }
 
+  /** Loads and caches the Pi SDK module. */
   private getPiSdk(): Promise<PiSdk> {
     this.piSdkPromise ??= importPiSdk(PI_SDK_PACKAGE);
     return this.piSdkPromise;
@@ -220,6 +260,7 @@ export class LlmService {
     return this.piSubagentsFactoryPromise;
   }
 
+  /** Creates one cached model runtime and registers configured adapters. */
   private getModelRuntime(sdk: PiSdk): Promise<PiModelRuntime> {
     this.modelRuntimePromise ??= sdk.ModelRuntime.create({
       refreshOnCreate: false,
@@ -231,6 +272,7 @@ export class LlmService {
     return this.modelRuntimePromise;
   }
 
+  /** Reads the latest assistant text and rejects empty provider completions. */
   private readAssistantText(session: PiAgentSession): string {
     const text = session.getLastAssistantText();
     if (!text?.trim()) {

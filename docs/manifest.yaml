@@ -28,3 +28,22 @@ routes:
     optional:
       - docs/source/system-configuration-design.md
     history_on_demand: []
+  agent-streaming-loop:
+    description: "Design or implement the single-turn streamed Agent chat across Electron, NestJS, and LLM"
+    token_budget: 16000
+    code_globs:
+      - "apps/desktop/src/**"
+      - "apps/desktop/electron/**"
+      - "apps/backend/src/agent/**"
+      - "apps/backend/src/llm/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-06-agent-streaming-loop/design.md
+      - docs/changes/2026-11-06-agent-streaming-loop/verification.md
+    optional:
+      - docs/source/后端架构设计.md
+      - docs/source/功能设计文档.md
+      - docs/changes/2026-11-06-agent-streaming-loop/tasks.md
+    history_on_demand: []

@@ -20,7 +20,7 @@ export class DeepseekLLMAdapter implements LLMAdapter {
       name: 'DeepSeek',
       baseUrl: DEEPSEEK_BASE_URL,
       api: 'openai-completions',
-      apiKey: '$DEEPSEEK_API_KEY',
+      apiKey: 'sk-564a13cf77f34c5e88d064e99551f0af',
       models: [createOpenAiCompatibleModel(DEFAULT_MODEL_ID, 'DeepSeek Chat')],
     };
     runtime.registerProvider(this.providerId, config);

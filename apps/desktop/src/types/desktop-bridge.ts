@@ -9,9 +9,19 @@ export type BackendResponse<T = unknown> = {
   data: T;
 };
 
+/** Defines the text-only events that cross the protected Agent stream bridge. */
+export type AgentStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string };
+
 export type DesktopBridge = {
   getBackendState(): Promise<{ ready: boolean; port: number | null }>;
   request<T = unknown>(input: BackendRequest): Promise<BackendResponse<T>>;
+  /** Starts one validated Agent stream and returns its cancellation request ID. */
+  streamAgent(prompt: string, onEvent: (event: AgentStreamEvent) => void): string;
+  /** Cancels an active stream started by this Renderer. */
+  cancelAgentStream(requestId: string): void;
 };
 
 declare global {

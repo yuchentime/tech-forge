@@ -8,7 +8,9 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
-    "start:dev": "nest start --watch"
+    "start:dev": "nest start --watch",
+    "test:agent-stream": "npm run build && node --test test/agent-stream.test.cjs",
+    "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",

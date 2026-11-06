@@ -40,12 +40,19 @@ flowchart LR
   UI[React renderer] --> Bridge[window.teachforge]
   Bridge --> Preload[Electron preload]
   Preload --> IPC[Electron main IPC]
-  IPC --> HTTP[127.0.0.1 HTTP + token]
+  IPC --> HTTP[127.0.0.1 JSON HTTP + token]
   HTTP --> Nest[NestJS Controller]
   Nest --> Service[Domain Service]
   Service --> ORM[TypeORM Repository / Entity]
   ORM --> DB[(SQLite)]
   Service --> LLM[LlmService / Adapter]
+  UI -->|streamAgent| StreamBridge[Preload typed stream bridge]
+  StreamBridge --> MainStream[Electron main fixed Agent proxy]
+  MainStream -->|SSE + local token| AgentHTTP[POST /api/agent/stream]
+  AgentHTTP --> AgentController[AgentController]
+  AgentController --> AgentService[AgentService]
+  AgentService --> LLM
+  MainStream -->|MessageChannel deltas| UI
 ```
 
 React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务。请求经 preload 的窄桥接接口进入 Electron main，再由 main 添加本地 token 并转发到随机端口上的 NestJS 服务。
@@ -57,10 +64,11 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 | 位置 | 当前内容 | 后续边界 |
 |---|---|---|
 | `apps/desktop/src/main.tsx` | React renderer 入口，挂载 `App` 和全局样式 | 保持为应用启动与根组件装配点 |
-| `apps/desktop/src/App.tsx` | 当前单页原型：请求 health、列出和创建 Course | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
-| `apps/desktop/src/types/desktop-bridge.ts` | IPC 请求、响应和 `window.teachforge` 类型 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
-| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 HTTP | 可访问 Electron/Node 能力；不要在此实现会话、演练等业务用例 |
-| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState` 和 `request` | 保持最小授权面；新增能力需定义明确 IPC 方法，不暴露通用 Node 接口 |
+| `apps/desktop/src/App.tsx` | 装配常驻的 Agent `LocalRuntime`，提供 Agent/Course 标签、health、Course 列表和创建原型 | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
+| `apps/desktop/src/features/agent/` | `AgentChatPage` 展示单轮文本对话；`agent-chat-adapter` 把运行时请求映射到窄桌面流桥 | 页面只处理运行时展示与交互；不访问本地 HTTP 或模型凭据 |
+| `apps/desktop/src/types/desktop-bridge.ts` | IPC 请求、响应、Agent stream 事件和 `window.teachforge` 类型 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
+| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径 | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
+| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口 |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
 
@@ -79,7 +87,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | Service 为空壳 |
 | `llm` | 模型运行时及提供商适配 | `LlmService` 已有 generate/stream；DeepSeek 与 OpenAI 兼容 Adapter 读取环境变量 |
-| `agent` | 需要多个步骤或工具协作时的 Agent 运行编排 | Service 为空壳；单纯模型调用直接使用 LLM 能力，不必先增加通用 Agent 抽象 |
+| `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；`AgentService` 将本轮 prompt 委托给 `LlmService.stream()`。每轮独立建内存 session，不保存聊天记录 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
 `assessments`、`memory`、`teaching`、`lessons` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 页面/API 是遗留原型，Course/Class/Lesson 不属于当前目标模型。
@@ -106,6 +114,8 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。系统设计草案中的用户可选工作空间和 `config.toml` 还未由此处实现。
 - [Course API 与 UI](../../../apps/backend/src/courses/courses.controller.ts)仍可用，但与个人学习目标模型冲突。不要把它复制成新的 Course/Class/Lesson 依赖路径；移除旧原型应作为独立业务变更处理。
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
+- Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并增量解析 SSE，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 只接收类型化 `delta`、`done`、`error` 事件，不能指定本地 HTTP 地址或读取 token。
+- Agent 页面使用 `@assistant-ui/react` 的本地运行时。切换到 Course 原型时 Agent 页面隐藏但仍挂载，因此本进程内临时消息保留；关闭应用后消息不恢复。当前 LLM session 仍装载 `billion-context-pi` 和 `pi-subagents` 扩展，UI 只展示助手文本，不展示工具事件。
 
 ## 7. 新增业务时的落点清单
 
