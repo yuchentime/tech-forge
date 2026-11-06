@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { isAgentStreamEvent } from '../../src/types/agent-stream-event';
 import type {
   AgentStreamEvent,
   BackendRequest,
@@ -13,15 +14,6 @@ type AgentStreamHandler = {
 
 const agentStreams = new Map<string, AgentStreamHandler>();
 let nextStreamId = 0;
-
-/** Validates values received from Main before exposing them to the Renderer. */
-function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
-  if (!value || typeof value !== 'object') return false;
-  const event = value as Partial<AgentStreamEvent>;
-  if (event.type === 'delta') return typeof event.text === 'string';
-  if (event.type === 'done') return true;
-  return event.type === 'error' && typeof event.message === 'string';
-}
 
 /** Closes one local port and drops its callback after a terminal condition. */
 function finishAgentStream(

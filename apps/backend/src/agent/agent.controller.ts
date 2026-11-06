@@ -11,7 +11,7 @@ export class AgentController {
   /** Injects the single-turn Agent use case for HTTP streaming. */
   constructor(private readonly agent: AgentService) {}
 
-  /** Streams assistant text and aborts the underlying Pi session on disconnect. */
+  /** Streams selected Pi events and aborts the underlying Pi session on disconnect. */
   @Post('stream')
   async stream(
     @Body() input: AgentPromptDto,
@@ -39,16 +39,16 @@ export class AgentController {
 
     try {
       while (!abortController.signal.aborted) {
-        // 等待生成器交付下一段：item.value 是文本片段，item.done 表示生成器已结束。
+        // 等待生成器交付下一事件：item.value 是 Pi 事件投影，item.done 表示生成器已结束。
         const item = await iterator.next();
         // 等待下一段期间也可能收到断开事件，因此拿到结果后再次检查取消状态。
         if (abortController.signal.aborted) break;
         if (item.done) break;
 
-        // 每次 next() 取得一个片段后编码成 SSE 写给前端，再循环请求下一段。
+        // 每次 next() 取得一个事件后用 Pi 原生 type 编码为 SSE，再请求下一事件。
         const written = await writeSseFrame(
           response,
-          encodeAgentSseEvent({ event: 'delta', data: { text: item.value } }),
+          encodeAgentSseEvent(item.value),
           abortController.signal,
         );
         if (!written) {
@@ -61,8 +61,8 @@ export class AgentController {
         const written = await writeSseFrame(
           response,
           encodeAgentSseEvent({
-            event: 'done',
-            data: { finishReason: 'stop' },
+            type: 'done',
+            finishReason: 'stop',
           }),
           abortController.signal,
         );
@@ -73,8 +73,8 @@ export class AgentController {
         const written = await writeSseFrame(
           response,
           encodeAgentSseEvent({
-            event: 'error',
-            data: { message: getSafeErrorMessage(error) },
+            type: 'error',
+            message: getSafeErrorMessage(error),
           }),
           abortController.signal,
         );

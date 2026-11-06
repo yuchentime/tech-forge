@@ -3,6 +3,7 @@ import type {
   ThreadMessage,
 } from '@assistant-ui/react';
 import type { AgentStreamEvent } from '../../types/desktop-bridge';
+import { agentEventBus } from './agent-event-bus';
 
 /** Extracts the newest user text because the backend runs each turn alone. */
 function getLatestUserPrompt(messages: readonly ThreadMessage[]): string {
@@ -53,6 +54,7 @@ export const agentChatAdapter: ChatModelAdapter = {
     };
 
     requestId = window.teachforge.streamAgent(prompt, receiveEvent);
+    agentEventBus.begin(requestId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();
 
@@ -61,13 +63,18 @@ export const agentChatAdapter: ChatModelAdapter = {
         const event = await takeNextEvent();
         if (!event) return;
 
-        if (event.type === 'delta') {
-          accumulatedText += event.text;
+        agentEventBus.publish(requestId, event);
+
+        if (
+          event.type === 'message_update' &&
+          event.assistantMessageEvent.type === 'text_delta'
+        ) {
+          accumulatedText += event.assistantMessageEvent.delta;
           yield { content: [{ type: 'text', text: accumulatedText }] };
         } else if (event.type === 'done') {
           terminal = true;
           return;
-        } else {
+        } else if (event.type === 'error') {
           terminal = true;
           throw new Error(event.message);
         }
@@ -75,6 +82,7 @@ export const agentChatAdapter: ChatModelAdapter = {
     } finally {
       abortSignal.removeEventListener('abort', cancel);
       if (!terminal) cancel();
+      if (requestId) agentEventBus.clear(requestId);
     }
   },
 };

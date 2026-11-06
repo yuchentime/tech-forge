@@ -1,4 +1,7 @@
-import type { AgentStreamEvent } from '../../src/types/desktop-bridge';
+import {
+  isAgentStreamEvent,
+  type AgentStreamEvent,
+} from '../../src/types/agent-stream-event';
 import type { SseMessage } from './sse-parser';
 
 /** Validates and normalizes one backend SSE frame before crossing into Renderer. */
@@ -11,18 +14,8 @@ export function decodeAgentSseMessage(
   } catch {
     return undefined;
   }
-  if (!data || typeof data !== 'object') return undefined;
-
-  if (message.event === 'delta') {
-    const text = (data as { text?: unknown }).text;
-    return typeof text === 'string' ? { type: 'delta', text } : undefined;
-  }
-  if (message.event === 'done') return { type: 'done' };
-  if (message.event === 'error') {
-    const errorMessage = (data as { message?: unknown }).message;
-    return typeof errorMessage === 'string'
-      ? { type: 'error', message: errorMessage }
-      : undefined;
-  }
-  return undefined;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  if (Object.hasOwn(data, 'type')) return undefined;
+  const event = { ...data, type: message.event };
+  return isAgentStreamEvent(event) ? event : undefined;
 }

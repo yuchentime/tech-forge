@@ -30,7 +30,7 @@ routes:
     history_on_demand: []
   agent-streaming-loop:
     description: "Design or implement the single-turn streamed Agent chat across Electron, NestJS, and LLM"
-    token_budget: 16000
+    token_budget: 22000
     code_globs:
       - "apps/desktop/src/**"
       - "apps/desktop/electron/**"

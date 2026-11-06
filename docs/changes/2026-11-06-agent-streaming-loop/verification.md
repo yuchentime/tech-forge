@@ -1,5 +1,5 @@
 ---
-status: draft
+status: implemented
 layer: change
 domain: agent
 created_at: 2026-11-06
@@ -9,8 +9,8 @@ related:
   - docs/changes/2026-11-06-agent-streaming-loop/design.md
   - docs/changes/2026-11-06-agent-streaming-loop/tasks.md
   - docs/current/platform/architecture-and-code-placement.md
-last_verified: 2026-11-06
-version: 1.0
+last_verified: 2026-11-07
+version: 2.0
 acceptance_review_status: approved
 ---
 
@@ -164,8 +164,81 @@ npx cross-env TEACHFORGE_AGENT_LIVE_TEST=1 npm run verify:agent-stream --workspa
 | 空白、超长或含未知字段的 prompt | HTTP 400 且无 SSE/模型请求 | L1 / L2 | DTO 单测及 HTTP 集成断言 | 阻止无效输入进入昂贵外部调用 |
 | 正常真实模型流 | 一个或多个 delta 在 done 前到达，顺序保持 | L2 | opt-in DeepSeek 实时验证 | 证明真实 HTTP/Provider 流不是完整响应缓冲 |
 | Assistant UI 取消生成 | 请求停止，状态显示取消/未完成，后续请求不收旧事件 | L1 / L3 | 清理测试与 Electron 手工操作 | 覆盖跨进程取消和 listener 生命周期 |
+| Pi 工具事件及公开字段边界 | UI 显示工具名称/参数；结果、partial result、完整消息和未知字段不会到达 Renderer | L1 / L2 / L3 | 事件投影与校验测试、本地 HTTP、Electron 窗口观察 | 确保活动提示有用且不泄露工具输出 |
+| 活动状态与最终文本流并行 | 工具状态更新独立于 Assistant 正文；text delta 仍按序累积，终态清理状态 | L1 / L2 / L3 | EventBus/Adapter 测试、SSE 联动、Electron 窗口观察 | 验证状态提示没有打断答案流 |
 | 桌面端健康与 Course 原型回归 | ready 状态、健康、课程列表/创建仍工作 | L2 / L3 | HTTP 回归与 Electron 手工操作 | 防止扩展 IPC 时破坏现有 JSON 路径 |
 | 应用关闭后重新启动 | 本轮消息不恢复 | L1 / L3 | 状态边界检查与重启观察 | 验证最小闭环没有暗中承诺持久化 |
+
+## v2.0 Acceptance Criteria Amendments
+
+本节是 v2.0 的有效验收补充，保留 v1.0 记录。v2.0 修订 AC-03 与 AC-04 中“只转发文本、不显示工具事件”的规则；其余 AC 继续有效。
+
+### AC-03 v2.0 Agent 到 Pi 事件流
+
+| 要素 | 内容 |
+| --- | --- |
+| 代码位置 | `AgentService.stream()`；`LlmService.stream()`；Pi SDK `AgentSessionEvent` 与 `AgentSession.subscribe()` |
+| 前置条件 | 有效 prompt；DeepSeek 配置可用；Pi session 产生 lifecycle、tool 或 text delta 事件 |
+| 预期行为 | AgentService 按原顺序投影 `agent_start`、`turn_start`、`turn_end`、`tool_execution_start`、`tool_execution_end`、`agent_end` 和 text-only `message_update`；`tool_execution_start` 保留工具名和参数，文本增量仍逐段发送 |
+| 禁止出现 | 不把所有 Pi 事件原样透传；不暴露 `tool_execution_update.partialResult`、`tool_execution_end.result`、`turn_end.message/toolResults`、`agent_end.messages` 或非 text delta 内容；不拼入历史 prompt |
+| 判定方式 | L1 对真实 `AgentSessionEvent` 形状做投影断言；真实端点检查 delta 顺序与终态；代码走查确认仅 allowlist 穿过 AgentService 边界 |
+
+### AC-04 v2.0 事件桥接、UI EventBus 与 JSON 兼容
+
+| 要素 | 内容 |
+| --- | --- |
+| 代码位置 | `AgentSseEvent` / `encodeAgentSseEvent()`；Electron `decodeAgentSseMessage()`、`routeAgentStreamEvent()`、Preload `isAgentStreamEvent()`；Renderer Agent EventBus / `agent-chat-adapter` |
+| 前置条件 | Renderer 提交一轮 Agent prompt，后端连续产生工具/lifecycle/text 事件；或执行现有 JSON `request()` |
+| 预期行为 | SSE 以对应 Pi `type` 为事件名；Main 按原顺序投递到请求独立的 MessagePort；Preload 只转发通过校验的事件；Renderer EventBus 更新进度状态，Assistant UI 累积 `message_update/text_delta`；health/Course 仍走 JSON bridge |
+| 禁止出现 | 不新增 `progress` 语义事件；不跨 request ID 串流；Renderer 不接触 HTTP token、任意 IPC 或裸 MessagePort；工具/lifecycle 事件不写进助手正文 |
+| 判定方式 | L1 逐层断言事件名、字段 allowlist、顺序、request ID 隔离、EventBus 状态和 delta 累计；L2 检查 SSE 连续帧；L3 检查窗口中的工具状态与答案增量 |
+
+### AC-08 Pi 事件公开字段边界
+
+| 要素 | 内容 |
+| --- | --- |
+| 代码位置 | `AgentService.stream()` 的 Pi 事件投影；`AgentSseEvent`；桌面桥接类型与 Preload 运行时校验 |
+| 前置条件 | Pi 发出包含工具参数、工具结果和 message 内容的事件 |
+| 预期行为 | `tool_execution_start` 暴露 `toolCallId`、`toolName`、`args`；`tool_execution_end` 只暴露 `toolCallId`、`toolName`、`isError`、可选 `durationMs`；生命周期事件只暴露 UI 所需字段；文本更新只暴露 `text_delta` |
+| 禁止出现 | `partialResult`、`result`、`toolResults`、完整 `messages`、模型 reasoning/non-text delta 或未列入 allowlist 的 Pi event type 不进入 SSE、MessagePort 或 Renderer EventBus |
+| 判定方式 | L1 使用含敏感哨兵字段的 Pi event fixture 检查序列化 payload；Main/Preload 对未知 event 和字段形状拒绝转发 |
+
+### AC-09 单轮事件顺序、终态和取消清理
+
+| 要素 | 内容 |
+| --- | --- |
+| 代码位置 | `LlmService.stream()` 异步事件队列；`AgentController.stream()`；Main SSE reader 与每请求 MessagePort lifecycle；Renderer EventBus |
+| 前置条件 | 同一轮先后触发 Pi 工具事件和多个 `message_update/text_delta`；或在事件等待/响应写入期间取消 |
+| 预期行为 | 同一 request 的事件各发送一次且保持顺序；`done`/`error` 是终态；取消停止后续事件并解除订阅、关闭端口和 Pi session；下一轮只收到自己的事件 |
+| 禁止出现 | 取消后继续发送、事件跨请求串扰、终态后再收到 delta，或未关闭的订阅/端口保留回调 |
+| 判定方式 | L1 使用多个请求 ID 和可控 Pi session 覆盖顺序、终态、取消与清理；L2 验证真实 SSE 写入并保持 JSON API 兼容 |
+
+## v2.0 Acceptance Criteria Review
+
+> Design Review v2.0 已 PASS；以下核验在 v2 编码前逐条对照当前 Pi SDK 声明与项目代码完成。
+
+| AC | 核验结果 | 备注（修正内容 / 协商一致结论） |
+| --- | --- | --- |
+| AC-03 | pass | 当前 `LlmService.stream()`、`AgentService.stream()` 和 `AgentController.stream()` 均存在；安装版本导出的 `AgentSessionEvent` 包含列出的 lifecycle/tool/message 事件；`message_update` 携带 `assistantMessageEvent`，可窄化到 `text_delta`。 |
+| AC-04 | pass | `AgentSseEvent`、`encodeAgentSseEvent()`、`decodeAgentSseMessage()`、`routeAgentStreamEvent()`、Preload `isAgentStreamEvent()` 和 request ID MessagePort 均是现有代码锚点；新增 Pi-native variants 与 Renderer EventBus 属于 v2 目标。 |
+| AC-08 | pass | 当前 SDK 声明确认 `tool_execution_start.args`、`tool_execution_end.result`、`turn_end.message/toolResults` 和 `agent_end.messages` 的字段结构；投影可逐事件选择并剔除不公开字段。 |
+| AC-09 | pass | 当前 LlmService 使用队列与 `wakeConsumer`，Controller 的 `writeSseFrame()` 等待 drain，Main/Preload 按 request ID 隔离且支持取消；这些是 v2 顺序和清理验收的现有锚点。 |
+
+- 评审结论：AC-03、AC-04、AC-08、AC-09 已按 SDK 与现有桥接实现核验；v2 AC 均可判定，可以进入编码。
+- 评审方 / 确认人 / 时间：Codex（实现方）与开发者（确认 Pi 原生事件、工具参数可见、工具结果不出站）/ 2026-11-06
+
+## v2.0 Implementation Verification
+
+- Backend build: PASS (`npm run build:backend`).
+- Desktop build: PASS (`npm run build --workspace @teachforge/desktop`); Vite reports a non-blocking large-chunk advisory.
+- Backend L1: PASS, 5/5 (`npm run test:agent-stream --workspace @teachforge/backend`).
+- Desktop L1: PASS, 8/8 (`npm run test:agent-stream --workspace @teachforge/desktop`).
+- Local HTTP L2: PASS (`npm run verify:agent-stream --workspace @teachforge/backend`), including Agent stream endpoint, health, and Course routes.
+- DeepSeek adapter configuration: the registered Pi provider now uses the same `DEEPSEEK_API_KEY` value checked by the adapter; no literal credential remains in the adapter source. Rotation/revocation of the historical credential is not verified here.
+- DeepSeek v2 L2: NOT RUN; the opted-in subprocess reported `DEEPSEEK_API_KEY is required`. No credential was read or exposed by this verification attempt.
+- Electron L3: PARTIAL; the desktop app and Agent page launched, but the page reported the local backend connection unavailable, so end-to-end tool activity and streamed answer display could not be observed.
+- Visual inspection: development preview inspected at 1440, 768, and 390 px; 0 FAIL, 1 WARN (development server; production inspection recommended). The UI was in its empty state because the backend was disconnected.
+- Remaining: repeat the DeepSeek v2 stream with the configured key available to the launched process, then verify tool activity and streamed text in Electron; exercise Stop and restart memory behavior from the v1 checklist.
 
 ## Known Guardrails
 
@@ -211,3 +284,10 @@ npx cross-env TEACHFORGE_AGENT_LIVE_TEST=1 npm run verify:agent-stream --workspa
 ## Version History
 
 本轮为 v1.0 初始验收稿；交付后反馈尚未产生版本升级记录。
+
+### v2.0 — 2026-11-06
+
+- 触发：开发者要求把 Pi 的处理中间事件通过 EventBus 传递给 UI，同时维持最终回答文本流。
+- 改动内容：修订 AC-03、AC-04，新增 AC-08（Pi 事件字段筛选）和 AC-09（顺序、终态及取消清理）。
+- 影响范围：后端事件队列与投影、SSE、Electron/Preload 事件桥接、Renderer EventBus、UI 状态和流式文本 Adapter。
+- 处理状态：已在 L003 实施；L1、本地 HTTP 与构建通过。DeepSeek v2 联调及 Electron 活动态 L3 待完成。

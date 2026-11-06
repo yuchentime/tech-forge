@@ -4,9 +4,17 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
 } from '@assistant-ui/react';
+import { useSyncExternalStore } from 'react';
+import { agentEventBus } from './agent-event-bus';
 
 /** Renders the text-only Agent thread and its send/stop controls. */
 export function AgentChatPage() {
+  const activity = useSyncExternalStore(
+    agentEventBus.subscribe,
+    agentEventBus.getSnapshot,
+    agentEventBus.getSnapshot,
+  );
+
   return (
     <section className="mx-auto flex h-full w-full max-w-5xl flex-col px-5 py-5 md:px-8">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
@@ -15,7 +23,7 @@ export function AgentChatPage() {
           <p className="mt-1 text-sm text-stone-500">问题与回答只保留在当前应用运行期间。</p>
         </div>
         <p className="max-w-xl text-xs leading-5 text-stone-600">
-          当前 Pi 扩展工具可能由模型调用；工具执行细节不会显示在对话中。
+          运行期间会显示当前工具和参数；工具执行结果不会进入对话。
         </p>
       </header>
 
@@ -35,6 +43,8 @@ export function AgentChatPage() {
               message.role === 'user' ? <UserMessage /> : <AssistantMessage />
             }
           </ThreadPrimitive.Messages>
+
+          <AgentActivity activity={activity} />
 
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 pt-3">
             <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
@@ -68,6 +78,41 @@ export function AgentChatPage() {
   );
 }
 
+/** Shows request activity separately from the assistant's streamed answer. */
+function AgentActivity({
+  activity,
+}: {
+  activity: ReturnType<typeof agentEventBus.getSnapshot>;
+}) {
+  if (activity.phase === 'idle') return null;
+
+  const label = activity.tools.length
+    ? `正在使用 ${activity.tools.length > 1 ? '多个工具' : activity.tools[0].toolName}`
+    : activity.phase === 'responding'
+      ? '正在生成回答'
+      : '正在处理中';
+
+  return (
+    <div
+      aria-live="polite"
+      className="mx-auto w-full max-w-[90%] shrink-0 rounded-xl border border-emerald-900/15 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950"
+      role="status"
+    >
+      <p className="font-medium">{label}</p>
+      {activity.tools.map((tool) => (
+        <details className="mt-2" key={tool.toolCallId}>
+          <summary className="cursor-pointer text-xs text-emerald-900">
+            查看 {tool.toolName} 参数
+          </summary>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/80 p-2 text-xs leading-5 text-stone-700">
+            {JSON.stringify(tool.args, null, 2)}
+          </pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 /** Displays the user's message with right-aligned emphasis. */
 function UserMessage() {
   return (
@@ -79,7 +124,7 @@ function UserMessage() {
   );
 }
 
-/** Displays only assistant text; Pi extension tool events stay internal. */
+/** Displays assistant text and safe errors; activity events use AgentActivity. */
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-start">

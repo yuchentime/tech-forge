@@ -17,20 +17,79 @@ async function collect(generator) {
 test('AgentService delegates the prompt and request signal to the configured model', async () => {
   const signal = new AbortController().signal;
   const calls = [];
+  const piEvents = [
+    { type: 'agent_start' },
+    { type: 'turn_start' },
+    {
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'knowledge_search',
+      args: { query: '缓存雪崩' },
+    },
+    {
+      type: 'tool_execution_update',
+      toolCallId: 'tool-1',
+      toolName: 'knowledge_search',
+      args: { query: '缓存雪崩' },
+      partialResult: { chunks: ['must stay private'] },
+    },
+    {
+      type: 'tool_execution_end',
+      toolCallId: 'tool-1',
+      toolName: 'knowledge_search',
+      result: { chunks: ['must stay private'] },
+      isError: false,
+      durationMs: 24,
+    },
+    {
+      type: 'turn_end',
+      message: { content: 'must stay private' },
+      toolResults: [{ content: 'must stay private' }],
+    },
+    {
+      type: 'message_update',
+      message: { content: 'must stay private' },
+      assistantMessageEvent: { type: 'text_delta', delta: '第一段' },
+    },
+    {
+      type: 'message_update',
+      message: { content: 'private reasoning' },
+      assistantMessageEvent: { type: 'thinking_delta', delta: 'private reasoning' },
+    },
+    { type: 'agent_end', messages: [{ content: 'must stay private' }] },
+  ];
   const llm = {
     stream(prompt, options) {
       calls.push({ prompt, options });
       return (async function* () {
-        yield '第一段';
-        yield '第二段';
+        yield* piEvents;
       })();
     },
   };
 
   const service = new AgentService(llm);
   assert.deepEqual(await collect(service.stream('讲解缓存雪崩', signal)), [
-    '第一段',
-    '第二段',
+    { type: 'agent_start' },
+    { type: 'turn_start' },
+    {
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'knowledge_search',
+      args: { query: '缓存雪崩' },
+    },
+    {
+      type: 'tool_execution_end',
+      toolCallId: 'tool-1',
+      toolName: 'knowledge_search',
+      isError: false,
+      durationMs: 24,
+    },
+    { type: 'turn_end' },
+    {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: '第一段' },
+    },
+    { type: 'agent_end' },
   ]);
   assert.deepEqual(calls, [
     {
@@ -59,15 +118,57 @@ test('AgentPromptDto trims input and counts Unicode characters', async () => {
   assert.ok((await validate(blank)).some((error) => error.property === 'prompt'));
 });
 
-test('SSE encoder keeps event names fixed and JSON-escapes text', () => {
+test('SSE encoder preserves Pi event names and JSON-escapes text deltas', () => {
   assert.equal(
-    encodeAgentSseEvent({ event: 'delta', data: { text: '一行\n二行' } }),
-    'event: delta\ndata: {"text":"一行\\n二行"}\n\n',
+    encodeAgentSseEvent({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: '一行\n二行' },
+    }),
+    'event: message_update\ndata: {"assistantMessageEvent":{"type":"text_delta","delta":"一行\\n二行"}}\n\n',
   );
   assert.equal(
-    encodeAgentSseEvent({ event: 'done', data: { finishReason: 'stop' } }),
+    encodeAgentSseEvent({ type: 'done', finishReason: 'stop' }),
     'event: done\ndata: {"finishReason":"stop"}\n\n',
   );
+});
+
+test('LlmService queues Pi session events in subscription order', async () => {
+  const received = [];
+  const session = {
+    subscribe(callback) {
+      received.push(callback);
+      return () => undefined;
+    },
+    prompt() {
+      received[0]({ type: 'turn_start' });
+      received[0]({
+        type: 'tool_execution_start',
+        toolCallId: 'tool-1',
+        toolName: 'search',
+        args: { query: 'q' },
+      });
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    getLastAssistantText() {
+      return '回答';
+    },
+  };
+  const service = new LlmService({}, {});
+  service.createSession = async () => session;
+
+  assert.deepEqual(await collect(service.stream('prompt')), [
+    { type: 'turn_start' },
+    {
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'search',
+      args: { query: 'q' },
+    },
+  ]);
 });
 
 test('LlmService aborts the Pi session and removes its listener on cancellation', async () => {
@@ -84,10 +185,7 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
       };
     },
     prompt() {
-      listener({
-        type: 'message_update',
-        assistantMessageEvent: { type: 'text_delta', delta: '部分回答' },
-      });
+      listener({ type: 'agent_start' });
       return new Promise((resolve) => {
         finishRun = resolve;
       });
@@ -109,7 +207,10 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
   const controller = new AbortController();
   const iterator = service.stream('prompt', { signal: controller.signal });
 
-  assert.deepEqual(await iterator.next(), { value: '部分回答', done: false });
+  assert.deepEqual(await iterator.next(), {
+    value: { type: 'agent_start' },
+    done: false,
+  });
   controller.abort();
   assert.deepEqual(await iterator.next(), { value: undefined, done: true });
   assert.equal(abortCalled, true);

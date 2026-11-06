@@ -9,18 +9,19 @@ drift goes into `Design Deviations`.
 -->
 
 ---
-status: in_progress
+status: implemented
 layer: change
 domain: agent
 created_at: 2026-11-06
-version: 1.0
+version: 2.0
 canonical_for:
   - agent-streaming-loop-design
 related:
   - docs/current/platform/architecture-and-code-placement.md
   - docs/source/后端架构设计.md
   - docs/source/功能设计文档.md
-last_verified: 2026-11-06
+last_verified: 2026-11-07
+landed_in: L003
 updates_current:
   - docs/current/platform/architecture-and-code-placement.md
 ---
@@ -236,3 +237,104 @@ data: {"message":"模型请求失败，请检查模型配置和网络。"}
 
 - [x] `docs/current/platform/architecture-and-code-placement.md`（同步 AgentService 责任和流式入口事实）
 - [x] `docs/manifest.yaml`
+
+## v2.0 Active Design Amendment: Pi Event Stream
+
+This amendment is the active v2.0 design for the post-delivery event-visibility request. It supersedes conflicting v1.0 statements about the Agent stream exposing text only. The original v1.0 record remains above for history.
+
+### Goals
+
+- Carry selected Pi lifecycle and tool-execution events to the Agent UI so the user can see that the run is active and which tool is running.
+- Carry final assistant text as ordered Pi `message_update` events containing only `text_delta`; continue rendering the answer incrementally.
+- Use one request-scoped event stream across AgentService, SSE, Electron Main/MessagePort, Preload, and the Renderer.
+- Keep event names aligned with Pi events where the event originates in Pi. Do not add a semantic `progress` event.
+
+### Non-Goals
+
+- Do not forward every `AgentSessionEvent` or expose the model's private reasoning trace.
+- Do not forward `tool_execution_update.partialResult`, `tool_execution_end.result`, `turn_end.message`, `turn_end.toolResults`, or `agent_end.messages`.
+- Do not add a global process-wide bus, a third-party EventBus dependency, persistence, replay, or cross-run subscribers.
+- Do not add knowledge retrieval or new tools in this change.
+
+### Event Projection Contract
+
+`LlmService.stream()` becomes an async event stream of Pi `AgentSessionEvent` objects. `AgentService.stream()` projects that internal stream into a request-safe event union before it reaches the HTTP boundary. The public event names remain Pi-native for observable lifecycle/tool/text events; payloads are intentionally narrower than Pi's internal event objects.
+
+| Pi event | Public projection | UI use |
+|---|---|---|
+| `agent_start` | `{ type }` | Show that the run has started |
+| `turn_start` | `{ type }` | Show a generic active state while the model is working |
+| `turn_end` | `{ type }` only | Keep the run active; do not expose message or tool results |
+| `tool_execution_start` | `{ type, toolCallId, toolName, args }` | Show the active tool and its arguments |
+| `tool_execution_end` | `{ type, toolCallId, toolName, isError, durationMs? }` | Mark that tool activity as finished without showing its result |
+| `message_update` with `assistantMessageEvent.type === 'text_delta'` | `{ type, assistantMessageEvent: { type: 'text_delta', delta } }` | Append the final answer delta to the active assistant message |
+| `agent_end` | `{ type }` | Show that Pi's agent run ended; the transport `done` remains the stream terminal signal |
+
+All other Pi events are ignored at the AgentService boundary. `tool_execution_start.args` is the one tool payload intentionally made visible. Tool result and full message fields never cross the boundary. Existing `done` and safe `error` SSE events remain transport lifecycle events; they are not a new progress vocabulary.
+
+### Event Interaction Flow
+
+```mermaid
+sequenceDiagram
+  participant P as Pi AgentSession
+  participant L as LlmService async event queue
+  participant A as AgentService projection
+  participant C as AgentController / SSE
+  participant M as Electron Main / MessagePort
+  participant R as Renderer EventBus and Assistant UI
+  P-->>L: AgentSessionEvent
+  L-->>A: ordered event via async iterator
+  A->>A: allowlist type and project safe fields
+  A-->>C: Pi-named public event
+  C-->>M: SSE frame (one frame per event)
+  M-->>R: request-scoped MessagePort event
+  R->>R: publish lifecycle/tool event to UI EventBus
+  R->>R: append message_update text_delta to answer
+```
+
+| 节点 | 责任 | 关键边界 |
+|---|---|---|
+| Pi `AgentSession.subscribe()` | 产生 session 生命周期、工具及消息增量事件 | 内部事件可能包含完整 message、partial result 和 tool result |
+| `LlmService.stream()` | 将 Pi 回调事件放入本次运行的异步队列并按序产出 | 继续响应取消；队列只属于当前 session，不做持久化或重放 |
+| `AgentService.stream()` | 以 Pi 原生事件名筛选和投影公开字段 | 唯一的工具事件出站策略边界；不转发结果和非文本 message 更新 |
+| AgentController / Electron bridge | 每事件一帧 SSE，再由 request ID 对应的 MessagePort 转发 | 认证 token 仍只在 Main；普通 JSON `request()` 不变 |
+| Renderer EventBus / Assistant UI | 生命周期和工具事件更新临时活动状态；文本 delta 更新助手回答 | 状态不混入聊天文本；停止、完成、失败时释放对应订阅 |
+
+### Frontend Fetching Logic
+
+- Preload 桥接类型与 Main SSE 解码器采用同一组 Pi-native `type` 名称和窄 payload。Preload 仍逐事件校验后才调用 Renderer 回调。
+- `agent-chat-adapter` 把收到的事件发布到 Renderer 的 request-scoped EventBus。文本 `message_update/text_delta` 同时按 Assistant UI 约定累积后 yield；工具与 lifecycle 事件只更新 UI 活动状态，不进入助手正文。
+- Agent 页面订阅 EventBus，显示活动状态、工具名和参数；`done`、`error` 或取消时清除本轮状态。当前单线程 UI 只允许一个活动运行；事件仍以现有 request ID 隔离。
+- EventBus 不替代 SSE 或 MessagePort：它统一 Renderer 内的事件订阅；跨进程传输继续使用已经实现的逐事件通道。
+
+### Backend Fetching Logic
+
+- 不读取数据库、文件或知识库；每个请求仍建立独立的 Pi session。
+- `LlmService` 的 Pi session 订阅将事件入队；`AgentService` 只投影上述允许的事件。工具参数按 Pi 提供的 JSON 参数传递；工具输出、部分输出和完整 message 不传递。
+- AgentController 逐条读取异步生成器并写 SSE。响应写入遇到 backpressure 时等待 `drain`；客户端断开仍沿 AbortSignal 关闭迭代器并释放 session。
+- 工具事件的跨层处理保留原始顺序；各事件仅发送一次，不持久化、不重放。
+
+### Verification
+
+- L1 验证 Pi 事件筛选、工具结果字段剔除、SSE 编码/解码和 Renderer EventBus 状态变化。
+- L2 验证真实本地 HTTP 流在工具事件与 `message_update/text_delta` 间保持顺序，并且普通 health/Course JSON 路径不变。
+- L3 在 Electron 中确认等待状态、工具名/参数展示、文本增量更新和取消后的状态清理。
+
+### Alternatives Considered
+
+| 方案 | 结论 | 理由 | 是否升级为 ADR |
+|---|---|---|---|
+| 在 UI 只显示通用 spinner，不转发 Pi 事件 | 否决 | 用户需要看到当前工具活动，单一 spinner 无法表达该信息。 | n/a |
+| 将所有 Pi 事件对象原样传到 UI | 否决 | 会暴露 tool result、partial result 和完整消息，也把 SDK 内部载荷耦合到 UI。 | n/a |
+| 增加自定义 `progress` 事件类型 | 否决 | Pi 已提供可用的 lifecycle/tool 事件；避免维护重复的语义协议。 | n/a |
+| 加入全局 EventBus 服务或第三方总线 | 否决 | 当前每次请求只有单一消费者；SSE 和每请求 MessagePort 已承担进程间传输，额外常驻总线不必要。 | n/a |
+| 每请求异步事件迭代 + 现有 SSE/MessagePort + Renderer EventBus | 采用 | 保留流式消费与写入背压，按请求隔离事件，并在 UI 内用订阅更新活动状态。 | n/a |
+
+### Version History
+
+#### v2.0 — 2026-11-06
+
+- 触发：开发者交付后要求将 Agent 中间处理事件传递给 UI，以减少长任务等待焦虑；明确复用 Pi 原生事件并通过 EventBus 订阅，最终回答继续流式输出。
+- 改动内容：扩展事件流与 Pi 事件白名单；加入工具名和参数展示、文本 delta 事件、Renderer EventBus 与 UI 活动态；明确剔除工具结果、partial result、完整 message 和非文本更新。
+- 影响范围：Agent/Llm 事件接口、SSE/桌面桥接 payload、Agent UI 状态与事件消费、AC-03/AC-04 及新增 AC-08/AC-09。
+- 处理状态：已实施于 L003；构建、局部测试和本地 HTTP 回归通过。真实 DeepSeek v2 流及 Electron 活动事件界面验收仍待补齐。

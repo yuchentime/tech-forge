@@ -1,3 +1,5 @@
+import type { AgentStreamEvent } from './agent-stream-event';
+
 export type BackendRequest = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
@@ -9,11 +11,7 @@ export type BackendResponse<T = unknown> = {
   data: T;
 };
 
-/** Defines the text-only events that cross the protected Agent stream bridge. */
-export type AgentStreamEvent =
-  | { type: 'delta'; text: string }
-  | { type: 'done' }
-  | { type: 'error'; message: string };
+export type { AgentStreamEvent } from './agent-stream-event';
 
 export type DesktopBridge = {
   getBackendState(): Promise<{ ready: boolean; port: number | null }>;

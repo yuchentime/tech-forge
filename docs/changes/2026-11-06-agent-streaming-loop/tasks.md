@@ -8,7 +8,7 @@ canonical_for:
 related:
   - docs/changes/2026-11-06-agent-streaming-loop/design.md
   - docs/changes/2026-11-06-agent-streaming-loop/verification.md
-last_verified: 2026-11-06
+last_verified: 2026-11-07
 ---
 
 # Agent 单轮流式闭环 Tasks
@@ -50,3 +50,12 @@ npx cross-env TEACHFORGE_AGENT_LIVE_TEST=1 npm run verify:agent-stream --workspa
 - [x] Current docs reflect implemented behavior.
 - [x] No historical documents were superseded by this change.
 - [x] No task-only document is routed as required runtime context.
+
+## v2.0 Post-Delivery Implementation
+
+- [x] **v2 设计评审与 AC 复核**：`reviews/design-review.md` 的 v2.0 评审结论为 PASS；v2.0 AC-03/04/08/09 已核验真实 Pi SDK 与当前边界代码，并在 `verification.md` 记录 approved。
+- [x] **Pi 原生事件流**：让 `LlmService.stream()` 按序产出 Pi `AgentSessionEvent`；`AgentService` 仅投影批准的 lifecycle、tool start/end 和 `message_update/text_delta` 字段，不透传 tool result、partial result、完整 message 或非文本增量。
+- [x] **跨进程事件桥接**：SSE 用对应 Pi `type` 作为事件名；扩展 Electron Main 解码、request-scoped MessagePort 和 Preload 校验；保留现有 `done/error` 终态及 JSON `request()`。
+- [x] **Renderer EventBus 与展示**：Adapter 将事件发布到 request-scoped EventBus；UI 展示运行状态、工具名/参数，文本 delta 继续累计到助手消息；完成、失败、取消后清理本轮状态。
+- [x] **v2 自动验证与当前事实同步**：增加事件投影、编码/解码、桥接隔离、Renderer EventBus 与文本流测试；构建和本地 HTTP 回归通过；更新平台架构页及 L003 worklog。
+- [ ] **v2 外部验收**：在 DeepSeek key 可供启动进程读取的环境重跑真实 Provider 流，并在 Electron 窗口确认工具活动与答案增量；同时补齐 Stop 与重启状态观察，见 `verification.md`。
