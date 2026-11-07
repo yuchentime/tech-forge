@@ -4,7 +4,7 @@ layer: change
 domain: conversations
 created_at: 2026-11-07
 landed_in: L001
-version: 1.0
+version: 2.0
 updates_current:
   - docs/current/index.md
   - docs/current/domains/README.md
@@ -174,7 +174,10 @@ sequenceDiagram
 
 ## Version History
 
-No post-delivery revision has occurred; the design remains at v1.0 until delivery feedback.
+| Version | Trigger | Change | Impact scope | Handling |
+|---|---|---|---|---|
+| 1.0 | Initial implementation | Added Conversation list/history reads and sidebar restore/selection flow. | Conversations API and desktop Agent page. | Implemented in L001. |
+| 2.0 | Developer reported a blank startup screen caused by a missing assistant-ui named export after L001. | No business design change; replace the obsolete state-hook name with the installed package's public hook. | `AgentChatPage` import/runtime state selector only. | Fixed in L002; focused import-export check passes. |
 
 ## Current Doc Updates
 

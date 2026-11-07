@@ -3,7 +3,7 @@ import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
-  useAssistantState,
+  useAuiState,
   type AssistantRuntime,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
@@ -37,7 +37,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     agentEventBus.getTurnSnapshots,
     agentEventBus.getTurnSnapshots,
   );
-  const isRunning = useAssistantState((state) => state.thread.isRunning);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
@@ -81,11 +81,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   /** Restores the last selected thread only after the initial list is known. */
   useEffect(() => {
-    if (conversationState.listStatus === 'error') {
-      setHasLoadedInitialList(true);
-      restoredInitialConversation.current = true;
-      return;
-    }
     if (
       conversationState.listStatus !== 'ready' ||
       restoredInitialConversation.current
@@ -159,7 +154,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
         {isHistoryLoading || isInitialListLoading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
-            {isInitialListLoading ? '正在加载对话列表…' : '正在加载历史消息…'}
+            {isInitialListLoading
+              ? conversationState.listStatus === 'error'
+                ? '会话列表加载失败，请在左侧重试。'
+                : '正在加载对话列表…'
+              : '正在加载历史消息…'}
           </div>
         ) : (
           <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">

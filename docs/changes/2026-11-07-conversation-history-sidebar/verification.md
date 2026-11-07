@@ -5,7 +5,7 @@ domain: conversations
 canonical_for:
   - conversation-history-sidebar-verification
 last_verified: 2026-11-07
-version: 1.0
+version: 2.0
 acceptance_review_status: approved
 ---
 
@@ -142,7 +142,11 @@ npm run build --workspace @teachforge/desktop
 - Code inspection confirms both Conversation GET routes, the text-only/status-filtered message projection, startup list loading, saved active conversation restore, selection generation guard, new-thread reset, and stream-triggered list refresh.
 - `git diff --check` passed as a whitespace/conflict-marker check.
 - Backend/desktop builds and Electron interaction checks are not run in this turn; no build, test, or manual verification was requested. API and UI runtime behavior remains unverified in a running application.
+- L002 reproduces the missing-export condition by comparing AgentChatPage runtime imports with the optimized Vite module exports; after changing `useAssistantState` to `useAuiState`, the same check passes. Installed package `@assistant-ui/react` is version 0.15.32.
 
 ## Version History
 
-Implementation is recorded in L001. Runtime/API interaction checks remain pending a requested verification pass.
+| Version | Trigger | AC impact | Handling |
+|---|---|---|---|
+| 1.0 | Initial implementation and AC review. | AC-01 through AC-05 established and reviewed. | Implemented in L001; runtime/API interaction checks were not run. |
+| 2.0 | Developer reported a blank page from the removed `useAssistantState` export. | No AC change; the startup UI import compatibility is covered by the existing AC-04 startup check. | Fixed in L002 with the current `useAuiState` export; import-export check passes. |
