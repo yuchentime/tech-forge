@@ -505,7 +505,7 @@ function cancelAllAgentStreams(): void {
   }
 }
 
-/** Creates the isolated Renderer window after the backend is ready. */
+/** Creates the isolated Renderer window and opens DevTools in development. */
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -538,7 +538,9 @@ function createWindow(): void {
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
-    void mainWindow.loadURL(devUrl);
+    void mainWindow.loadURL(devUrl).then(() => {
+      mainWindow?.webContents.openDevTools();
+    });
   } else {
     void mainWindow.loadFile(path.join(__dirname, '../../../dist/index.html'));
   }

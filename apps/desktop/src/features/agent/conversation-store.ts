@@ -1,3 +1,5 @@
+import { hasDesktopBridge } from '../../types/desktop-bridge';
+
 /** Describes one lightweight Conversation row displayed in the sidebar. */
 export interface ConversationSummary {
   id: string;
@@ -74,11 +76,22 @@ export class ConversationStore {
     const requestVersion = ++this.listRequestVersion;
     this.update({ listStatus: 'loading', listError: null });
 
+    if (!hasDesktopBridge()) {
+      console.error('[TeachForge][conversation.list] desktop_bridge_unavailable');
+      this.update({
+        listStatus: 'error',
+        listError: '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。',
+      });
+      return;
+    }
+
+    let httpStatus: number | null = null;
     try {
       const response = await window.teachforge.request<ConversationSummary[]>({
         method: 'GET',
         path: '/api/conversations',
       });
+      httpStatus = response.status;
       if (response.status !== 200 || !Array.isArray(response.data)) {
         throw new Error('会话列表加载失败。');
       }
@@ -89,11 +102,18 @@ export class ConversationStore {
         listStatus: 'ready',
         listError: null,
       });
-    } catch {
+    } catch (error) {
       if (requestVersion !== this.listRequestVersion) return;
+      console.error('[TeachForge][conversation.list] request_failed', {
+        httpStatus,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
       this.update({
         listStatus: 'error',
-        listError: '会话列表加载失败，请重试。',
+        listError:
+          httpStatus === null
+            ? '会话列表加载失败，请重试。'
+            : `会话列表加载失败（HTTP ${httpStatus}），请重试。`,
       });
     }
   }

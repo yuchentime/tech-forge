@@ -24,3 +24,4 @@ last_verified: 2026-11-06
 
 - [复杂变更工作流](changes/README.md)：何时建立正式变更记录，以及变更目录的生命周期。
 - [已接受决策索引](decisions/index.md)：长期有效的已接受权衡。
+- [故障复盘与复用经验](postmortems/index.md)：运行失败的证据、根因及防复发验收。

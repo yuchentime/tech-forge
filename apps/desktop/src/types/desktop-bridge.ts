@@ -26,6 +26,19 @@ export type DesktopBridge = {
   cancelAgentStream(requestId: string): void;
 };
 
+/** Detects whether this renderer was launched with the restricted Electron preload bridge. */
+export function hasDesktopBridge(): boolean {
+  if (typeof window === 'undefined') return false;
+  const bridge = window.teachforge;
+  return Boolean(
+    bridge &&
+      typeof bridge.getBackendState === 'function' &&
+      typeof bridge.request === 'function' &&
+      typeof bridge.streamAgent === 'function' &&
+      typeof bridge.cancelAgentStream === 'function',
+  );
+}
+
 declare global {
   interface Window {
     teachforge: DesktopBridge;

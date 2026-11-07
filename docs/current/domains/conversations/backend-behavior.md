@@ -10,6 +10,8 @@ related:
   - docs/current/platform/architecture-and-code-placement.md
   - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+  - docs/changes/2026-11-07-agent-flow-logging/design.md
+  - docs/changes/2026-11-07-agent-flow-logging/verification.md
 last_verified: 2026-11-07
 ---
 
@@ -45,6 +47,10 @@ Conversation 查询接口由 `ConversationsController` 暴露，并经现有本�
 - `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。消息只包括 `user`/`assistant` 角色和 `completed`/`failed`/`cancelled` 状态，按 `sequenceNo ASC` 返回 `id`、`role`、纯文本 `content`、`status`、`createdAt`。不存在的会话不隐式创建。
 - 消息查询仅输出文本内容；内部 `toolExecution`、`toolResult`、`assistantTurn`、pending 状态、thinking 和工具调用内容不进入 API 响应。无可显示文本的 assistant 行会被省略。
 - 列表和消息历史当前全部读取，不分页；空列表返回 `[]`，空历史返回 `[]`。
+
+## 诊断日志
+
+Agent 请求由 `AgentController` 生成 `requestId`，沿轮次编排、Pi/LLM 执行和消息/工具持久化传递；列表和历史查询分别使用自己的 requestId。Backend 通过 Nest `Logger` 输出 JSON 生命周期记录，包含阶段、状态、行数/事件数、耗时及安全错误类型，消息与工具进度按 debug 级别限速记录。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload 或凭据；日志不改变 API/SSE 契约。详见 [Agent Runtime 日志约定](../../platform/agent-runtime.md#运行日志) 和[变更验收](../../../changes/2026-11-07-agent-flow-logging/verification.md)。
 
 ### 已知边界
 

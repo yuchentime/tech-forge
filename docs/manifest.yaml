@@ -35,6 +35,26 @@ routes:
       - docs/changes/2026-11-07-conversation-session-persistence/verification.md
       - docs/source/agent-runtime-open-questions.md
     history_on_demand: []
+  agent-flow-logging:
+    description: "Trace Agent requests across backend queueing, persistence, Pi/LLM, tools, and terminal outcomes with safe structured logs"
+    token_budget: 16000
+    code_globs:
+      - "apps/backend/src/agent/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/logging/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/changes/2026-11-07-agent-flow-logging/design.md
+      - docs/changes/2026-11-07-agent-flow-logging/verification.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-07-agent-flow-logging/worklog.md
+      - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+    history_on_demand: []
   data-model-implementation:
     description: "Implement or change persistence using the current candidate data model"
     token_budget: 14000
@@ -94,12 +114,13 @@ routes:
       - docs/changes/2026-11-07-conversation-session-persistence/worklog.md
     history_on_demand: []
   conversation-history-sidebar:
-    description: "Read persisted Conversation summaries and messages into the desktop Agent sidebar and runtime"
+    description: "Read Conversation history into desktop Agent UI; diagnose HTTP-success/UI-failure across Electron IPC and runtime message conversion"
     token_budget: 18000
     code_globs:
       - "apps/backend/src/conversations/**"
       - "apps/desktop/src/App.tsx"
       - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/test/conversation-history.test.cjs"
       - "apps/desktop/electron/**"
     required:
       - docs/current/index.md
@@ -113,9 +134,11 @@ routes:
     optional:
       - docs/current/platform/architecture-and-code-placement.md
       - docs/changes/2026-11-07-conversation-history-sidebar/worklog.md
+      - docs/changes/2026-11-07-conversation-history-sidebar/handoff.md
       - docs/changes/2026-11-07-conversation-session-persistence/design.md
       - docs/changes/2026-11-07-conversation-session-persistence/verification.md
-    history_on_demand: []
+    history_on_demand:
+      - docs/postmortems/2026-11-07-conversation-history-runtime.md
   agent-chat-presentation:
     description: "Render per-turn Agent tool activity and assistant Markdown in the desktop chat"
     token_budget: 12000

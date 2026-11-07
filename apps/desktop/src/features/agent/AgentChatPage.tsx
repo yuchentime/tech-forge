@@ -5,7 +5,6 @@ import {
   ThreadPrimitive,
   useAuiState,
   type AssistantRuntime,
-  type ThreadMessageLike,
 } from '@assistant-ui/react';
 import {
   CaretDown,
@@ -20,6 +19,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ConversationSidebar } from './ConversationSidebar';
+import { toThreadMessage } from './conversation-history';
+import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   conversationStore,
   type ConversationHistoryMessage,
@@ -52,22 +53,74 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     setLoadingConversationId(conversationId);
     setHistoryError(null);
     setHistoryErrorConversationId(null);
+    let failureMessage = '历史消息加载失败，请重试。';
 
+    if (!hasDesktopBridge()) {
+      setLoadingConversationId(null);
+      failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
+      console.error('[TeachForge][conversation.history] desktop_bridge_unavailable');
+      setHistoryError(failureMessage);
+      setHistoryErrorConversationId(null);
+      return;
+    }
+
+    let httpStatus: number | null = null;
     try {
       const response = await window.teachforge.request<ConversationHistoryMessage[]>({
         method: 'GET',
         path: `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
       });
-      if (response.status !== 200 || !Array.isArray(response.data)) {
-        throw new Error('历史消息加载失败。');
+      httpStatus = response.status;
+      if (response.status === 404) {
+        await conversationStore.refresh();
+        if (version !== requestVersion.current) return;
+
+        const latestState = conversationStore.getSnapshot();
+        const conversationStillListed = latestState.conversations.some(
+          ({ id }) => id === conversationId,
+        );
+        if (latestState.listStatus === 'ready' && !conversationStillListed) {
+          const activeConversationStillListed = latestState.conversations.some(
+            ({ id }) => id === latestState.activeConversationId,
+          );
+          if (
+            latestState.activeConversationId &&
+            !activeConversationStillListed
+          ) {
+            conversationStore.setActiveConversationId(null);
+          }
+          failureMessage = '该会话已不存在，对话列表已刷新。';
+        } else {
+          failureMessage = '历史消息暂时不可用，请刷新对话列表后重试。';
+        }
+        setHistoryError(failureMessage);
+        setHistoryErrorConversationId(conversationStillListed ? conversationId : null);
+        return;
+      }
+      if (response.status !== 200) {
+        failureMessage = `历史消息加载失败（HTTP ${response.status}），请重试。`;
+        throw new Error(failureMessage);
+      }
+      if (!Array.isArray(response.data)) {
+        failureMessage = '历史消息响应格式异常，请重试。';
+        throw new Error(failureMessage);
       }
       if (version !== requestVersion.current) return;
 
       runtime.thread.reset(response.data.map(toThreadMessage));
       conversationStore.setActiveConversationId(conversationId);
-    } catch {
+    } catch (error) {
       if (version !== requestVersion.current) return;
-      setHistoryError('历史消息加载失败，请重试。');
+      const bridgeUnavailable = !hasDesktopBridge();
+      if (bridgeUnavailable) {
+        failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
+      }
+      console.error('[TeachForge][conversation.history] load_failed', {
+        code: bridgeUnavailable ? 'desktop_bridge_unavailable' : 'history_request_failed',
+        httpStatus,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      setHistoryError(failureMessage);
       setHistoryErrorConversationId(conversationId);
     } finally {
       if (version === requestVersion.current) setLoadingConversationId(null);
@@ -156,7 +209,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
             {isInitialListLoading
               ? conversationState.listStatus === 'error'
-                ? '会话列表加载失败，请在左侧重试。'
+                ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
                 : '正在加载对话列表…'
               : '正在加载历史消息…'}
           </div>
@@ -219,23 +272,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       </div>
     </section>
   );
-}
-
-/** Converts one text-only history DTO into the public assistant-ui reset shape. */
-function toThreadMessage(message: ConversationHistoryMessage): ThreadMessageLike {
-  return {
-    id: message.id,
-    role: message.role,
-    content: [{ type: 'text', text: message.content }],
-    createdAt: new Date(message.createdAt),
-    status:
-      message.status === 'completed'
-        ? { type: 'complete', reason: 'stop' }
-        : {
-            type: 'incomplete',
-            reason: message.status === 'cancelled' ? 'cancelled' : 'error',
-          },
-  };
 }
 
 /** Shows one request's elapsed time and safe tool summaries below its user message. */

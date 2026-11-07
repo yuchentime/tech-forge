@@ -5,6 +5,7 @@ import {
 } from '@assistant-ui/react';
 import { agentChatAdapter } from './features/agent/agent-chat-adapter';
 import { AgentChatPage } from './features/agent/AgentChatPage';
+import { hasDesktopBridge } from './types/desktop-bridge';
 
 type Health = {
   status: string;
@@ -20,11 +21,20 @@ export default function App() {
 
   /** Checks the local backend health endpoint through the controlled JSON bridge. */
   const loadWorkspace = useCallback(async () => {
+    if (!hasDesktopBridge()) {
+      setHealth(null);
+      setError('请通过 TeachForge 桌面应用打开；浏览器预览无法连接本地服务。');
+      console.error('[TeachForge][backend.health] desktop_bridge_unavailable');
+      return;
+    }
+
+    let httpStatus: number | null = null;
     try {
       const response = await window.teachforge.request<Health>({
         method: 'GET',
         path: '/api/health',
       });
+      httpStatus = response.status;
       if (response.status !== 200) {
         throw new Error('本地服务返回了错误状态。');
       }
@@ -33,6 +43,10 @@ export default function App() {
     } catch (cause) {
       setHealth(null);
       setError(cause instanceof Error ? cause.message : '连接本地服务失败。');
+      console.error('[TeachForge][backend.health] request_failed', {
+        httpStatus,
+        errorName: cause instanceof Error ? cause.name : 'UnknownError',
+      });
     }
   }, []);
 
@@ -61,11 +75,18 @@ export default function App() {
               <div
                 aria-live="polite"
                 className="flex items-center gap-2 text-xs text-stone-600"
+                title={error || undefined}
               >
                 <span
                   className={`size-2 rounded-full ${health ? 'bg-emerald-700' : 'bg-amber-600'}`}
                 />
-                {health ? '本地服务已连接' : error ? '本地服务连接异常' : '正在连接服务'}
+                {health
+                  ? '本地服务已连接'
+                  : !hasDesktopBridge()
+                    ? '请在桌面应用打开'
+                    : error
+                      ? '本地服务连接异常'
+                      : '正在连接服务'}
               </div>
             </header>
 

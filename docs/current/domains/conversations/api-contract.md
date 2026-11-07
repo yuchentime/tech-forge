@@ -180,3 +180,4 @@ HTTP 200 的响应体为按 `sequenceNo ASC` 排列的可见消息数组；无�
 - 返回 `user` 与 `assistant` 的 `completed`、`failed`、`cancelled` 终态文本，按 `sequenceNo ASC` 排列。
 - 不返回 `toolExecution`、`toolResult`、`assistantTurn`、pending 行、thinking、工具调用参数、原始 `contentJson` 或非文本 Pi blocks。
 - 当前不分页，响应历史完整文本；工具活动只显示当前运行时事件，恢复历史时不重建工具活动 UI。
+- 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。

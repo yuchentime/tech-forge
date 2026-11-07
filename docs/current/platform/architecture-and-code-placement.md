@@ -6,6 +6,9 @@ canonical_for:
   - frontend-backend-code-placement
 related:
   - docs/current/platform/index.md
+  - docs/current/platform/agent-runtime.md
+  - docs/current/domains/conversations/backend-behavior.md
+  - docs/changes/2026-11-07-agent-flow-logging/verification.md
   - docs/source/data-model-design.md
   - docs/source/data-model-fields.md
   - docs/source/system-configuration-design.md
@@ -29,6 +32,7 @@ last_verified: 2026-11-07
 | 持久化结构 | 对应领域目录中的 `*.entity.ts` | 只描述表、字段、关系和索引，不放流程规则 |
 | Schema 演进 | `apps/backend/src/database/migrations/` | 新增/修改表结构用迁移；保持 `synchronize: false` |
 | 模型提供商调用 | `apps/backend/src/llm/` | `LlmService` 统一调用入口；提供商差异放 `adapters/` |
+| Backend 业务流程诊断日志 | `apps/backend/src/logging/structured-logger.ts` 与各领域 Controller/Service | 通过 Nest Logger 输出带 requestId 的 JSON 事件；由所属边界记录阶段与失败，不输出业务正文或工具 payload |
 | 文件系统、向量索引等底层能力 | 现有领域 Service 的依赖；需要复用时再新增 `platform` adapter | 业务规则归领域，通用 I/O 适配归基础设施 |
 
 简单功能可继续使用现有领域文件；当组件变多时再按页面、组件、hooks 和类型拆分，不先创建空目录或通用框架。
@@ -67,8 +71,8 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 | `apps/desktop/src/App.tsx` | 装配常驻的 Agent `LocalRuntime`，提供 Agent/Course 标签、health、Course 列表和创建原型 | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
 | `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；`ConversationSidebar` 负责切换和新建；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；选中历史后仅恢复 user/assistant 文本，不恢复旧工具活动 |
 | `apps/desktop/src/types/desktop-bridge.ts` 与 `agent-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
-| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径 | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
-| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口 |
+| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
+| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
 
@@ -86,8 +90,8 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `retrieval` | 按 Conversation 资料范围组合检索上下文 | Service 为空壳 |
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | Service 为空壳 |
-| `llm` | 模型运行时及提供商适配 | `LlmService` 已有 generate/stream；DeepSeek 与 OpenAI 兼容 Adapter 已注册。当前 DeepSeek Adapter 还保留源码 credential fallback，具体值不记录在文档中 |
-| `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`AgentService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库 |
+| `llm` | 模型运行时及提供商适配 | `LlmService` 已有 generate/stream；DeepSeek 与 OpenAI 兼容 Adapter 已注册。当前 DeepSeek Adapter 还保留源码 credential fallback，具体值不记录在文档中。Pi session 创建和运行阶段通过结构化日志提供 requestId、阶段和耗时 |
+| `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`AgentService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
 `assessments`、`memory`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type {
   AgentSession as PiAgentSession,
@@ -16,6 +17,11 @@ import {
 } from './tools/default-tools';
 import { createWorkspaceFileTools } from './tools/workspace-file-tools';
 import { parsePersistedPiMessage } from '../conversations/conversation-transcript';
+import {
+  getSafeErrorLogFields,
+  writeStructuredEvent,
+  type RequestLogContext,
+} from '../logging/structured-logger';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 type BillionContextPi = typeof import('billion-context-pi');
@@ -39,6 +45,7 @@ export interface LlmConversationContext {
 }
 
 export interface LlmRequestOptions {
+  requestId?: string;
   providerId?: string;
   modelId?: string;
   thinkingLevel?: PiThinkingLevel;
@@ -119,6 +126,7 @@ function createConversationPersistenceExtension(
 @Injectable()
 /** Provides shared model generation and streaming with request-scoped Pi sessions. */
 export class LlmService {
+  private readonly logger = new Logger(LlmService.name);
   private piSdkPromise?: Promise<PiSdk>;
   private billionContextFactoryPromise?: Promise<PiExtensionFactory>;
   private piSubagentsFactoryPromise?: Promise<PiExtensionFactory>;
@@ -135,13 +143,49 @@ export class LlmService {
     prompt: string,
     options: LlmRequestOptions = {},
   ): Promise<string> {
-    const session = await this.createSession(options);
-
+    const requestId = options.requestId ?? randomUUID();
+    const logContext = getRequestLogContext(options, requestId);
+    const startedAt = Date.now();
+    let session: PiAgentSession | undefined;
+    writeStructuredEvent(this.logger, 'log', 'llm.generate.started', {
+      ...logContext,
+      providerId: options.providerId,
+      modelId: options.modelId,
+      promptLength: Array.from(prompt).length,
+      historyMessageCount: options.conversation?.history.length ?? 0,
+    });
     try {
+      session = await this.createSession({ ...options, requestId });
+      writeStructuredEvent(this.logger, 'log', 'llm.generate.provider_run.started', {
+        ...logContext,
+        providerId: options.providerId,
+        modelId: options.modelId,
+      });
       await session.prompt(prompt, { expandPromptTemplates: false });
-      return this.readAssistantText(session);
+      const result = this.readAssistantText(session);
+      writeStructuredEvent(this.logger, 'log', 'llm.generate.completed', {
+        ...logContext,
+        resultLength: Array.from(result).length,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'llm.generate.failed', {
+        ...logContext,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
     } finally {
-      session.dispose();
+      try {
+        session?.dispose();
+      } catch (error) {
+        writeStructuredEvent(this.logger, 'error', 'llm.session.dispose.failed', {
+          ...logContext,
+          ...getSafeErrorLogFields(error),
+        });
+        throw error;
+      }
     }
   }
 
@@ -154,7 +198,27 @@ export class LlmService {
     prompt: string,
     options: LlmStreamOptions = {},
   ): AsyncGenerator<PiAgentSessionEvent> {
-    if (options.signal?.aborted) return;
+    const requestId = options.requestId ?? randomUUID();
+    const logContext = getRequestLogContext(options, requestId);
+    const startedAt = Date.now();
+    const eventCounts = new Map<string, number>();
+    let outcome: 'completed' | 'failed' | 'cancelled' = 'failed';
+    let phase = 'session_create';
+    if (options.signal?.aborted) {
+      writeStructuredEvent(this.logger, 'warn', 'llm.stream.cancelled', {
+        ...logContext,
+        phase: 'before_session_create',
+        reason: 'signal_already_aborted',
+      });
+      return;
+    }
+    writeStructuredEvent(this.logger, 'log', 'llm.stream.started', {
+      ...logContext,
+      providerId: options.providerId,
+      modelId: options.modelId,
+      promptLength: Array.from(prompt).length,
+      historyMessageCount: options.conversation?.history.length ?? 0,
+    });
 
     let activeSession: PiAgentSession | undefined;
     let hasPersistenceError = false;
@@ -167,12 +231,41 @@ export class LlmService {
           } catch (error) {
             hasPersistenceError = true;
             persistenceError = error;
+            writeStructuredEvent(
+              this.logger,
+              'error',
+              'llm.persistence_event.failed',
+              {
+                ...logContext,
+                eventType: event.type,
+                ...getSafeErrorLogFields(error),
+              },
+            );
             if (!persistenceAbortPromise && activeSession) {
               try {
                 persistenceAbortPromise = activeSession
                   .abort()
-                  .catch(() => undefined);
-              } catch {
+                  .catch((abortError: unknown) => {
+                    writeStructuredEvent(
+                      this.logger,
+                      'error',
+                      'llm.persistence_abort.failed',
+                      {
+                        ...logContext,
+                        ...getSafeErrorLogFields(abortError),
+                      },
+                    );
+                  });
+              } catch (abortError) {
+                writeStructuredEvent(
+                  this.logger,
+                  'error',
+                  'llm.persistence_abort.failed',
+                  {
+                    ...logContext,
+                    ...getSafeErrorLogFields(abortError),
+                  },
+                );
                 persistenceAbortPromise = Promise.resolve();
               }
             }
@@ -180,10 +273,29 @@ export class LlmService {
           }
         }
       : undefined;
-    const session = await this.createSession({
-      ...options,
-      persistConversationEvent,
-    });
+    let session: PiAgentSession;
+    try {
+      session = await this.createSession({
+        ...options,
+        requestId,
+        persistConversationEvent,
+      });
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'llm.stream.failed', {
+        ...logContext,
+        phase,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      writeStructuredEvent(this.logger, 'error', 'llm.stream.terminated', {
+        ...logContext,
+        outcome: 'failed',
+        phase,
+        elapsedMs: Date.now() - startedAt,
+        eventCounts: Object.fromEntries(eventCounts),
+      });
+      throw error;
+    }
     activeSession = session;
     // events 是 Pi 事件生产者与异步生成器消费者之间的本轮缓冲队列。
     const events: PiAgentSessionEvent[] = [];
@@ -207,8 +319,17 @@ export class LlmService {
     const abortSession = (): void => {
       if (!abortPromise) {
         try {
-          abortPromise = session.abort().catch(() => undefined);
-        } catch {
+          abortPromise = session.abort().catch((error: unknown) => {
+            writeStructuredEvent(this.logger, 'error', 'llm.abort.failed', {
+              ...logContext,
+              ...getSafeErrorLogFields(error),
+            });
+          });
+        } catch (error) {
+          writeStructuredEvent(this.logger, 'error', 'llm.abort.failed', {
+            ...logContext,
+            ...getSafeErrorLogFields(error),
+          });
           abortPromise = Promise.resolve();
         }
       }
@@ -216,6 +337,7 @@ export class LlmService {
     };
 
     try {
+      phase = 'subscribe';
       options.signal?.addEventListener('abort', abortSession, { once: true });
       if (options.signal?.aborted) {
         abortSession();
@@ -228,12 +350,20 @@ export class LlmService {
           wake();
           return;
         }
+        eventCounts.set(event.type, (eventCounts.get(event.type) ?? 0) + 1);
         events.push(event);
         wake();
       });
 
       // 先启动底层模型请求，它与下方消费队列的循环并行推进。
       // 请求成功或失败时都设置结束状态并唤醒循环，避免最后没有新片段时一直等待。
+      phase = 'provider_run';
+      writeStructuredEvent(this.logger, 'log', 'llm.provider_run.started', {
+        ...logContext,
+        providerId: options.providerId,
+        modelId: options.modelId,
+        historyMessageCount: options.conversation?.history.length ?? 0,
+      });
       const run = session
         .prompt(prompt, { expandPromptTemplates: false })
         .then(
@@ -274,19 +404,73 @@ export class LlmService {
       if (hasPersistenceError) {
         throw persistenceError;
       }
-      if (options.signal?.aborted) return;
+      if (options.signal?.aborted) {
+        outcome = 'cancelled';
+        return;
+      }
       if (hasRunError) {
         throw runError;
       }
 
-      this.readAssistantText(session);
+      const responseText = this.readAssistantText(session);
+      outcome = 'completed';
+      writeStructuredEvent(this.logger, 'log', 'llm.stream.completed', {
+        ...logContext,
+        resultLength: Array.from(responseText).length,
+        eventCounts: Object.fromEntries(eventCounts),
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      outcome = options.signal?.aborted ? 'cancelled' : 'failed';
+      writeStructuredEvent(
+        this.logger,
+        outcome === 'cancelled' ? 'warn' : 'error',
+        outcome === 'cancelled' ? 'llm.stream.cancelled' : 'llm.stream.failed',
+        {
+          ...logContext,
+          phase,
+          eventCounts: Object.fromEntries(eventCounts),
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
     } finally {
       // 无论自然结束、报错还是取消，都解除监听并释放本次请求的 session。
+      if (options.signal?.aborted && outcome !== 'failed') {
+        outcome = 'cancelled';
+      }
       options.signal?.removeEventListener('abort', abortSession);
       if (options.signal?.aborted) await abortPromise;
       if (persistenceAbortPromise) await persistenceAbortPromise;
       unsubscribe();
-      session.dispose();
+      try {
+        session.dispose();
+      } catch (error) {
+        outcome = 'failed';
+        writeStructuredEvent(this.logger, 'error', 'llm.session.dispose.failed', {
+          ...logContext,
+          ...getSafeErrorLogFields(error),
+        });
+        throw error;
+      } finally {
+        writeStructuredEvent(
+          this.logger,
+          outcome === 'completed'
+            ? 'log'
+            : outcome === 'cancelled'
+              ? 'warn'
+              : 'error',
+          'llm.stream.terminated',
+          {
+            ...logContext,
+            outcome,
+            phase,
+            eventCounts: Object.fromEntries(eventCounts),
+            elapsedMs: Date.now() - startedAt,
+          },
+        );
+      }
     }
   }
 
@@ -294,91 +478,194 @@ export class LlmService {
   private async createSession(
     options: LlmRequestOptions,
   ): Promise<PiAgentSession> {
-    const sdk = await this.getPiSdk();
-    const modelRuntime = await this.getModelRuntime(sdk);
+    const startedAt = Date.now();
+    const requestId = options.requestId ?? randomUUID();
+    const logContext = getRequestLogContext(options, requestId);
+    let phase = 'pi_sdk_load';
+    writeStructuredEvent(this.logger, 'log', 'llm.session.create.started', {
+      ...logContext,
+      phase,
+      providerId: options.providerId,
+      modelId: options.modelId,
+      historyMessageCount: options.conversation?.history.length ?? 0,
+    });
+    try {
+      const sdk = await this.getPiSdk();
+      phase = 'model_runtime_load';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      const modelRuntime = await this.getModelRuntime(sdk);
 
-    if (Boolean(options.providerId) !== Boolean(options.modelId)) {
-      throw new Error('providerId and modelId must be supplied together.');
-    }
+      phase = 'model_configuration';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      if (Boolean(options.providerId) !== Boolean(options.modelId)) {
+        throw new Error('providerId and modelId must be supplied together.');
+      }
 
-    if (options.providerId === this.deepseekAdapter.providerId) {
-      const error = this.deepseekAdapter.getConfigurationError();
-      if (error) throw new Error(error);
-    } else if (options.providerId === this.customAdapter.providerId) {
-      const error = this.customAdapter.getConfigurationError();
-      if (error) throw new Error(error);
-    }
+      if (options.providerId === this.deepseekAdapter.providerId) {
+        const error = this.deepseekAdapter.getConfigurationError();
+        if (error) {
+          writeStructuredEvent(
+            this.logger,
+            'error',
+            'llm.provider.configuration.invalid',
+            {
+              ...logContext,
+              providerId: options.providerId,
+              phase,
+            },
+          );
+          throw new Error(error);
+        }
+      } else if (options.providerId === this.customAdapter.providerId) {
+        const error = this.customAdapter.getConfigurationError();
+        if (error) {
+          writeStructuredEvent(
+            this.logger,
+            'error',
+            'llm.provider.configuration.invalid',
+            {
+              ...logContext,
+              providerId: options.providerId,
+              phase,
+            },
+          );
+          throw new Error(error);
+        }
+      }
 
-    const model =
-      options.providerId && options.modelId
-        ? modelRuntime.getModel(options.providerId, options.modelId)
+      const model =
+        options.providerId && options.modelId
+          ? modelRuntime.getModel(options.providerId, options.modelId)
+          : undefined;
+
+      if (options.providerId && options.modelId && !model) {
+        throw new Error(
+          `Pi SDK model not found: ${options.providerId}/${options.modelId}.`,
+        );
+      }
+      if (options.conversation && !model) {
+        throw new Error(
+          'A configured Pi model is required to restore conversation history.',
+        );
+      }
+
+      const cwd = process.cwd();
+      const agentDir = sdk.getAgentDir();
+      phase = 'workspace_tool_load';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      const workspaceFileTools = await createWorkspaceFileTools(sdk, cwd);
+      phase = 'billion_context_extension_load';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      const billionContextExtension = await this.getBillionContextExtension();
+      phase = 'pi_subagents_extension_load';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      const piSubagentsExtension = await this.getPiSubagentsExtension();
+      const extensionFactories = [
+        billionContextExtension,
+        piSubagentsExtension,
+      ];
+      if (options.persistConversationEvent) {
+        extensionFactories.push(
+          createConversationPersistenceExtension(
+            options.persistConversationEvent,
+          ),
+        );
+      }
+      const systemPrompt = `${SYSTEM_PROMPT}\n\nAgent workspace: ${cwd}`;
+      const resourceLoader = new sdk.DefaultResourceLoader({
+        cwd,
+        agentDir,
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        extensionFactories,
+        additionalSkillPaths: [join(PI_SUBAGENTS_ROOT, 'skills')],
+        additionalPromptTemplatePaths: [join(PI_SUBAGENTS_ROOT, 'prompts')],
+        systemPrompt,
+      });
+      // The SDK does not reload an explicitly supplied resourceLoader. Load
+      // only these allowlisted extensions before session creation.
+      phase = 'resource_loader_reload';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      await resourceLoader.reload();
+
+      phase = 'history_restore';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+        historyMessageCount: options.conversation?.history.length ?? 0,
+      });
+      const sessionEntries = options.conversation
+        ? this.createSessionEntries(options.conversation.history, model!)
         : undefined;
+      const sessionManager = options.conversation
+        ? sdk.SessionManager.inMemory(
+            cwd,
+            { id: options.conversation.id },
+            sessionEntries!,
+          )
+        : sdk.SessionManager.inMemory();
+      phase = 'agent_session_create';
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.phase', {
+        ...logContext,
+        phase,
+      });
+      const { session } = await sdk.createAgentSession({
+        cwd,
+        agentDir,
+        modelRuntime,
+        model,
+        thinkingLevel: options.thinkingLevel ?? 'medium',
+        resourceLoader,
+        sessionManager,
+        tools: [...DEFAULT_LLM_TOOL_MODIFIERS],
+        excludeTools: [...EXCLUDED_LLM_TOOLS],
+        customTools: workspaceFileTools,
+      });
 
-    if (options.providerId && options.modelId && !model) {
-      throw new Error(
-        `Pi SDK model not found: ${options.providerId}/${options.modelId}.`,
-      );
+      writeStructuredEvent(this.logger, 'log', 'llm.session.create.completed', {
+        ...logContext,
+        providerId: options.providerId,
+        modelId: options.modelId,
+        historyMessageCount: options.conversation?.history.length ?? 0,
+        restoredEntryCount: sessionEntries?.length ?? 0,
+        extensionCount: extensionFactories.length,
+        workspaceToolCount: workspaceFileTools.length,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return session;
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'llm.session.create.failed', {
+        ...logContext,
+        providerId: options.providerId,
+        modelId: options.modelId,
+        phase,
+        historyMessageCount: options.conversation?.history.length ?? 0,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
     }
-    if (options.conversation && !model) {
-      throw new Error(
-        'A configured Pi model is required to restore conversation history.',
-      );
-    }
-
-    const cwd = process.cwd();
-    const agentDir = sdk.getAgentDir();
-    const workspaceFileTools = await createWorkspaceFileTools(sdk, cwd);
-    const billionContextExtension = await this.getBillionContextExtension();
-    const piSubagentsExtension = await this.getPiSubagentsExtension();
-    const extensionFactories = [
-      billionContextExtension,
-      piSubagentsExtension,
-    ];
-    if (options.persistConversationEvent) {
-      extensionFactories.push(
-        createConversationPersistenceExtension(
-          options.persistConversationEvent,
-        ),
-      );
-    }
-    const systemPrompt = `${SYSTEM_PROMPT}\n\nAgent workspace: ${cwd}`;
-    const resourceLoader = new sdk.DefaultResourceLoader({
-      cwd,
-      agentDir,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      extensionFactories,
-      additionalSkillPaths: [join(PI_SUBAGENTS_ROOT, 'skills')],
-      additionalPromptTemplatePaths: [join(PI_SUBAGENTS_ROOT, 'prompts')],
-      systemPrompt,
-    });
-    // The SDK does not reload an explicitly supplied resourceLoader; load only these allowlisted extensions before session creation.
-    await resourceLoader.reload();
-
-    const sessionManager = options.conversation
-      ? sdk.SessionManager.inMemory(
-          cwd,
-          { id: options.conversation.id },
-          this.createSessionEntries(options.conversation.history, model!),
-        )
-      : sdk.SessionManager.inMemory();
-    const { session } = await sdk.createAgentSession({
-      cwd,
-      agentDir,
-      modelRuntime,
-      model,
-      thinkingLevel: options.thinkingLevel ?? 'medium',
-      resourceLoader,
-      sessionManager,
-      tools: [...DEFAULT_LLM_TOOL_MODIFIERS],
-      excludeTools: [...EXCLUDED_LLM_TOOLS],
-      customTools: workspaceFileTools,
-    });
-
-    return session;
   }
 
   /** Converts persisted plain-text turns into the Pi SDK's authoritative entry tree. */
@@ -530,4 +817,15 @@ export class LlmService {
     }
     return text;
   }
+}
+
+/** Builds the shared internal request correlation fields for LLM logs. */
+function getRequestLogContext(
+  options: LlmRequestOptions,
+  requestId: string,
+): RequestLogContext {
+  return {
+    requestId,
+    ...(options.conversation ? { conversationId: options.conversation.id } : {}),
+  };
 }

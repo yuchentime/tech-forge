@@ -8,6 +8,7 @@ canonical_for:
 related:
   - docs/current/platform/index.md
   - docs/current/platform/architecture-and-code-placement.md
+  - docs/current/domains/conversations/backend-behavior.md
   - docs/current/domains/conversations/api-contract.md
   - docs/current/domains/conversations/backend-behavior.md
   - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
@@ -33,6 +34,16 @@ last_verified: 2026-11-07
 | `LlmService` | 为每次请求创建 Pi session，恢复传入历史，注册持久化钩子，并将 Pi 事件交给 AgentService。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
+## 运行日志
+
+Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `AgentController` 生成一个内部 `requestId`，并沿 `AgentService`、`ConversationsService`、`LlmService` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
+
+`AgentController` 记录 HTTP 接收、SSE 终态和客户端断开；`AgentService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+
+Renderer 的 backend health、会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
+
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+
 ## 请求与持久化时序
 
 ```mermaid
@@ -52,7 +63,7 @@ sequenceDiagram
     User->>UI: 提交 prompt
     UI->>Main: streamAgent(prompt, conversationId)
     Main->>HTTP: POST /api/agent/stream + 本地认证
-    HTTP->>Agent: stream(prompt, conversationId, signal)
+    HTTP->>Agent: stream(prompt, conversationId, signal, requestId)
     Agent->>Conv: beginTurn()
     Conv->>DB: 读取并排序该对话全部历史
     DB-->>Conv: MessageEntity rows
@@ -104,6 +115,8 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 Renderer 的会话摘要通过 `GET /api/conversations` 读取，选中会话后再通过 `GET /api/conversations/:conversationId/messages` 读取按序排列的 user/assistant 纯文本历史。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload；加载成功后页面调用 LocalRuntime `thread.reset()` 替换当前可见线程。
 
+`conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`，调用实际安装包的消息转换链路。
+
 Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` 消息以带格式标记的 JSON 保存在 `contentJson`。工具执行元数据、部分输出、最终结果和终态保存在独立的 `toolExecution` 行中。`assistantTurn` 和 `toolExecution` 行不会作为模型消息发送。
 
 下一次请求会把 pending 工具执行标记为中断。不完整的 assistant 快照保留已生成文本，并移除未完成的 toolCall block。已完成的 tool call 若缺少 `toolResult`，优先用已持久化的工具最终结果重建；没有最终结果时则补一条错误结果，避免重放可能已产生副作用的工具。
@@ -131,6 +144,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - 轮次编排与安全事件投影：`apps/backend/src/agent/agent.service.ts`、`agent-events.ts`
 - 对话消息行和中断对账：`apps/backend/src/conversations/conversations.service.ts`
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
+- 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
 - SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`

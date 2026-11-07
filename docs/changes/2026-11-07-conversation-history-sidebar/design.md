@@ -4,7 +4,7 @@ layer: change
 domain: conversations
 created_at: 2026-11-07
 landed_in: L001
-version: 2.0
+version: 3.0
 updates_current:
   - docs/current/index.md
   - docs/current/domains/README.md
@@ -165,7 +165,7 @@ sequenceDiagram
 - Backend and desktop builds validate the endpoint and renderer runtime contracts.
 - Code-level/SQLite verification covers empty list, title fallback, ordering, text projection, hidden internal roles, unknown ID, and terminal statuses.
 - Desktop acceptance covers startup list loading, active ID restore, conversation switching, new-thread reset, and refreshing after a streamed turn.
-- Per repository instructions, implementation verification must not add or run tests unless requested.
+- Run focused regression checks and the real Electron history path; the current repository instructions do not prohibit tests.
 
 ## Design Deviations
 
@@ -178,6 +178,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | 1.0 | Initial implementation | Added Conversation list/history reads and sidebar restore/selection flow. | Conversations API and desktop Agent page. | Implemented in L001. |
 | 2.0 | Developer reported a blank startup screen caused by a missing assistant-ui named export after L001. | No business design change; replace the obsolete state-hook name with the installed package's public hook. | `AgentChatPage` import/runtime state selector only. | Fixed in L002; focused import-export check passes. |
+| 3.0 | Developer asked to resolve the remaining history failure from handoff.md. | Keep the existing design; map status only on assistant messages before LocalRuntime reset. | Renderer history conversion and AC-04 regression verification; no API/schema change. | L003 fixed; actual package regression and Electron restore/switch/restart checks pass. |
 
 ## Current Doc Updates
 

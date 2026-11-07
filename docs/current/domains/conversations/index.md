@@ -12,18 +12,20 @@ related:
   - docs/source/data-model-fields.md
   - docs/changes/2026-11-07-conversation-session-persistence/design.md
   - docs/changes/2026-11-07-conversation-history-sidebar/design.md
+  - docs/changes/2026-11-07-agent-flow-logging/verification.md
 last_verified: 2026-11-07
 ---
 
 # Conversation 对话持久化
 
-当前 Agent 聊天使用 SQLite 中的 `ConversationEntity` 和 `MessageEntity` 保存对话。用户输入、Pi assistant/toolResult 消息快照和工具执行状态均写为有序消息行。`ConversationsService` 负责查询、排序、写入和下一请求时的中断对账；Conversation 模块提供只读列表和可见消息历史 API。
+当前 Agent 聊天使用 SQLite 中的 `ConversationEntity` 和 `MessageEntity` 保存对话。用户输入、Pi assistant/toolResult 消息快照和工具执行状态均写为有序消息行。`ConversationsService` 负责查询、排序、写入和下一请求时的中断对账；Conversation 模块提供只读列表和可见消息历史 API。Agent、LLM、持久化及查询边界通过同一请求 ID 输出结构化诊断日志，具体字段和脱敏规则见 [Conversation backend 行为](backend-behavior.md)。
 
 ## 当前行为
 
 - `POST /api/agent/stream` 接收 `prompt` 和可选 UUIDv4 `conversationId`。未提供 ID 时后端创建 Conversation，并在 SSE 流开始时发送 `conversation` 元数据事件。
 - Renderer 将活动 ID 保存在 localStorage，并在该 UI 活动对话的后续请求中复用。
 - Agent 页面启动时读取会话摘要并显示在左侧栏；若 localStorage 中的活动 ID 仍存在，则同时加载该对话的可见消息。选中其他会话会加载完整历史并替换当前 LocalRuntime 线程。
+- 历史 DTO 的状态由 Renderer 按角色映射：只有 assistant 向 LocalRuntime 传递状态；user 保留文本、ID 和时间。该契约已通过真实 Electron 恢复/切换及实际 assistant-ui 转换回归验证。
 - `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要；标题使用实体标题、首条用户消息文本或“新对话”的显示回退，不写回实体。
 - `GET /api/conversations/:conversationId/messages` 按 `sequenceNo ASC` 返回终态 user/assistant 文本；工具执行、toolResult、turn 标记、pending 行与非文本块不会暴露给 Renderer。
 - 每轮开始时，后端在短 SQLite 事务中保存 `user/completed` 行和 `assistantTurn/pending` 标记；模型调用不在数据库事务内。

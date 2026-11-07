@@ -16,6 +16,7 @@
     "electron/**/*.ts",
     "src/types/desktop-bridge.ts",
     "src/features/agent/agent-event-bus.ts",
-    "src/features/agent/agent-chat-adapter.ts"
+    "src/features/agent/agent-chat-adapter.ts",
+    "src/features/agent/conversation-history.ts"
   ]
 }

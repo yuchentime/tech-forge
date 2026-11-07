@@ -20,7 +20,8 @@ last_verified: 2026-11-07
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
-| Conversation History Sidebar | Conversation 列表 API、历史消息 API 与桌面端会话选择/恢复 | [设计](2026-11-07-conversation-history-sidebar/design.md) · [验收](2026-11-07-conversation-history-sidebar/verification.md) · [工作记录](2026-11-07-conversation-history-sidebar/worklog.md) |
+| Agent Flow Structured Logging | Agent HTTP、对话持久化、Pi/LLM 与工具流程的关联诊断日志 | [设计](2026-11-07-agent-flow-logging/design.md) · [验收](2026-11-07-agent-flow-logging/verification.md) · [工作记录](2026-11-07-agent-flow-logging/worklog.md) |
+| Conversation History Sidebar | Conversation 列表 API、历史消息 API 与桌面端会话选择/恢复 | [设计](2026-11-07-conversation-history-sidebar/design.md) · [验收](2026-11-07-conversation-history-sidebar/verification.md) · [工作记录](2026-11-07-conversation-history-sidebar/worklog.md) · [交接](2026-11-07-conversation-history-sidebar/handoff.md) |
 | Conversation Session Persistence | Agent 对话通过 SQLite 消息记录恢复 Pi SDK 上下文 | [设计](2026-11-07-conversation-session-persistence/design.md) · [验收](2026-11-07-conversation-session-persistence/verification.md) · [工作记录](2026-11-07-conversation-session-persistence/worklog.md) |
 | Agent 对话展示 | Agent 工具活动与流式回答的桌面呈现 | [设计](2026-11-07-agent-chat-presentation/design.md) · [验收](2026-11-07-agent-chat-presentation/verification.md) · [工作记录](2026-11-07-agent-chat-presentation/worklog.md) |
 | Agent 单轮流式闭环 | 桌面端用户输入，经 Electron 安全桥接到 Agent/LLM 并流式显示回答 | [设计](2026-11-06-agent-streaming-loop/design.md) · [任务](2026-11-06-agent-streaming-loop/tasks.md) · [验收](2026-11-06-agent-streaming-loop/verification.md) |

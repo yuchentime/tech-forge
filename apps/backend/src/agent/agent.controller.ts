@@ -1,12 +1,15 @@
 import {
   Body,
   Controller,
+  Logger,
   NotFoundException,
   Post,
   Res,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import type { ServerResponse } from 'node:http';
+import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
 import { AgentPromptDto } from './dto/agent-prompt.dto';
 import { AgentService } from './agent.service';
 import { encodeAgentSseEvent } from './sse';
@@ -14,6 +17,8 @@ import { encodeAgentSseEvent } from './sse';
 /** Converts validated Agent prompts into authenticated HTTP SSE responses. */
 @Controller('agent')
 export class AgentController {
+  private readonly logger = new Logger(AgentController.name);
+
   /** Injects the persistent Agent conversation use case for HTTP streaming. */
   constructor(private readonly agent: AgentService) {}
 
@@ -23,10 +28,36 @@ export class AgentController {
     @Body() input: AgentPromptDto,
     @Res() reply: FastifyReply,
   ): Promise<void> {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    const eventCounts = new Map<string, number>();
+    let outcome: 'completed' | 'failed' | 'cancelled' = 'failed';
     const response = reply.raw;
     const abortController = new AbortController();
+    let disconnectLogged = false;
+    writeStructuredEvent(this.logger, 'log', 'agent.http.stream.accepted', {
+      requestId,
+      conversationId: input.conversationId,
+      promptLength: Array.from(input.prompt).length,
+    });
     const onClose = (): void => {
-      if (!response.writableEnded) abortController.abort();
+      if (!response.writableEnded && !abortController.signal.aborted) {
+        outcome = 'cancelled';
+        if (!disconnectLogged) {
+          disconnectLogged = true;
+          writeStructuredEvent(
+            this.logger,
+            'warn',
+            'agent.http.client_disconnected',
+            {
+              requestId,
+              conversationId: input.conversationId,
+              elapsedMs: Date.now() - startedAt,
+            },
+          );
+        }
+        abortController.abort();
+      }
     };
 
     reply.hijack();
@@ -44,6 +75,7 @@ export class AgentController {
       input.prompt,
       input.conversationId,
       abortController.signal,
+      requestId,
     );
     const iterator = stream[Symbol.asyncIterator]();
 
@@ -54,6 +86,10 @@ export class AgentController {
         // 等待下一段期间也可能收到断开事件，因此拿到结果后再次检查取消状态。
         if (abortController.signal.aborted) break;
         if (item.done) break;
+        eventCounts.set(
+          item.value.type,
+          (eventCounts.get(item.value.type) ?? 0) + 1,
+        );
 
         // 每次 next() 取得一个事件后用 Pi 原生 type 编码为 SSE，再请求下一事件。
         const written = await writeSseFrame(
@@ -62,6 +98,7 @@ export class AgentController {
           abortController.signal,
         );
         if (!written) {
+          outcome = 'cancelled';
           abortController.abort();
           break;
         }
@@ -76,10 +113,27 @@ export class AgentController {
           }),
           abortController.signal,
         );
-        if (written) response.end();
+        if (written) {
+          response.end();
+          outcome = 'completed';
+        } else {
+          outcome = 'cancelled';
+        }
       }
     } catch (error) {
+      outcome = abortController.signal.aborted ? 'cancelled' : 'failed';
       if (!abortController.signal.aborted) {
+        writeStructuredEvent(
+          this.logger,
+          'error',
+          'agent.http.stream.failed',
+          {
+            requestId,
+            conversationId: input.conversationId,
+            failureStage: 'sse_iteration',
+            ...getSafeErrorLogFields(error),
+          },
+        );
         const written = await writeSseFrame(
           response,
           encodeAgentSseEvent({
@@ -94,11 +148,32 @@ export class AgentController {
       if (abortController.signal.aborted) {
         try {
           await iterator.return?.(undefined);
-        } catch {
-          // Cancellation cleanup must not leak an iterator error to Fastify.
+        } catch (error) {
+          writeStructuredEvent(
+            this.logger,
+            'error',
+            'agent.http.iterator_cleanup.failed',
+            {
+              requestId,
+              conversationId: input.conversationId,
+              ...getSafeErrorLogFields(error),
+            },
+          );
         }
       }
       response.removeListener('close', onClose);
+      writeStructuredEvent(
+        this.logger,
+        outcome === 'failed' ? 'error' : outcome === 'cancelled' ? 'warn' : 'log',
+        'agent.http.stream.terminated',
+        {
+          requestId,
+          conversationId: input.conversationId,
+          outcome,
+          elapsedMs: Date.now() - startedAt,
+          eventCounts: Object.fromEntries(eventCounts),
+        },
+      );
     }
   }
 }
