@@ -138,7 +138,7 @@ export default function App() {
               className="h-full min-h-[32rem]"
               hidden={activeTab !== 'agent'}
             >
-              <AgentChatPage />
+              <AgentChatPage runtime={runtime} />
             </section>
 
             <section

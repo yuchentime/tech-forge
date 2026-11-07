@@ -1,4 +1,10 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  NotFoundException,
+  Post,
+  Res,
+} from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import type { ServerResponse } from 'node:http';
 import { AgentPromptDto } from './dto/agent-prompt.dto';
@@ -8,10 +14,10 @@ import { encodeAgentSseEvent } from './sse';
 /** Converts validated Agent prompts into authenticated HTTP SSE responses. */
 @Controller('agent')
 export class AgentController {
-  /** Injects the single-turn Agent use case for HTTP streaming. */
+  /** Injects the persistent Agent conversation use case for HTTP streaming. */
   constructor(private readonly agent: AgentService) {}
 
-  /** Streams selected Pi events and aborts the underlying Pi session on disconnect. */
+  /** Streams conversation/Pi events and aborts the underlying Pi session on disconnect. */
   @Post('stream')
   async stream(
     @Body() input: AgentPromptDto,
@@ -34,7 +40,11 @@ export class AgentController {
     response.flushHeaders();
 
     // stream() 返回异步生成器；拿到 iterator 本身还没有取出文本，第一次 next() 才会启动它。
-    const stream = this.agent.stream(input.prompt, abortController.signal);
+    const stream = this.agent.stream(
+      input.prompt,
+      input.conversationId,
+      abortController.signal,
+    );
     const iterator = stream[Symbol.asyncIterator]();
 
     try {
@@ -124,6 +134,9 @@ function writeSseFrame(
 
 /** Hides provider errors while keeping missing local configuration actionable. */
 function getSafeErrorMessage(error: unknown): string {
+  if (error instanceof NotFoundException) {
+    return '对话不存在，请重新开始。';
+  }
   if (error instanceof Error && error.message.includes('DEEPSEEK_API_KEY')) {
     return '未配置 DeepSeek API 密钥，请配置后重启应用。';
   }

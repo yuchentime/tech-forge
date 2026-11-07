@@ -4,7 +4,9 @@ import type {
   AgentSession as PiAgentSession,
   AgentSessionEvent as PiAgentSessionEvent,
   ExtensionFactory as PiExtensionFactory,
+  FileEntry as PiFileEntry,
   ModelRuntime as PiModelRuntime,
+  SessionMessageEntry as PiSessionMessageEntry,
 } from '@earendil-works/pi-coding-agent';
 import { DeepseekLLMAdapter } from './adapters/deepseek-llm.adapter';
 import { CustomLLMAdapter } from './adapters/custom-llm.adapter';
@@ -12,16 +14,36 @@ import {
   DEFAULT_LLM_TOOL_MODIFIERS,
   EXCLUDED_LLM_TOOLS,
 } from './tools/default-tools';
+import { createWorkspaceFileTools } from './tools/workspace-file-tools';
+import { parsePersistedPiMessage } from '../conversations/conversation-transcript';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 type BillionContextPi = typeof import('billion-context-pi');
 type PiSubagents = typeof import('pi-subagents');
 type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
+type PiModel = NonNullable<ReturnType<PiModelRuntime['getModel']>>;
+
+/** Describes one completed chat message used to restore an external transcript. */
+export interface LlmConversationHistoryMessage {
+  id: string;
+  role: string;
+  contentJson: string;
+  status: string;
+  createdAt: Date | string;
+}
+
+/** Supplies SQLite-owned conversation identity and history to a Pi session. */
+export interface LlmConversationContext {
+  id: string;
+  history: readonly LlmConversationHistoryMessage[];
+}
 
 export interface LlmRequestOptions {
   providerId?: string;
   modelId?: string;
   thinkingLevel?: PiThinkingLevel;
+  conversation?: LlmConversationContext;
+  persistConversationEvent?: (event: PiAgentSessionEvent) => Promise<void>;
 }
 
 /** Adds request-scoped cancellation to streamed LLM calls. */
@@ -34,7 +56,7 @@ const BILLION_CONTEXT_PACKAGE = 'billion-context-pi';
 const PI_SUBAGENTS_PACKAGE = 'pi-subagents';
 const PI_SUBAGENTS_ROOT = dirname(dirname(require.resolve(PI_SUBAGENTS_PACKAGE)));
 const SYSTEM_PROMPT =
-  'You are a language model provider for TeachForge. Answer the supplied prompt directly. Do not access local files or invoke tools unless the user explicitly asks for work that requires them. Use context-management tools only to manage conversation context. Delegate only when the user requests delegation or the task clearly calls for parallel work.';
+  'You are a language model provider for TeachForge. Answer the supplied prompt directly. Use file tools only when the requested task needs local files. File tools are confined to the configured workspace; use relative paths and do not request extra permission for operations inside it. Do not use shell or delegate work. If a requested output path is outside the workspace, save the result inside the workspace under the same filename when possible, then report the actual path. Never claim an outside file was written.';
 
 // The backend is compiled as CommonJS while Pi publishes an ESM-only entry point.
 const importPiSdk = new Function(
@@ -49,6 +71,50 @@ const importPiSubagents = new Function(
   'specifier',
   'return import(specifier)',
 ) as (specifier: string) => Promise<PiSubagents>;
+
+/** Supplies a valid zero-usage record for restored assistant text messages. */
+function createEmptyUsage() {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
+/** Registers awaited Pi event hooks so database commits precede later Pi work. */
+function createConversationPersistenceExtension(
+  persistEvent: (event: PiAgentSessionEvent) => Promise<void>,
+): PiExtensionFactory {
+  return (pi) => {
+    pi.on('message_start', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+    pi.on('message_update', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+    pi.on('message_end', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+    pi.on('tool_execution_start', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+    pi.on('tool_execution_update', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+    pi.on('tool_execution_end', (event) =>
+      persistEvent(event as PiAgentSessionEvent),
+    );
+  };
+}
 
 @Injectable()
 /** Provides shared model generation and streaming with request-scoped Pi sessions. */
@@ -90,7 +156,35 @@ export class LlmService {
   ): AsyncGenerator<PiAgentSessionEvent> {
     if (options.signal?.aborted) return;
 
-    const session = await this.createSession(options);
+    let activeSession: PiAgentSession | undefined;
+    let hasPersistenceError = false;
+    let persistenceError: unknown;
+    let persistenceAbortPromise: Promise<void> | undefined;
+    const persistConversationEvent = options.persistConversationEvent
+      ? async (event: PiAgentSessionEvent): Promise<void> => {
+          try {
+            await options.persistConversationEvent!(event);
+          } catch (error) {
+            hasPersistenceError = true;
+            persistenceError = error;
+            if (!persistenceAbortPromise && activeSession) {
+              try {
+                persistenceAbortPromise = activeSession
+                  .abort()
+                  .catch(() => undefined);
+              } catch {
+                persistenceAbortPromise = Promise.resolve();
+              }
+            }
+            throw error;
+          }
+        }
+      : undefined;
+    const session = await this.createSession({
+      ...options,
+      persistConversationEvent,
+    });
+    activeSession = session;
     // events 是 Pi 事件生产者与异步生成器消费者之间的本轮缓冲队列。
     const events: PiAgentSessionEvent[] = [];
     // 只表示 session.prompt() 整次运行已结束或失败；结束后仍要把队列里的事件交完。
@@ -104,9 +198,9 @@ export class LlmService {
 
     const wake = (): void => {
       // wake 不传递事件，只负责解除消费者的等待；事件仍保存在 events 队列中。
-      const wake = wakeConsumer;
+      const resume = wakeConsumer;
       wakeConsumer = undefined;
-      wake?.();
+      resume?.();
     };
 
     /** 只中止一次 Pi run，并唤醒正在等待下一事件的生成器消费者。 */
@@ -130,6 +224,10 @@ export class LlmService {
 
       unsubscribe = session.subscribe((event) => {
         // 所有 Pi 事件按回调顺序入队；AgentService 随后决定哪些字段可以出站。
+        if (hasPersistenceError) {
+          wake();
+          return;
+        }
         events.push(event);
         wake();
       });
@@ -173,6 +271,9 @@ export class LlmService {
       }
 
       await run;
+      if (hasPersistenceError) {
+        throw persistenceError;
+      }
       if (options.signal?.aborted) return;
       if (hasRunError) {
         throw runError;
@@ -183,6 +284,7 @@ export class LlmService {
       // 无论自然结束、报错还是取消，都解除监听并释放本次请求的 session。
       options.signal?.removeEventListener('abort', abortSession);
       if (options.signal?.aborted) await abortPromise;
+      if (persistenceAbortPromise) await persistenceAbortPromise;
       unsubscribe();
       session.dispose();
     }
@@ -217,11 +319,29 @@ export class LlmService {
         `Pi SDK model not found: ${options.providerId}/${options.modelId}.`,
       );
     }
+    if (options.conversation && !model) {
+      throw new Error(
+        'A configured Pi model is required to restore conversation history.',
+      );
+    }
 
     const cwd = process.cwd();
     const agentDir = sdk.getAgentDir();
+    const workspaceFileTools = await createWorkspaceFileTools(sdk, cwd);
     const billionContextExtension = await this.getBillionContextExtension();
     const piSubagentsExtension = await this.getPiSubagentsExtension();
+    const extensionFactories = [
+      billionContextExtension,
+      piSubagentsExtension,
+    ];
+    if (options.persistConversationEvent) {
+      extensionFactories.push(
+        createConversationPersistenceExtension(
+          options.persistConversationEvent,
+        ),
+      );
+    }
+    const systemPrompt = `${SYSTEM_PROMPT}\n\nAgent workspace: ${cwd}`;
     const resourceLoader = new sdk.DefaultResourceLoader({
       cwd,
       agentDir,
@@ -230,14 +350,21 @@ export class LlmService {
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      extensionFactories: [billionContextExtension, piSubagentsExtension],
+      extensionFactories,
       additionalSkillPaths: [join(PI_SUBAGENTS_ROOT, 'skills')],
       additionalPromptTemplatePaths: [join(PI_SUBAGENTS_ROOT, 'prompts')],
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
     });
     // The SDK does not reload an explicitly supplied resourceLoader; load only these allowlisted extensions before session creation.
     await resourceLoader.reload();
 
+    const sessionManager = options.conversation
+      ? sdk.SessionManager.inMemory(
+          cwd,
+          { id: options.conversation.id },
+          this.createSessionEntries(options.conversation.history, model!),
+        )
+      : sdk.SessionManager.inMemory();
     const { session } = await sdk.createAgentSession({
       cwd,
       agentDir,
@@ -245,12 +372,115 @@ export class LlmService {
       model,
       thinkingLevel: options.thinkingLevel ?? 'medium',
       resourceLoader,
-      sessionManager: sdk.SessionManager.inMemory(),
+      sessionManager,
       tools: [...DEFAULT_LLM_TOOL_MODIFIERS],
       excludeTools: [...EXCLUDED_LLM_TOOLS],
+      customTools: workspaceFileTools,
     });
 
     return session;
+  }
+
+  /** Converts persisted plain-text turns into the Pi SDK's authoritative entry tree. */
+  private createSessionEntries(
+    history: readonly LlmConversationHistoryMessage[],
+    model: PiModel,
+  ): PiFileEntry[] {
+    let parentId: string | null = null;
+    const entries: PiFileEntry[] = [];
+
+    for (const storedMessage of history) {
+      const createdAt = new Date(storedMessage.createdAt);
+      const timestamp = createdAt.getTime();
+      const persistedPiMessage = parsePersistedPiMessage(
+        storedMessage.contentJson,
+      );
+      if (persistedPiMessage) {
+        const nestedTimestamp = persistedPiMessage.message.timestamp;
+        const entryTimestamp = Number.isFinite(nestedTimestamp)
+          ? new Date(nestedTimestamp).toISOString()
+          : createdAt.toISOString();
+        const piEntry: PiSessionMessageEntry = {
+          type: 'message',
+          id: storedMessage.id,
+          parentId,
+          timestamp: entryTimestamp,
+          message: persistedPiMessage.message,
+        };
+        entries.push(piEntry);
+        parentId = piEntry.id;
+        continue;
+      }
+
+      if (storedMessage.role === 'user') {
+        const userMessage: PiSessionMessageEntry['message'] = {
+          role: 'user',
+          content: this.parseTextBlocks(storedMessage.contentJson),
+          timestamp,
+        };
+        const userEntry: PiSessionMessageEntry = {
+          type: 'message',
+          id: storedMessage.id,
+          parentId,
+          timestamp: createdAt.toISOString(),
+          message: userMessage,
+        };
+        entries.push(userEntry);
+        parentId = userEntry.id;
+        continue;
+      }
+      if (storedMessage.role !== 'assistant') continue;
+
+      const content = this.parseTextBlocks(storedMessage.contentJson);
+      if (content.length === 0) continue;
+      const assistantMessage: PiSessionMessageEntry['message'] = {
+        role: 'assistant',
+        content,
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        usage: createEmptyUsage(),
+        stopReason:
+          storedMessage.status === 'completed'
+            ? 'stop'
+            : storedMessage.status === 'cancelled'
+              ? 'aborted'
+              : 'error',
+        timestamp,
+      };
+      const assistantEntry: PiSessionMessageEntry = {
+        type: 'message',
+        id: storedMessage.id,
+        parentId,
+        timestamp: createdAt.toISOString(),
+        message: assistantMessage,
+      };
+      entries.push(assistantEntry);
+      parentId = assistantEntry.id;
+    }
+
+    return entries;
+  }
+
+  /** Parses the stored text-block format and rejects content Pi history cannot restore. */
+  private parseTextBlocks(
+    contentJson: string,
+  ): Array<{ type: 'text'; text: string }> {
+    const value: unknown = JSON.parse(contentJson);
+    if (
+      !Array.isArray(value) ||
+      !value.every(
+        (block) =>
+          typeof block === 'object' &&
+          block !== null &&
+          !Array.isArray(block) &&
+          (block as { type?: unknown }).type === 'text' &&
+          typeof (block as { text?: unknown }).text === 'string',
+      )
+    ) {
+      throw new Error('Stored conversation content is not valid text blocks.');
+    }
+    return value as Array<{ type: 'text'; text: string }>;
   }
 
   /** Loads and caches the Pi SDK module. */

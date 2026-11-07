@@ -3,6 +3,9 @@ import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAssistantState,
+  type AssistantRuntime,
+  type ThreadMessageLike,
 } from '@assistant-ui/react';
 import {
   CaretDown,
@@ -13,83 +16,227 @@ import {
   WarningCircle,
   XCircle,
 } from '@phosphor-icons/react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { ConversationSidebar } from './ConversationSidebar';
+import {
+  conversationStore,
+  type ConversationHistoryMessage,
+} from './conversation-store';
 
-/** Renders the text-only Agent thread and its send/stop controls. */
-export function AgentChatPage() {
+/** Loads persisted conversation history into the long-lived Agent runtime. */
+export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
+  const conversationState = useSyncExternalStore(
+    conversationStore.subscribe,
+    conversationStore.getSnapshot,
+    conversationStore.getSnapshot,
+  );
   const activity = useSyncExternalStore(
     agentEventBus.subscribe,
     agentEventBus.getTurnSnapshots,
     agentEventBus.getTurnSnapshots,
   );
+  const isRunning = useAssistantState((state) => state.thread.isRunning);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
+  const [hasLoadedInitialList, setHasLoadedInitialList] = useState(false);
+  const requestVersion = useRef(0);
+  const restoredInitialConversation = useRef(false);
+
+  /** Fetches one history snapshot and replaces the visible local thread on success. */
+  const loadConversation = useCallback(async (conversationId: string) => {
+    if (isRunning) return;
+    const version = ++requestVersion.current;
+    setLoadingConversationId(conversationId);
+    setHistoryError(null);
+    setHistoryErrorConversationId(null);
+
+    try {
+      const response = await window.teachforge.request<ConversationHistoryMessage[]>({
+        method: 'GET',
+        path: `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      });
+      if (response.status !== 200 || !Array.isArray(response.data)) {
+        throw new Error('历史消息加载失败。');
+      }
+      if (version !== requestVersion.current) return;
+
+      runtime.thread.reset(response.data.map(toThreadMessage));
+      conversationStore.setActiveConversationId(conversationId);
+    } catch {
+      if (version !== requestVersion.current) return;
+      setHistoryError('历史消息加载失败，请重试。');
+      setHistoryErrorConversationId(conversationId);
+    } finally {
+      if (version === requestVersion.current) setLoadingConversationId(null);
+    }
+  }, [isRunning, runtime]);
+
+  /** Loads sidebar rows when the Agent page first mounts. */
+  useEffect(() => {
+    void conversationStore.refresh();
+  }, []);
+
+  /** Restores the last selected thread only after the initial list is known. */
+  useEffect(() => {
+    if (conversationState.listStatus === 'error') {
+      setHasLoadedInitialList(true);
+      restoredInitialConversation.current = true;
+      return;
+    }
+    if (
+      conversationState.listStatus !== 'ready' ||
+      restoredInitialConversation.current
+    ) {
+      return;
+    }
+    setHasLoadedInitialList(true);
+    restoredInitialConversation.current = true;
+
+    const savedConversationId = conversationState.activeConversationId;
+    if (!savedConversationId) {
+      runtime.thread.reset([]);
+      return;
+    }
+    if (!conversationState.conversations.some(({ id }) => id === savedConversationId)) {
+      conversationStore.setActiveConversationId(null);
+      runtime.thread.reset([]);
+      return;
+    }
+
+    void loadConversation(savedConversationId);
+  }, [conversationState, loadConversation, runtime]);
+
+  /** Clears the active thread so the next prompt creates a new Conversation. */
+  const startNewConversation = useCallback(() => {
+    if (isRunning) return;
+    requestVersion.current += 1;
+    setLoadingConversationId(null);
+    setHistoryError(null);
+    setHistoryErrorConversationId(null);
+    conversationStore.setActiveConversationId(null);
+    runtime.thread.reset([]);
+  }, [isRunning, runtime]);
+
+  const isHistoryLoading = loadingConversationId !== null;
+  const isInitialListLoading = !hasLoadedInitialList;
 
   return (
-    <section className="mx-auto flex h-full w-full max-w-none flex-col px-5 py-5 md:px-8">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
-          <p className="mt-1 text-sm text-stone-500">问题与回答只保留在当前应用运行期间。</p>
-        </div>
-      </header>
+    <section className="flex h-full w-full flex-col md:flex-row">
+      <ConversationSidebar
+        isBusy={isRunning || isHistoryLoading || isInitialListLoading}
+        loadingConversationId={loadingConversationId}
+        onNewConversation={startNewConversation}
+        onRefresh={() => void conversationStore.refresh()}
+        onSelect={(conversationId) => void loadConversation(conversationId)}
+        state={conversationState}
+      />
 
-      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-3">
-          <AuiIf condition={(state) => state.thread.isEmpty}>
-            <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
-              <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
-              <p className="mt-2 text-sm leading-6 text-stone-500">
-                例如：帮我用一个生活中的例子解释缓存雪崩。
-              </p>
-            </div>
-          </AuiIf>
+      <div className="mx-auto flex min-h-0 w-full max-w-none flex-1 flex-col px-5 py-5 md:px-8">
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
+            <p className="mt-1 text-sm text-stone-500">对话上下文保存在本机，重启后可继续提问。</p>
+          </div>
+        </header>
 
-          <ThreadPrimitive.Messages>
-            {({ message }) => {
-              if (message.role === 'user') {
-                return (
-                  <div className="space-y-4" key={message.id}>
-                    <UserMessage />
-                    <AgentActivity activity={activity[message.id]} />
-                  </div>
-                );
-              }
+        {historyError && (
+          <div className="mb-3 flex items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+            <span className="min-w-0 flex-1">{historyError}</span>
+            {historyErrorConversationId && (
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => void loadConversation(historyErrorConversationId)}
+                type="button"
+              >
+                重试
+              </button>
+            )}
+          </div>
+        )}
 
-              return <AssistantMessage key={message.id} />;
-            }}
-          </ThreadPrimitive.Messages>
-
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 pt-3">
-            <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
-              <ComposerPrimitive.Input
-                aria-label="发送给备课助手"
-                className="min-h-24 w-full resize-y bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
-                placeholder="写下你正在准备的内容或问题…"
-                rows={3}
-                submitMode="ctrlEnter"
-              />
-              <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
-                <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
-                <div className="flex items-center gap-2">
-                  <AuiIf condition={(state) => state.thread.isRunning}>
-                    <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
-                      停止生成
-                    </ComposerPrimitive.Cancel>
-                  </AuiIf>
-                  <AuiIf condition={(state) => !state.thread.isRunning}>
-                    <ComposerPrimitive.Send className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40">
-                      发送
-                    </ComposerPrimitive.Send>
-                  </AuiIf>
+        {isHistoryLoading || isInitialListLoading ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
+            {isInitialListLoading ? '正在加载对话列表…' : '正在加载历史消息…'}
+          </div>
+        ) : (
+          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
+            <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-3">
+              <AuiIf condition={(state) => state.thread.isEmpty}>
+                <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
+                  <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    例如：帮我用一个生活中的例子解释缓存雪崩。
+                  </p>
                 </div>
-              </div>
-            </ComposerPrimitive.Root>
-          </ThreadPrimitive.ViewportFooter>
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
+              </AuiIf>
+
+              <ThreadPrimitive.Messages>
+                {({ message }) => {
+                  if (message.role === 'user') {
+                    return (
+                      <div className="space-y-4" key={message.id}>
+                        <UserMessage />
+                        <AgentActivity activity={activity[message.id]} />
+                      </div>
+                    );
+                  }
+
+                  return <AssistantMessage key={message.id} />;
+                }}
+              </ThreadPrimitive.Messages>
+
+              <ThreadPrimitive.ViewportFooter className="sticky bottom-0 pt-3">
+                <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+                  <ComposerPrimitive.Input
+                    aria-label="发送给备课助手"
+                    className="min-h-24 w-full resize-y bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
+                    placeholder="写下你正在准备的内容或问题…"
+                    rows={3}
+                    submitMode="ctrlEnter"
+                  />
+                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
+                    <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                    <div className="flex items-center gap-2">
+                      <AuiIf condition={(state) => state.thread.isRunning}>
+                        <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+                          停止生成
+                        </ComposerPrimitive.Cancel>
+                      </AuiIf>
+                      <AuiIf condition={(state) => !state.thread.isRunning}>
+                        <ComposerPrimitive.Send className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40">
+                          发送
+                        </ComposerPrimitive.Send>
+                      </AuiIf>
+                    </div>
+                  </div>
+                </ComposerPrimitive.Root>
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </ThreadPrimitive.Root>
+        )}
+      </div>
     </section>
   );
+}
+
+/** Converts one text-only history DTO into the public assistant-ui reset shape. */
+function toThreadMessage(message: ConversationHistoryMessage): ThreadMessageLike {
+  return {
+    id: message.id,
+    role: message.role,
+    content: [{ type: 'text', text: message.content }],
+    createdAt: new Date(message.createdAt),
+    status:
+      message.status === 'completed'
+        ? { type: 'complete', reason: 'stop' }
+        : {
+            type: 'incomplete',
+            reason: message.status === 'cancelled' ? 'cancelled' : 'error',
+          },
+  };
 }
 
 /** Shows one request's elapsed time and safe tool summaries below its user message. */

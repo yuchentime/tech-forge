@@ -19,6 +19,14 @@ function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
 
   switch (value.type) {
+    case 'conversation':
+      return (
+        hasExactKeys(value, ['type', 'conversationId']) &&
+        typeof value.conversationId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          value.conversationId,
+        )
+      );
     case 'agent_start':
     case 'turn_start':
     case 'turn_end':
@@ -190,10 +198,14 @@ const bridge: DesktopBridge = {
   getBackendState: () => ipcRenderer.invoke('backend:state'),
   request: <T = unknown>(input: BackendRequest) =>
     ipcRenderer.invoke('backend:request', input) as Promise<BackendResponse<T>>,
-  streamAgent: (prompt, onEvent) => {
+  streamAgent: (prompt, onEvent, conversationId) => {
     const requestId = `agent-${Date.now()}-${++nextStreamId}`;
     agentStreams.set(requestId, { onEvent });
-    ipcRenderer.send('agent:stream:start', { requestId, prompt });
+    ipcRenderer.send('agent:stream:start', {
+      requestId,
+      prompt,
+      ...(conversationId ? { conversationId } : {}),
+    });
     return requestId;
   },
   cancelAgentStream: (requestId) => {

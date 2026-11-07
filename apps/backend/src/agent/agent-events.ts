@@ -1,7 +1,8 @@
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
-/** 定义允许跨过 Agent 边界、送到 UI 的 Pi 原生事件投影。 */
+/** 定义送到 UI 的会话元数据与安全 Pi 原生事件投影。 */
 export type AgentStreamEvent =
+  | { type: 'conversation'; conversationId: string }
   | { type: 'agent_start' }
   | { type: 'turn_start' }
   | { type: 'turn_end' }

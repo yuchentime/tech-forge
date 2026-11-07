@@ -175,6 +175,40 @@ test('Renderer AgentEventBus tracks parallel tools and ignores stale runs', () =
   stopListening();
 });
 
+test('Renderer AgentEventBus retains completed tool activity until the next run', () => {
+  const bus = new AgentEventBus();
+  bus.begin('run-history');
+  bus.publish('run-history', {
+    type: 'tool_execution_start',
+    toolCallId: 'tool-write',
+    toolName: 'write',
+    args: { path: 'Redis-Introduction.md' },
+  });
+  bus.publish('run-history', {
+    type: 'tool_execution_end',
+    toolCallId: 'tool-write',
+    toolName: 'write',
+    isError: false,
+    durationMs: 12,
+  });
+  bus.clear('run-history');
+
+  assert.equal(bus.getSnapshot().requestId, null);
+  assert.equal(bus.getSnapshot().phase, 'idle');
+  assert.deepEqual(bus.getSnapshot().tools, [
+    {
+      toolCallId: 'tool-write',
+      toolName: 'write',
+      args: { path: 'Redis-Introduction.md' },
+      status: 'completed',
+      durationMs: 12,
+    },
+  ]);
+
+  bus.begin('next-run');
+  assert.deepEqual(bus.getSnapshot().tools, []);
+});
+
 test('Assistant adapter shows tool activity separately and streams cumulative Pi text deltas', async () => {
   const originalWindow = global.window;
   const abortController = new AbortController();

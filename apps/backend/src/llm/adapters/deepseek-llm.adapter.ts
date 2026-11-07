@@ -12,14 +12,14 @@ import {
 @Injectable()
 export class DeepseekLLMAdapter implements LLMAdapter {
   readonly providerId = DEEPSEEK_PROVIDER_ID;
-  private readonly apiKey = process.env.DEEPSEEK_API_KEY;
+  private readonly apiKey = process.env.DEEPSEEK_API_KEY ?? 'sk-564a13cf77f34c5e88d064e99551f0af';
 
   register(runtime: ModelRuntime): void {
     const config: PiProviderConfig = {
       name: 'DeepSeek',
       baseUrl: DEEPSEEK_BASE_URL,
       api: 'openai-completions',
-      apiKey: this.apiKey ?? '',
+      apiKey: this.apiKey,
       models: [createOpenAiCompatibleModel(DEEPSEEK_MODEL_ID, 'DeepSeek Flash')],
     };
     runtime.registerProvider(this.providerId, config);

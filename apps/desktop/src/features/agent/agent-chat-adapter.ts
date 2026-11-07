@@ -4,6 +4,7 @@ import type {
 } from '@assistant-ui/react';
 import type { AgentStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
+import { conversationStore } from './conversation-store';
 
 /** Extracts the newest user message because the backend runs each turn alone. */
 function getLatestUserMessage(messages: readonly ThreadMessage[]): {
@@ -59,7 +60,11 @@ export const agentChatAdapter: ChatModelAdapter = {
       resolve?.(null);
     };
 
-    requestId = window.teachforge.streamAgent(userMessage.prompt, receiveEvent);
+    requestId = window.teachforge.streamAgent(
+      userMessage.prompt,
+      receiveEvent,
+      conversationStore.getSnapshot().activeConversationId ?? undefined,
+    );
     agentEventBus.begin(userMessage.id || requestId, requestId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();
@@ -68,6 +73,12 @@ export const agentChatAdapter: ChatModelAdapter = {
       while (!abortSignal.aborted) {
         const event = await takeNextEvent();
         if (!event) return;
+
+        if (event.type === 'conversation') {
+          conversationStore.setActiveConversationId(event.conversationId);
+          void conversationStore.refresh();
+          continue;
+        }
 
         agentEventBus.publish(requestId, event);
 
@@ -88,7 +99,10 @@ export const agentChatAdapter: ChatModelAdapter = {
     } finally {
       abortSignal.removeEventListener('abort', cancel);
       if (!terminal) cancel();
-      if (requestId) agentEventBus.clear(requestId);
+      if (requestId) {
+        agentEventBus.clear(requestId);
+        void conversationStore.refresh();
+      }
     }
   },
 };

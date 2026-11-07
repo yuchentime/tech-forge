@@ -31,7 +31,11 @@ const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const agentRequestIdPattern = /^agent-\d+-\d+$/;
 
 type BackendChild = UtilityProcess | ChildProcess;
-type AgentStreamStart = { requestId: string; prompt: string };
+type AgentStreamStart = {
+  requestId: string;
+  prompt: string;
+  conversationId?: string;
+};
 type ActiveAgentStream = {
   requestId: string;
   sender: WebContents;
@@ -46,6 +50,8 @@ let backendToken: string | undefined;
 let mainWindow: BrowserWindow | undefined;
 let quitting = false;
 const activeAgentStreams = new Map<string, ActiveAgentStream>();
+const conversationIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const configuredDataDirectory = process.env.TEACHFORGE_DATA_DIR;
 if (configuredDataDirectory) {
@@ -266,11 +272,17 @@ function registerBackendIpc(): void {
 function parseAgentStreamStart(value: unknown): AgentStreamStart | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const input = value as Partial<AgentStreamStart>;
+  const keys = Object.keys(value);
   if (
-    Object.keys(value).length !== 2 ||
+    keys.some((key) => !['requestId', 'prompt', 'conversationId'].includes(key)) ||
+    keys.length < 2 ||
+    keys.length > 3 ||
     typeof input.requestId !== 'string' ||
     !agentRequestIdPattern.test(input.requestId) ||
-    typeof input.prompt !== 'string'
+    typeof input.prompt !== 'string' ||
+    (input.conversationId !== undefined &&
+      (typeof input.conversationId !== 'string' ||
+        !conversationIdPattern.test(input.conversationId)))
   ) {
     return undefined;
   }
@@ -279,7 +291,11 @@ function parseAgentStreamStart(value: unknown): AgentStreamStart | undefined {
   if (!prompt || Array.from(prompt).length > MAX_AGENT_PROMPT_LENGTH) {
     return undefined;
   }
-  return { requestId: input.requestId, prompt };
+  return {
+    requestId: input.requestId,
+    prompt,
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+  };
 }
 
 /** Starts a single Agent stream only for the main application frame. */
@@ -339,7 +355,7 @@ function startAgentStream(event: IpcMainEvent, value: unknown): void {
     cancelBackendAgentStream(active.requestId, active.sender);
     return;
   }
-  void forwardAgentStream(active, input.prompt);
+  void forwardAgentStream(active, input.prompt, input.conversationId);
 }
 
 /** Posts one normalized event and closes its resources at terminal events. */
@@ -368,6 +384,7 @@ function postAgentStreamEvent(
 async function forwardAgentStream(
   active: ActiveAgentStream,
   prompt: string,
+  conversationId?: string,
 ): Promise<void> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let finished = false;
@@ -388,7 +405,10 @@ async function forwardAgentStream(
           'x-teachforge-token': backendToken,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          ...(conversationId ? { conversationId } : {}),
+        }),
         signal: active.controller.signal,
       },
     );

@@ -1,5 +1,6 @@
-/** 定义允许跨过 Electron 桌面桥接的 Pi 原生事件字段。 */
+/** Defines the safe conversation metadata and Pi event fields that may cross the desktop bridge. */
 export type AgentStreamEvent =
+  | { type: 'conversation'; conversationId: string }
   | { type: 'agent_start' }
   | { type: 'turn_start' }
   | { type: 'turn_end' }
@@ -29,6 +30,14 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
 
   switch (value.type) {
+    case 'conversation':
+      return (
+        hasExactKeys(value, ['type', 'conversationId']) &&
+        typeof value.conversationId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          value.conversationId,
+        )
+      );
     case 'agent_start':
     case 'turn_start':
     case 'turn_end':

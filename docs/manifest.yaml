@@ -10,9 +10,30 @@ routes:
       - docs/current/platform/index.md
       - docs/current/platform/architecture-and-code-placement.md
     optional:
+      - docs/current/platform/agent-runtime.md
       - docs/source/data-model-design.md
       - docs/source/data-model-fields.md
       - docs/source/system-configuration-design.md
+    history_on_demand: []
+  agent-runtime:
+    description: "Extend the Agent and Pi SDK request, tool, stream, and persistence lifecycle"
+    token_budget: 14000
+    code_globs:
+      - "apps/backend/src/agent/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/llm/**"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/agent-runtime.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+      - docs/source/agent-runtime-open-questions.md
     history_on_demand: []
   data-model-implementation:
     description: "Implement or change persistence using the current candidate data model"
@@ -30,7 +51,7 @@ routes:
     history_on_demand: []
   agent-streaming-loop:
     description: "Design or implement the single-turn streamed Agent chat across Electron, NestJS, and LLM"
-    token_budget: 22000
+    token_budget: 14000
     code_globs:
       - "apps/desktop/src/**"
       - "apps/desktop/electron/**"
@@ -40,12 +61,60 @@ routes:
       - docs/current/index.md
       - docs/current/platform/index.md
       - docs/current/platform/architecture-and-code-placement.md
-      - docs/changes/2026-11-06-agent-streaming-loop/design.md
-      - docs/changes/2026-11-06-agent-streaming-loop/verification.md
+      - docs/current/platform/agent-runtime.md
     optional:
       - docs/source/后端架构设计.md
       - docs/source/功能设计文档.md
+      - docs/changes/2026-11-06-agent-streaming-loop/design.md
+      - docs/changes/2026-11-06-agent-streaming-loop/verification.md
       - docs/changes/2026-11-06-agent-streaming-loop/tasks.md
+    history_on_demand: []
+  conversation-session-persistence:
+    description: "Persist streamed Pi conversation and tool state in SQLite, then rebuild or reconcile history on later requests"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/agent/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/llm/**"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/changes/2026-11-07-conversation-session-persistence/design.md
+      - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+    optional:
+      - docs/current/platform/agent-runtime.md
+      - docs/source/data-model-design.md
+      - docs/source/data-model-fields.md
+      - docs/changes/2026-11-07-conversation-session-persistence/worklog.md
+    history_on_demand: []
+  conversation-history-sidebar:
+    description: "Read persisted Conversation summaries and messages into the desktop Agent sidebar and runtime"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/conversations/**"
+      - "apps/desktop/src/App.tsx"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-07-conversation-history-sidebar/design.md
+      - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-07-conversation-history-sidebar/worklog.md
+      - docs/changes/2026-11-07-conversation-session-persistence/design.md
+      - docs/changes/2026-11-07-conversation-session-persistence/verification.md
     history_on_demand: []
   agent-chat-presentation:
     description: "Render per-turn Agent tool activity and assistant Markdown in the desktop chat"
@@ -59,6 +128,7 @@ routes:
       - docs/changes/2026-11-07-agent-chat-presentation/design.md
       - docs/changes/2026-11-07-agent-chat-presentation/verification.md
     optional:
+      - docs/current/platform/agent-runtime.md
       - docs/changes/2026-11-06-agent-streaming-loop/design.md
       - docs/changes/2026-11-06-agent-streaming-loop/verification.md
       - docs/changes/2026-11-07-agent-chat-presentation/worklog.md

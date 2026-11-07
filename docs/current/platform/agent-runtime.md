@@ -1,0 +1,142 @@
+---
+status: current
+layer: platform
+domain: agent-runtime
+canonical_for:
+  - agent-runtime-behavior
+  - agent-extension-guidance
+related:
+  - docs/current/platform/index.md
+  - docs/current/platform/architecture-and-code-placement.md
+  - docs/current/domains/conversations/api-contract.md
+  - docs/current/domains/conversations/backend-behavior.md
+  - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
+  - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+  - docs/source/agent-runtime-open-questions.md
+last_verified: 2026-11-07
+---
+
+# Agent Runtime 运行链路
+
+本文记录当前 Agent 的执行流程，以及扩展能力时必须保留的边界。内容以代码中已实现的行为为准；运行链路或持久化契约变化时应同步更新。
+
+## Runtime ownership
+
+| 组件 | 职责 |
+|---|---|
+| `AgentChatPage` / `ConversationStore` | 启动时读取 Conversation 摘要并恢复仍存在的活动 ID；选择会话时读取可见消息并替换 LocalRuntime 线程；新线程清除活动 ID。 |
+| Desktop Agent adapter | 发送最新用户输入和活动 `conversationId`；保存后端返回的 ID；将安全流事件转换为 UI 更新，并在元数据/终止事件后刷新侧栏摘要。 |
+| Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
+| `AgentController` | 校验并流式处理 `POST /api/agent/stream`；客户端断开时中止请求。 |
+| `AgentService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
+| `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
+| `LlmService` | 为每次请求创建 Pi session，恢复传入历史，注册持久化钩子，并将 Pi 事件交给 AgentService。 |
+| Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
+
+## 请求与持久化时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Desktop UI
+    participant Main as Electron Main / Preload
+    participant HTTP as AgentController
+    participant Agent as AgentService
+    participant Conv as ConversationsService
+    participant DB as SQLite
+    participant LLM as LlmService
+    participant Pi as Pi SDK
+    participant Model as 大模型
+    participant Tool as 工具
+
+    User->>UI: 提交 prompt
+    UI->>Main: streamAgent(prompt, conversationId)
+    Main->>HTTP: POST /api/agent/stream + 本地认证
+    HTTP->>Agent: stream(prompt, conversationId, signal)
+    Agent->>Conv: beginTurn()
+    Conv->>DB: 读取并排序该对话全部历史
+    DB-->>Conv: MessageEntity rows
+    Conv->>Conv: 对账遗留的 pending 行和缺失 toolResult
+    Conv->>DB: 保存 user 行和 pending assistantTurn 标记
+    DB-->>Conv: 提交完成
+    Conv-->>Agent: 返回已恢复的历史
+    Agent-->>HTTP: conversation 元数据事件
+    HTTP-->>Main: SSE conversation 事件
+    Main-->>UI: conversationId
+
+    Agent->>LLM: stream(prompt, history, 持久化回调)
+    LLM->>LLM: 将历史转换为 Pi SessionMessageEntry
+    LLM->>Pi: 创建带 history 的 SessionManager.inMemory()
+    Note over LLM,Pi: inMemory 是本次请求的运行副本；SQLite 仍是持久来源
+    Pi->>Model: 发送已恢复历史和本轮 prompt
+    Model-->>Pi: 流式生成 assistant 消息
+
+    loop Assistant 消息与工具事件
+        Pi->>LLM: 调用并等待持久化扩展钩子
+        LLM->>Agent: persistConversationEvent(event)
+        Agent->>Conv: 写入消息快照或工具状态
+        Conv->>DB: 提交 MessageEntity 行
+        DB-->>Conv: 提交完成
+        Conv-->>Agent: 持久化完成
+        Agent-->>LLM: 回调完成，Pi 可以继续
+        opt 当前事件为 tool_execution_start
+            Pi->>Tool: 执行工具
+            Tool-->>Pi: 返回工具结果
+        end
+        Pi-->>LLM: 派发 Pi session 事件
+        LLM-->>Agent: 返回事件
+        Agent-->>HTTP: 投影后的安全事件
+        HTTP-->>UI: SSE
+    end
+
+    Agent->>Conv: finishTurn(status)
+    Conv->>DB: 更新 assistantTurn 终态
+    DB-->>Conv: 提交完成
+```
+
+## 持久化与恢复约定
+
+`beginTurn()` 按 `sequenceNo` 读取该对话的全部消息行，对账上次中断的轮次，然后在模型调用前保存新的 `user/completed` 行和 `assistantTurn/pending` 标记。
+
+`LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
+
+Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `AgentService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
+
+Renderer 的会话摘要通过 `GET /api/conversations` 读取，选中会话后再通过 `GET /api/conversations/:conversationId/messages` 读取按序排列的 user/assistant 纯文本历史。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload；加载成功后页面调用 LocalRuntime `thread.reset()` 替换当前可见线程。
+
+Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` 消息以带格式标记的 JSON 保存在 `contentJson`。工具执行元数据、部分输出、最终结果和终态保存在独立的 `toolExecution` 行中。`assistantTurn` 和 `toolExecution` 行不会作为模型消息发送。
+
+下一次请求会把 pending 工具执行标记为中断。不完整的 assistant 快照保留已生成文本，并移除未完成的 toolCall block。已完成的 tool call 若缺少 `toolResult`，优先用已持久化的工具最终结果重建；没有最终结果时则补一条错误结果，避免重放可能已产生副作用的工具。
+
+每次请求都会加载全部可恢复历史，不做上下文裁剪或摘要，也不会自动续跑原来的 provider 调用。这里的“恢复”是下一次请求从持久消息继续对话。
+
+数据库事务只覆盖短时读写，不跨模型或工具 I/O。持久化钩子写入失败时会中止 Pi 请求，并作为请求错误返回。
+
+## 待办评估
+
+`billion-context-pi` 在当前配置下是否已负责上下文压缩尚未确认。当前实现每次加载全部历史且不做应用层压缩；在问题结论形成前，不要假设扩展会自动压缩，也不要自行裁剪历史。评估记录见[Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)。
+
+## 扩展边界
+
+1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
+2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
+3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `AgentStreamEvent`、桥接校验和 adapter。
+4. 工具操作必须限制在 backend 配置的工作区。当前通过 `workspace-file-tools.ts` 启用原生 `read`、`edit`、`write` 工具；`bash`、`subagent`、`subagents_enable` 被排除。不得增加绕开此边界的能力。
+5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
+6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
+
+## 代码入口
+
+- HTTP/SSE 边界：`apps/backend/src/agent/agent.controller.ts`
+- 轮次编排与安全事件投影：`apps/backend/src/agent/agent.service.ts`、`agent-events.ts`
+- 对话消息行和中断对账：`apps/backend/src/conversations/conversations.service.ts`
+- 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
+- Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
+- SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`
+- 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`
+- 会话侧栏与 Renderer 查询状态：`apps/desktop/src/features/agent/AgentChatPage.tsx`、`ConversationSidebar.tsx`、`conversation-store.ts`
+
+## Pi SDK 官方文档
+
+- [SDK 与外部历史初始化](https://pi.dev/docs/latest/sdk)
+- [Session 消息与工具结果格式](https://pi.dev/docs/latest/session-format)

@@ -10,8 +10,8 @@ related:
   - docs/changes/2026-11-06-agent-streaming-loop/tasks.md
   - docs/current/platform/architecture-and-code-placement.md
 last_verified: 2026-11-07
-version: 2.0
-acceptance_review_status: approved
+version: 5.0
+acceptance_review_status: pending review
 ---
 
 # Agent 单轮流式闭环 Verification
@@ -269,6 +269,32 @@ npx cross-env TEACHFORGE_AGENT_LIVE_TEST=1 npm run verify:agent-stream --workspa
 - `apps/backend/src/llm/tools/default-tools.ts` now declares `+read`, `+edit`, and `+write` tool modifiers. `LlmService` excludes `bash` while leaving extension tools enabled; the SDK file tools are reused directly rather than reimplemented.
 - Backend build: PASS (`npm run build:backend`). Runtime inspection of a created Pi session showed active `read`, `edit`, and `write` plus the configured extension tools; `bash` was absent.
 - The session inspection did not send a model request. Existing Agent event projection still excludes tool results from the Renderer; final assistant text remains the user-facing output.
+
+## L006 Workspace-Scoped Pi File Tools
+
+- Reproduced the SDK write behavior in an isolated temporary workspace: the built-in write operation calls `mkdir` for the parent even when it already exists. A write directly under a drive root can therefore attempt `mkdir E:\` and fail with `EPERM`; a write directly under the configured workspace root also needlessly attempts to mkdir that existing root.
+- `createWorkspaceFileTools()` now wraps Pi's native read/edit/write definitions with operations rooted at the canonical backend `process.cwd()`. It skips mkdir on the workspace root, creates nested directories one level at a time, and rejects paths outside the workspace or through symlinks. No per-operation approval prompt is involved inside the workspace.
+- The Agent system prompt supplies the resolved workspace path, asks for relative paths, and tells the model to save an outside-requested output inside the workspace under the same filename when possible. `bash`, `subagent`, and `subagents_enable` are excluded so those tools cannot bypass the file boundary. Existing UI event projection still shows allowed tool activity and arguments, while tool results remain out of the UI; final assistant output remains visible.
+- Backend build: PASS (`npm run build:backend`). Workspace regression tests: PASS, 2/2; the root-write test injects an `EPERM` failure if mkdir is called on the workspace root and confirms it is never called, then verifies nested directory creation. Boundary tests confirm read/edit/write reject outside absolute and traversal paths without changing the outside file.
+- Backend Agent stream suite: PASS, 7/7 (`npm run test:agent-stream --workspace @teachforge/backend`).
+- Runtime session inspection confirmed `read`, `edit`, `write` remain available and shell/child-agent tools are absent. A direct attempt to write `E:\test_file.txt` returned `EWORKSPACE`; it did not write outside the configured workspace or call mkdir on `E:\`.
+- Real Electron/Provider run: PASS for the workspace file outcome. The Agent wrote `E:\projects\tech-forge\apps\backend\dist\Redis-Introduction.md` (17,632 bytes; 369 lines; nine major sections). The UI showed the local backend connected, an in-progress state, then a completion response with the actual path and summary; no permission prompt appeared. The sampled UI states did not capture a tool-specific event or intermediate answer delta for this run; L004 contains the separate tool-activity and streaming observations.
+- The workspace currently derives from `process.cwd()`; in development Electron launches the backend with cwd at `apps/backend/dist`. Packaged-app writability has not been verified, so a user-configurable writable workspace remains future work.
+
+## L007 Retained Tool Activity in the Agent UI
+
+- Diagnosis: Pi `tool_execution_start/end` events already crossed backend projection, SSE, Electron bridge, and Renderer EventBus. The UI only kept active tools; `tool_execution_end` removed each item, and the stream terminal event cleared the activity card. A short file write could therefore complete between UI observations with no visible trace.
+- Change: the activity snapshot now keeps tool arguments and an explicit running/completed/failed/cancelled status for the current turn. Terminal cleanup retains that safe activity list until the next prompt starts. Tool results and full messages remain excluded; parameter details stay collapsed by default.
+- Desktop regression suite: PASS, 9/9 (`npm run test:agent-stream --workspace @teachforge/desktop`), including retention through terminal cleanup and clearing at the next run.
+- Real Electron/Provider check: PASS. A request wrote `E:\projects\tech-forge\apps\backend\dist\Redis-Tool-Trace.md` (903 bytes; 15 lines). After the final response appeared, the UI showed two `write` calls marked `已完成`; the tool arguments remained collapsed and no tool result appeared in chat.
+- Streaming: this run did not sample an intermediate text delta. Earlier L004 UI and stream observations remain the evidence for incremental answer display.
+
+## L008 Tool Activity Presentation
+
+- Tool activity is rendered after the current user message and before its corresponding assistant message. Both the activity and assistant response use a shared left edge.
+- While a tool runs, the activity line is concise and path-oriented: `读取文件 <绝对路径>` for `read`, or `正在编辑文件 <绝对路径>` for `write`/`edit`. The card uses a light grey background and smaller muted text than the answer.
+- Once the run finishes, the activity uses a collapsed disclosure summary with the action and path. Tool counts, success labels, parameter prompts, and tool results are not shown in the collapsed view.
+- Visual check: Electron HMR showed the tool summary immediately above the assistant output, aligned to the same left edge; the summary was collapsed and the answer remained unobstructed. `npx tsc --noEmit --project apps/desktop/tsconfig.app.json`: PASS.
 
 ## Known Guardrails
 

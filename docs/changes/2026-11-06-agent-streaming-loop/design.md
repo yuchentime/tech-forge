@@ -13,7 +13,7 @@ status: implemented
 layer: change
 domain: agent
 created_at: 2026-11-06
-version: 2.0
+version: 5.0
 canonical_for:
   - agent-streaming-loop-design
 related:
@@ -21,7 +21,7 @@ related:
   - docs/source/后端架构设计.md
   - docs/source/功能设计文档.md
 last_verified: 2026-11-07
-landed_in: L004
+landed_in: L008
 updates_current:
   - docs/current/platform/architecture-and-code-placement.md
 ---
@@ -230,12 +230,15 @@ data: {"message":"模型请求失败，请检查模型配置和网络。"}
 | 扩展加载前显式 reload | L004 Electron 联调 | Pi 运行时需要在创建 Agent session 前调用 `resourceLoader.reload()`，才能装载当前 allowlist 中的扩展工具 | 接受实现所需的初始化步骤；保持工具范围仍由 allowlist 控制 |
 | 测试凭据存在源码 fallback | L004 用户明确要求真实请求 | v2 设计描述凭据来自 `DEEPSEEK_API_KEY` 环境变量；本轮真实 Electron 测试使用了源码中的 fallback | 仅记录来源，不记录凭据值；移除 fallback 并轮换凭据仍需处理 |
 | 启用 Pi SDK 内置文件工具 | L005 用户要求 Agent 默认能产出文件 | 原实现设置 `noTools: 'builtin'`，关闭 SDK 原生 `read`、`edit`、`write` 工具 | 通过 SDK tool modifiers 启用文件工具并排除 `bash`；不重复实现 Pi 工具，扩展工具继续可用 |
+| 工作区内文件操作免授权并限制目录 | L006 用户反馈 `mkdir E:\` 的 EPERM，并明确文件操作仅限当前指定工作目录 | Pi 内置文件工具可接收绝对路径，且 write 会对父目录调用 mkdir；仅排除 `bash` 不能阻止目录外写入 | 保留 Pi 原生 read/edit/write 定义，通过自定义文件系统操作将路径限定在 `process.cwd()` 的真实目录内；工作区内不弹授权，工作区外拒绝；排除 bash 和子代理工具以避免绕过边界 |
+| 保留本轮工具调用状态 | L007 用户观察到文件写入后 UI 未显示工具事件 | Renderer 只保存运行中的工具，收到 `tool_execution_end` 即移除，done 后清空；短调用不易被观察 | 将工具开始参数与完成/失败/中止状态保留在本轮活动卡片中，直到下一轮开始；不保存或展示工具结果 |
+| 按回答分组并弱化工具信息 | L008 用户要求工具记录放在回答上方、灰色弱化、完成后折叠、内容简洁且左对齐 | 活动记录此前位于消息列表末尾、居中显示绿色卡片和参数/状态文字；最终回答因此被工具卡片隔开 | 将记录插入当前用户消息与对应回答之间；活动时只显示动作与文件绝对路径，完成后以默认折叠的浅灰摘要显示；消息和工具记录左对齐，工具结果不展示 |
 
-L004 真实联调已完成核心用户路径，但发现模型 ID 与扩展加载初始化偏差，见上表。工具任务结束后 Electron 启动的后端进程以退出码 1 退出，Pi SDK 扩展运行时抛出 stale-context guard；根因尚未确认，需后续排查进程稳定性。
+L004 真实联调已完成核心用户路径，但发现模型 ID 与扩展加载初始化偏差，见上表。工具任务结束后 Electron 启动的后端进程以退出码 1 退出，Pi SDK 扩展运行时抛出 stale-context guard；根因尚未确认，需后续排查进程稳定性。L006 增加文件系统边界后，该历史稳定性问题仍未通过本轮模型调用重新验证。
 
 ## Version History
 
-当前文档为 v1.0 初始设计稿。交付后的开发者反馈及评审结论尚未产生版本升级记录。
+当前文档保留 v1.0 初始设计稿；交付后的开发者反馈记录于 v2.0 至 v5.0 补充。
 
 ## Current Doc Updates
 
@@ -342,3 +345,24 @@ sequenceDiagram
 - 改动内容：扩展事件流与 Pi 事件白名单；加入工具名和参数展示、文本 delta 事件、Renderer EventBus 与 UI 活动态；明确剔除工具结果、partial result、完整 message 和非文本更新。
 - 影响范围：Agent/Llm 事件接口、SSE/桌面桥接 payload、Agent UI 状态与事件消费、AC-03/AC-04 及新增 AC-08/AC-09。
 - 处理状态：已实施于 L003；构建、局部测试和本地 HTTP 回归通过。真实 DeepSeek v2 流及 Electron 活动事件界面验收仍待补齐。
+
+### v3.0 — 2026-11-07
+
+- 触发：开发者报告 Pi 文件写入对盘符根目录调用 `mkdir` 得到 EPERM，并明确 Agent 文件访问只应在当前指定工作目录内运行，目录内无需逐次授权。
+- 改动内容：Pi 原生 read/edit/write 改用受工作区限制的文件系统操作；允许工作区根层文件和嵌套目录写入，拒绝越界与符号链接路径；禁用 shell 和子代理工具；工作区外目标改写到工作区内同名文件（可行时）并报告实际路径。
+- 影响范围：LlmService 的 Pi 文件工具装配、工具排除列表、Agent system prompt、工作区文件工具回归验证和当前平台事实。
+- 处理状态：已实施于 L006；backend build、7 项 Agent stream/workspace 测试通过，并在 Electron/Provider 真实请求中于无授权弹窗的情况下写出工作区文件。该次捕获确认处理中与最终路径/摘要，未采到工具专属事件或中途 delta；原 L004 已记录工具活动与流式输出观察。
+
+### v4.0 — 2026-11-07
+
+- 触发：开发者在 L006 真实文件写入后观察到 UI 未显示工具调用事件。
+- 改动内容：Renderer 保留本轮工具开始与结束记录，展示工具名、完成/失败/中止状态和折叠参数；工具结果继续不进入 UI；记录在下一轮提问时清除。
+- 影响范围：`AgentEventBus` 快照、Agent 活动面板、桌面端回归测试和当前平台事实。
+- 处理状态：已实施于 L007；桌面测试 9/9 通过；Electron 实际文件写入后 UI 显示两个完成的 `write` 调用及最终回答。
+
+### v5.0 — 2026-11-07
+
+- 触发：开发者指定工具调用信息与最终回答的顺序、颜色层级、简洁文案、折叠方式和左对齐布局。
+- 改动内容：工具记录放在对应助手回答前；执行中以浅灰小字显示“读取文件/编辑文件 + 绝对路径”；回答完成后默认折叠，仅显示去重后的短摘要；移除工具数量、成功状态和参数提示等冗余标签；工具记录与助手回答均左对齐。
+- 影响范围：Agent 活动区的消息排序、文案格式、颜色层级与折叠交互；不改变事件协议、工具结果过滤或流式文本行为。
+- 处理状态：已实施于 L008；Electron 页面热更新后已目视核对，Renderer TypeScript 检查通过。
