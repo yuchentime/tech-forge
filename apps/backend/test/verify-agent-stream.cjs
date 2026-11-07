@@ -116,23 +116,6 @@ async function main() {
     assert.equal(healthResponse.status, 200);
     assert.equal((await healthResponse.json()).status, 'ok');
 
-    const courseListResponse = await fetch(`http://127.0.0.1:${backend.port}/api/courses`, {
-      headers: { 'x-teachforge-token': token },
-    });
-    assert.equal(courseListResponse.status, 200);
-    assert.ok(Array.isArray(await courseListResponse.json()));
-
-    const createCourseResponse = await fetch(`http://127.0.0.1:${backend.port}/api/courses`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-teachforge-token': token,
-      },
-      body: JSON.stringify({ title: 'Agent stream regression check' }),
-    });
-    assert.equal(createCourseResponse.status, 201);
-    assert.equal((await createCourseResponse.json()).title, 'Agent stream regression check');
-
     const invalidPrompt = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -165,7 +148,7 @@ async function main() {
     assert.equal(unknownField.status, 400);
 
     if (!runLiveProvider) {
-      console.log('Local Agent HTTP, health, and Course checks passed; live DeepSeek request skipped.');
+      console.log('Local Agent HTTP and health checks passed; live DeepSeek request skipped.');
       return;
     }
 

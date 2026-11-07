@@ -1,6 +1,6 @@
 # TeachForge
 
-TeachForge 桌面端和本地服务的起始脚手架。当前包含一个最小端到端示例：Electron 启动本地 NestJS 服务，React 页面通过受控 Preload 调用健康检查与课程接口，课程数据由 TypeORM 写入 SQLite。
+TeachForge 桌面端和本地服务的起始脚手架。当前包含一个本地 Agent 工作台：Electron 启动 NestJS 服务，React 页面通过受控 Preload 访问健康检查、Agent 对话和 Conversation API。
 
 ## 环境
 
@@ -41,7 +41,8 @@ npm run start:desktop
 ## API
 
 - `GET /api/health`
-- `GET /api/courses`
-- `POST /api/courses`
+- `POST /api/agent/stream`
+- `GET /api/conversations`
+- `GET /api/conversations/:id/messages`
 
 所有请求均需携带 `x-teachforge-token`，并且服务只监听 Loopback。

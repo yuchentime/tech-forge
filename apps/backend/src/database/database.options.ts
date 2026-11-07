@@ -11,7 +11,6 @@ import { DocumentEntity } from '../documents/document.entity';
 import { DocumentVersionEntity } from '../documents/document-version.entity';
 import { RehearsalTurnEntity } from '../rehearsals/rehearsal-turn.entity';
 import { RehearsalEntity } from '../rehearsals/rehearsal.entity';
-import { CourseEntity } from '../courses/course.entity';
 
 /** Builds the SQLite TypeORM connection options and registers persisted entities. */
 export function buildDatabaseOptions(): TypeOrmModuleOptions {
@@ -24,7 +23,6 @@ export function buildDatabaseOptions(): TypeOrmModuleOptions {
     driver: Database,
     database: databasePath,
     entities: [
-      CourseEntity,
       ConversationEntity,
       MessageEntity,
       RehearsalEntity,

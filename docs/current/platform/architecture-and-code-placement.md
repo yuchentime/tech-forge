@@ -90,7 +90,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`AgentService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
-`assessments`、`memory`、`teaching`、`lessons` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 页面/API 是遗留原型，Course/Class/Lesson 不属于当前目标模型。
+`assessments`、`memory`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。
 
 ## 5. 后端分层约定
 
@@ -108,11 +108,12 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 
 ## 6. 当前装配与重要差异
 
-- [数据库选项](../../../apps/backend/src/database/database.options.ts)注册 Course 原型及当前 9 个目标实体；SQLite 启用 WAL、外键和 busy timeout，自动运行 migration，关闭 schema synchronize。
+- [数据库选项](../../../apps/backend/src/database/database.options.ts)注册当前 9 个目标实体；SQLite 启用 WAL、外键和 busy timeout，自动运行 migration，关闭 schema synchronize。
+- Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
 - 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。此迁移不代表对应业务流程已实现。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。
 - Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。系统设计草案中的用户可选工作空间和 `config.toml` 还未由此处实现。
-- [Course API 与 UI](../../../apps/backend/src/courses/courses.controller.ts)仍可用，但与个人学习目标模型冲突。不要把它复制成新的 Course/Class/Lesson 依赖路径；移除旧原型应作为独立业务变更处理。
+- `Course` API 与桌面端课程原型不再注册或调用；不要把它复制成新的 Course/Class/Lesson 依赖路径。
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
 - Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并按 SSE 帧增量解析，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 可收到 `conversation` 元数据、`agent_start`、`turn_start/end`、`tool_execution_start/end`、text-only `message_update`、`agent_end` 与安全终态事件；未知事件和非白名单字段不会穿过桌面桥，Renderer 不能指定本地 HTTP 地址或读取 token。
 - Agent 页面使用 `@assistant-ui/react` 的本地运行时和 Renderer `AgentEventBus`。每轮工具活动以 user message id 为键保存在进程内；页面按消息 id 读取对应活动，避免新轮覆盖旧轮。活动显示在对应用户消息下方，默认展开且可折叠；标题显示本轮动态/最终耗时，工具行仅呈现安全动作、路径和状态，不显示工具参数或结果。助手回答使用 `@assistant-ui/react-markdown` 的 `MarkdownTextPrimitive` 渲染 GFM Markdown，移除外层卡片边框；Renderer 阻止不安全 URL scheme 与图片加载。文本 delta 仍累积到 assistant-ui 回答。`ConversationStore` 在 Agent 页面启动时加载 `/api/conversations`，在 localStorage 保存活动 conversation ID，并在会话选择时从 `/api/conversations/:id/messages` 加载可见历史后调用 `runtime.thread.reset()`；新建空线程会清除活动 ID。列表在会话元数据事件和流终止后刷新。backend 将用户消息和 Pi assistant/toolResult 原生消息按事件写入 SQLite，工具执行状态单独记录；Pi `SessionManager.inMemory()` 在后续请求恢复所有历史消息。下一请求会对账中断行和未完成 tool call，不会重启原 provider 调用。选中历史时不恢复先前工具活动。Pi session 使用 SDK 原生 `read`、`edit`、`write` 工具定义，并通过 `src/llm/tools/workspace-file-tools.ts` 将文件 I/O 限制到 backend `process.cwd()` 的真实目录内；工作区根层写文件不会执行根目录 `mkdir`，允许创建子目录，越界路径与符号链接路径被拒绝。工作区内不需要逐次授权。为避免绕过边界，`bash`、`subagent`、`subagents_enable` 不可用。创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。开发环境 Electron 将 backend cwd 设为 `apps/backend/dist`；打包版工作区可写性尚未验证，应在面向用户前配置专用可写目录。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见本变更 L004 验证记录。
