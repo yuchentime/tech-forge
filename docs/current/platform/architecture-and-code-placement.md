@@ -115,7 +115,7 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - [Course API 与 UI](../../../apps/backend/src/courses/courses.controller.ts)仍可用，但与个人学习目标模型冲突。不要把它复制成新的 Course/Class/Lesson 依赖路径；移除旧原型应作为独立业务变更处理。
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
 - Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并按 SSE 帧增量解析，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 可收到 `agent_start`、`turn_start/end`、`tool_execution_start/end`、text-only `message_update`、`agent_end` 与安全终态事件；未知事件和非白名单字段不会穿过桌面桥，Renderer 不能指定本地 HTTP 地址或读取 token。
-- Agent 页面使用 `@assistant-ui/react` 的本地运行时和 Renderer `AgentEventBus`。运行状态、工具名和 `tool_execution_start.args` 独立展示；文本 delta 累积到助手回答；tool result、partial result、完整 message 和非文本更新不进入 UI。切换到 Course 原型时 Agent 页面隐藏但仍挂载，因此本进程内临时消息保留；关闭应用后消息不恢复。Pi session 启用 SDK 内置 `read`、`edit`、`write` 文件工具并排除 `bash`，Pi 扩展工具仍可用。创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见本变更 L004 验证记录。
+- Agent 页面使用 `@assistant-ui/react` 的本地运行时和 Renderer `AgentEventBus`。每轮工具活动以 user message id 为键保存在进程内；页面按消息 id 读取对应活动，避免新轮覆盖旧轮。活动显示在对应用户消息下方，默认展开且可折叠；标题显示本轮动态/最终耗时，工具行仅呈现安全动作、路径和状态，不显示工具参数或结果。助手回答使用 `@assistant-ui/react-markdown` 的 `MarkdownTextPrimitive` 渲染 GFM Markdown，移除外层卡片边框；Renderer 阻止不安全 URL scheme 与图片加载。文本 delta 仍累积到 assistant-ui 回答。切换到 Course 原型时 Agent 页面隐藏但仍挂载，因此本进程内临时消息保留；关闭应用后消息不恢复。Pi session 启用 SDK 内置 `read`、`edit`、`write` 文件工具并排除 `bash`，Pi 扩展工具仍可用。创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见本变更 L004 验证记录。
 
 ## 7. 新增业务时的落点清单
 

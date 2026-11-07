@@ -4,22 +4,29 @@ export type AgentToolActivity = {
   toolCallId: string;
   toolName: string;
   args: unknown;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  durationMs?: number;
 };
 
 export type AgentActivitySnapshot = {
+  turnId: string;
   requestId: string | null;
   phase: 'idle' | 'working' | 'responding';
   tools: AgentToolActivity[];
+  startedAt: number;
+  elapsedMs: number;
 };
+
+/** Keeps one immutable activity snapshot per user message during this app run. */
+export type AgentActivityState = Readonly<Record<string, AgentActivitySnapshot>>;
 
 /** 将当前运行的安全 Pi 事件发布给 React 活动状态订阅者。 */
 export class AgentEventBus {
   private readonly listeners = new Set<() => void>();
-  private snapshot: AgentActivitySnapshot = {
-    requestId: null,
-    phase: 'idle',
-    tools: [],
-  };
+  private activeRequestId: string | null = null;
+  private activeTurnId: string | null = null;
+  private lastTurnId: string | null = null;
+  private snapshot: AgentActivityState = {};
 
   /** 订阅活动状态快照，并返回取消订阅函数。 */
   subscribe = (listener: () => void): (() => void) => {
@@ -27,69 +34,150 @@ export class AgentEventBus {
     return () => this.listeners.delete(listener);
   };
 
-  /** 返回 useSyncExternalStore 所需的当前不可变快照。 */
-  getSnapshot = (): AgentActivitySnapshot => this.snapshot;
+  /** Returns the latest activity snapshot for existing single-run consumers. */
+  getSnapshot = (): AgentActivitySnapshot => {
+    const turnId = this.activeTurnId ?? this.lastTurnId;
+    return turnId ? this.snapshot[turnId] : EMPTY_ACTIVITY_SNAPSHOT;
+  };
 
-  /** 开始一轮请求，并清掉上一轮可能残留的 UI 状态。 */
-  begin(requestId: string): void {
-    this.setSnapshot({ requestId, phase: 'working', tools: [] });
+  /** Returns the immutable per-turn map consumed by the message list. */
+  getTurnSnapshots = (): AgentActivityState => this.snapshot;
+
+  /** Starts one activity record, optionally tied to its initiating user message. */
+  begin(turnIdOrRequestId: string, requestId?: string): void {
+    if (this.activeRequestId) this.clear(this.activeRequestId);
+
+    const turnId = turnIdOrRequestId;
+    const runRequestId = requestId ?? turnIdOrRequestId;
+    const startedAt = Date.now();
+    this.activeRequestId = runRequestId;
+    this.activeTurnId = turnId;
+    this.lastTurnId = turnId;
+    this.updateTurnSnapshot({
+      turnId,
+      requestId: runRequestId,
+      phase: 'working',
+      tools: [],
+      startedAt,
+      elapsedMs: 0,
+    });
   }
 
-  /** 只处理属于当前 requestId 的事件，隔离过期请求。 */
+  /** Applies only events from the active request and preserves older turn records. */
   publish(requestId: string, event: AgentStreamEvent): void {
-    if (requestId !== this.snapshot.requestId) return;
+    const activity = this.getActiveSnapshot(requestId);
+    if (!activity) return;
 
     switch (event.type) {
       case 'tool_execution_start':
-        this.setSnapshot({
-          ...this.snapshot,
+        this.updateActiveSnapshot(requestId, {
+          ...activity,
           phase: 'working',
           tools: [
-            ...this.snapshot.tools.filter(
+            ...activity.tools.filter(
               (tool) => tool.toolCallId !== event.toolCallId,
             ),
             {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               args: event.args,
+              status: 'running',
             },
           ],
         });
         return;
-      case 'tool_execution_end':
-        this.setSnapshot({
-          ...this.snapshot,
+      case 'tool_execution_end': {
+        const toolIndex = activity.tools.findIndex(
+          (tool) => tool.toolCallId === event.toolCallId,
+        );
+        if (toolIndex < 0) return;
+
+        const tools = [...activity.tools];
+        tools[toolIndex] = {
+          ...tools[toolIndex],
+          toolName: event.toolName,
+          status: event.isError ? 'failed' : 'completed',
+          ...(event.durationMs === undefined
+            ? {}
+            : { durationMs: event.durationMs }),
+        };
+        this.updateActiveSnapshot(requestId, {
+          ...activity,
           phase: 'working',
-          tools: this.snapshot.tools.filter(
-            (tool) => tool.toolCallId !== event.toolCallId,
-          ),
+          tools,
         });
         return;
+      }
       case 'message_update':
-        if (this.snapshot.phase === 'responding') return;
-        this.setSnapshot({ ...this.snapshot, phase: 'responding' });
+        if (activity.phase === 'responding') return;
+        this.updateActiveSnapshot(requestId, {
+          ...activity,
+          phase: 'responding',
+        });
         return;
       case 'done':
       case 'error':
         this.clear(requestId);
         return;
       default:
-        this.setSnapshot({ ...this.snapshot, phase: 'working' });
+        this.updateActiveSnapshot(requestId, {
+          ...activity,
+          phase: 'working',
+        });
     }
   }
 
-  /** 只清除匹配的运行，避免旧请求取消时清掉新请求状态。 */
+  /** Ends one matching request, freezes elapsed time, and retains its final tools. */
   clear(requestId: string): void {
-    if (requestId !== this.snapshot.requestId) return;
-    this.setSnapshot({ requestId: null, phase: 'idle', tools: [] });
+    const activity = this.getActiveSnapshot(requestId);
+    if (!activity) return;
+
+    this.activeRequestId = null;
+    this.activeTurnId = null;
+    this.lastTurnId = activity.turnId;
+    this.updateTurnSnapshot({
+      ...activity,
+      requestId: null,
+      phase: 'idle',
+      elapsedMs: Math.max(0, Date.now() - activity.startedAt),
+      tools: activity.tools.map((tool) =>
+        tool.status === 'running' ? { ...tool, status: 'cancelled' } : tool,
+      ),
+    });
   }
 
-  /** 替换状态快照并通知所有 UI 订阅者。 */
-  private setSnapshot(snapshot: AgentActivitySnapshot): void {
-    this.snapshot = snapshot;
+  /** Finds the current snapshot only when the request id still owns the active slot. */
+  private getActiveSnapshot(requestId: string): AgentActivitySnapshot | null {
+    if (requestId !== this.activeRequestId || !this.activeTurnId) return null;
+    return this.snapshot[this.activeTurnId] ?? null;
+  }
+
+  /** Replaces a live turn snapshot only while its request still owns the active slot. */
+  private updateActiveSnapshot(
+    requestId: string,
+    activity: AgentActivitySnapshot,
+  ): void {
+    if (requestId !== this.activeRequestId || activity.turnId !== this.activeTurnId) {
+      return;
+    }
+    this.updateTurnSnapshot(activity);
+  }
+
+  /** Replaces one turn in the immutable state map and notifies subscribers. */
+  private updateTurnSnapshot(activity: AgentActivitySnapshot): void {
+    this.snapshot = { ...this.snapshot, [activity.turnId]: activity };
     for (const listener of this.listeners) listener();
   }
 }
+
+const EMPTY_ACTIVITY_SNAPSHOT: AgentActivitySnapshot = {
+  turnId: '',
+  requestId: null,
+  phase: 'idle',
+  tools: [],
+  startedAt: 0,
+  elapsedMs: 0,
+};
 
 /** 向常驻 Agent 页面提供当前运行的事件状态。 */
 export const agentEventBus = new AgentEventBus();

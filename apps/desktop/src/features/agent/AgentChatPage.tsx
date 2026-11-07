@@ -4,27 +4,34 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
 } from '@assistant-ui/react';
-import { useSyncExternalStore } from 'react';
+import {
+  CaretDown,
+  Check,
+  CircleNotch,
+  FileText,
+  Stack,
+  WarningCircle,
+  XCircle,
+} from '@phosphor-icons/react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { agentEventBus } from './agent-event-bus';
+import { AssistantMarkdown } from './AssistantMarkdown';
 
 /** Renders the text-only Agent thread and its send/stop controls. */
 export function AgentChatPage() {
   const activity = useSyncExternalStore(
     agentEventBus.subscribe,
-    agentEventBus.getSnapshot,
-    agentEventBus.getSnapshot,
+    agentEventBus.getTurnSnapshots,
+    agentEventBus.getTurnSnapshots,
   );
 
   return (
-    <section className="mx-auto flex h-full w-full max-w-5xl flex-col px-5 py-5 md:px-8">
+    <section className="mx-auto flex h-full w-full max-w-none flex-col px-5 py-5 md:px-8">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
           <p className="mt-1 text-sm text-stone-500">问题与回答只保留在当前应用运行期间。</p>
         </div>
-        <p className="max-w-xl text-xs leading-5 text-stone-600">
-          运行期间会显示当前工具和参数；工具执行结果不会进入对话。
-        </p>
       </header>
 
       <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
@@ -39,12 +46,19 @@ export function AgentChatPage() {
           </AuiIf>
 
           <ThreadPrimitive.Messages>
-            {({ message }) =>
-              message.role === 'user' ? <UserMessage /> : <AssistantMessage />
-            }
-          </ThreadPrimitive.Messages>
+            {({ message }) => {
+              if (message.role === 'user') {
+                return (
+                  <div className="space-y-4" key={message.id}>
+                    <UserMessage />
+                    <AgentActivity activity={activity[message.id]} />
+                  </div>
+                );
+              }
 
-          <AgentActivity activity={activity} />
+              return <AssistantMessage key={message.id} />;
+            }}
+          </ThreadPrimitive.Messages>
 
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 pt-3">
             <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
@@ -78,39 +92,162 @@ export function AgentChatPage() {
   );
 }
 
-/** Shows request activity separately from the assistant's streamed answer. */
+/** Shows one request's elapsed time and safe tool summaries below its user message. */
 function AgentActivity({
   activity,
 }: {
-  activity: ReturnType<typeof agentEventBus.getSnapshot>;
+  activity: ReturnType<typeof agentEventBus.getTurnSnapshots>[string] | undefined;
 }) {
-  if (activity.phase === 'idle') return null;
+  const [now, setNow] = useState(() => Date.now());
+  const [isExpanded, setIsExpanded] = useState(true);
 
-  const label = activity.tools.length
-    ? `正在使用 ${activity.tools.length > 1 ? '多个工具' : activity.tools[0].toolName}`
-    : activity.phase === 'responding'
-      ? '正在生成回答'
-      : '正在处理中';
+  useEffect(() => {
+    if (!activity || activity.phase === 'idle') return;
+
+    const timerId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timerId);
+  }, [activity?.phase, activity?.startedAt]);
+
+  if (!activity || activity.tools.length === 0) return null;
+
+  const isFinal = activity.phase === 'idle';
+  const elapsedMs = isFinal
+    ? activity.elapsedMs
+    : Math.max(0, now - activity.startedAt);
 
   return (
-    <div
-      aria-live="polite"
-      className="mx-auto w-full max-w-[90%] shrink-0 rounded-xl border border-emerald-900/15 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950"
-      role="status"
-    >
-      <p className="font-medium">{label}</p>
-      {activity.tools.map((tool) => (
-        <details className="mt-2" key={tool.toolCallId}>
-          <summary className="cursor-pointer text-xs text-emerald-900">
-            查看 {tool.toolName} 参数
-          </summary>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/80 p-2 text-xs leading-5 text-stone-700">
-            {JSON.stringify(tool.args, null, 2)}
-          </pre>
-        </details>
-      ))}
+    <div className="flex w-full justify-start">
+      <details
+        className="group w-full max-w-[96%]"
+        open={isExpanded}
+        onToggle={(event) => setIsExpanded(event.currentTarget.open)}
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg py-1.5 text-sm text-stone-600 outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30">
+          <Stack aria-hidden="true" className="size-5 shrink-0 text-stone-600" weight="regular" />
+          <span>{isFinal ? '已工作' : '正在工作'}</span>
+          <time
+            aria-live="off"
+            className="tabular-nums"
+            dateTime={`PT${Math.floor(elapsedMs / 1000)}S`}
+          >
+            {formatDuration(elapsedMs)}
+          </time>
+          <CaretDown
+            aria-hidden="true"
+            className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180"
+            weight="bold"
+          />
+        </summary>
+        <div className="ml-2 space-y-2 border-l-2 border-stone-300 py-1 pl-4">
+          {activity.tools.map((tool) => (
+            <ToolActivityRow key={tool.toolCallId} tool={tool} />
+          ))}
+        </div>
+      </details>
     </div>
   );
+}
+
+/** Presents one tool action with a safe path chip and an accessible lifecycle status. */
+function ToolActivityRow({
+  tool,
+}: {
+  tool: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number];
+}) {
+  const filePath = getToolPath(tool.args);
+
+  return (
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-stone-200/65 px-3 py-2 text-sm text-stone-800">
+      <ToolStatusIcon status={tool.status} />
+      <span className="shrink-0">{getToolAction(tool.toolName)}</span>
+      {filePath && (
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-100 px-2 py-0.5">
+          <FileText aria-hidden="true" className="size-4 shrink-0 text-stone-600" />
+          <code className="min-w-0 break-all font-mono text-[0.9em]">{filePath}</code>
+        </span>
+      )}
+      <span className="sr-only">{getToolStatusLabel(tool.status)}</span>
+    </div>
+  );
+}
+
+/** Maps known file tools to concise Chinese action labels. */
+function getToolAction(toolName: string): string {
+  if (toolName === 'read') return '读取';
+  if (toolName === 'write') return '写入';
+  if (toolName === 'edit') return '编辑';
+  return `调用 ${toolName}`;
+}
+
+/** Returns only a string path and never exposes any other tool argument. */
+function getToolPath(args: unknown): string {
+  return typeof args === 'object' &&
+    args !== null &&
+    !Array.isArray(args) &&
+    'path' in args &&
+    typeof args.path === 'string'
+    ? args.path
+    : '';
+}
+
+/** Formats total request time with short units suited to the activity header. */
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${minutes}m ${seconds}s`;
+}
+
+/** Gives every tool state both a distinct icon and a screen-reader label. */
+function ToolStatusIcon({
+  status,
+}: {
+  status: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number]['status'];
+}) {
+  if (status === 'running') {
+    return (
+      <CircleNotch
+        aria-hidden="true"
+        className="size-4 shrink-0 animate-spin text-stone-600"
+      />
+    );
+  }
+
+  if (status === 'completed') {
+    return (
+      <Check
+        aria-hidden="true"
+        className="size-4 shrink-0 text-emerald-700"
+        weight="bold"
+      />
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <WarningCircle
+        aria-hidden="true"
+        className="size-4 shrink-0 text-rose-700"
+        weight="fill"
+      />
+    );
+  }
+
+  return (
+    <XCircle aria-hidden="true" className="size-4 shrink-0 text-stone-500" />
+  );
+}
+
+/** Names the lifecycle status for non-color context in each tool row. */
+function getToolStatusLabel(
+  status: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number]['status'],
+): string {
+  if (status === 'running') return '正在运行';
+  if (status === 'completed') return '已完成';
+  if (status === 'failed') return '执行失败';
+  return '已取消';
 }
 
 /** Displays the user's message with right-aligned emphasis. */
@@ -124,12 +261,16 @@ function UserMessage() {
   );
 }
 
-/** Displays assistant text and safe errors; activity events use AgentActivity. */
+/** Displays unboxed assistant Markdown and accessible safe errors. */
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-start">
-      <div className="max-w-[90%] whitespace-pre-wrap rounded-2xl rounded-bl-md border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800">
-        <MessagePrimitive.Parts />
+      <div className="min-w-0 max-w-full text-[15px] leading-7 text-stone-800">
+        <MessagePrimitive.Parts>
+          {({ part }) =>
+            part.type === 'text' ? <AssistantMarkdown /> : null
+          }
+        </MessagePrimitive.Parts>
         <MessagePrimitive.Error>
           <p className="mt-2 text-sm text-rose-700" role="alert">
             这次回答没有完成，请检查模型配置或网络后重试。

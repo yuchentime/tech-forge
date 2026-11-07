@@ -5,23 +5,29 @@ import type {
 import type { AgentStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
 
-/** Extracts the newest user text because the backend runs each turn alone. */
-function getLatestUserPrompt(messages: readonly ThreadMessage[]): string {
+/** Extracts the newest user message because the backend runs each turn alone. */
+function getLatestUserMessage(messages: readonly ThreadMessage[]): {
+  id: string;
+  prompt: string;
+} | null {
   const message = [...messages].reverse().find((candidate) => candidate.role === 'user');
-  return (
-    message?.content
+  if (!message) return null;
+
+  return {
+    id: message.id,
+    prompt: message.content
       .filter((part) => part.type === 'text')
       .map((part) => part.text)
       .join('\n')
-      .trim() ?? ''
-  );
+      .trim(),
+  };
 }
 
 /** Adapts the protected desktop stream bridge to Assistant UI cumulative output. */
 export const agentChatAdapter: ChatModelAdapter = {
   async *run({ messages, abortSignal }) {
-    const prompt = getLatestUserPrompt(messages);
-    if (!prompt) throw new Error('请输入文本后再发送。');
+    const userMessage = getLatestUserMessage(messages);
+    if (!userMessage?.prompt) throw new Error('请输入文本后再发送。');
     if (abortSignal.aborted) return;
 
     const queuedEvents: AgentStreamEvent[] = [];
@@ -53,8 +59,8 @@ export const agentChatAdapter: ChatModelAdapter = {
       resolve?.(null);
     };
 
-    requestId = window.teachforge.streamAgent(prompt, receiveEvent);
-    agentEventBus.begin(requestId);
+    requestId = window.teachforge.streamAgent(userMessage.prompt, receiveEvent);
+    agentEventBus.begin(userMessage.id || requestId, requestId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();
 

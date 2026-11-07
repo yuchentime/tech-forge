@@ -20,4 +20,5 @@ last_verified: 2026-11-06
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| Agent 对话展示 | Agent 工具活动与流式回答的桌面呈现 | [设计](2026-11-07-agent-chat-presentation/design.md) · [验收](2026-11-07-agent-chat-presentation/verification.md) · [工作记录](2026-11-07-agent-chat-presentation/worklog.md) |
 | Agent 单轮流式闭环 | 桌面端用户输入，经 Electron 安全桥接到 Agent/LLM 并流式显示回答 | [设计](2026-11-06-agent-streaming-loop/design.md) · [任务](2026-11-06-agent-streaming-loop/tasks.md) · [验收](2026-11-06-agent-streaming-loop/verification.md) |
