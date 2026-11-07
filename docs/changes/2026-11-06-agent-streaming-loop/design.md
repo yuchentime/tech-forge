@@ -21,7 +21,7 @@ related:
   - docs/source/后端架构设计.md
   - docs/source/功能设计文档.md
 last_verified: 2026-11-07
-landed_in: L003
+landed_in: L004
 updates_current:
   - docs/current/platform/architecture-and-code-placement.md
 ---
@@ -226,8 +226,12 @@ data: {"message":"模型请求失败，请检查模型配置和网络。"}
 
 | 偏差 | 发现于 | 与设计不符之处 | 处理（改设计 / 改现状文档 / 接受） |
 |---|---|---|---|
+| Provider 模型 ID 改为 `deepseek-flash` | L004 真实 Provider 联调 | v1/v2 设计中的 `deepseek-chat` 与当前已配置模型 ID 不符；使用旧 ID 时真实请求无法完成 | 接受当前 Provider 配置，并以 `DEEPSEEK_MODEL_ID` 作为注册与请求的共享值；后续模型变更同步更新此设计 |
+| 扩展加载前显式 reload | L004 Electron 联调 | Pi 运行时需要在创建 Agent session 前调用 `resourceLoader.reload()`，才能装载当前 allowlist 中的扩展工具 | 接受实现所需的初始化步骤；保持工具范围仍由 allowlist 控制 |
+| 测试凭据存在源码 fallback | L004 用户明确要求真实请求 | v2 设计描述凭据来自 `DEEPSEEK_API_KEY` 环境变量；本轮真实 Electron 测试使用了源码中的 fallback | 仅记录来源，不记录凭据值；移除 fallback 并轮换凭据仍需处理 |
+| 启用 Pi SDK 内置文件工具 | L005 用户要求 Agent 默认能产出文件 | 原实现设置 `noTools: 'builtin'`，关闭 SDK 原生 `read`、`edit`、`write` 工具 | 通过 SDK tool modifiers 启用文件工具并排除 `bash`；不重复实现 Pi 工具，扩展工具继续可用 |
 
-代码实现已完成，本轮没有需要修改设计目标或 API 契约的偏差。真实 Provider 流和 Electron 窗口验收因运行环境缺少 API key 与 Electron 二进制而待补；这属于验证证据未完成，不改变设计。
+L004 真实联调已完成核心用户路径，但发现模型 ID 与扩展加载初始化偏差，见上表。工具任务结束后 Electron 启动的后端进程以退出码 1 退出，Pi SDK 扩展运行时抛出 stale-context guard；根因尚未确认，需后续排查进程稳定性。
 
 ## Version History
 

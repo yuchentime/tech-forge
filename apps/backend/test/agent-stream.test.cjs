@@ -94,7 +94,7 @@ test('AgentService delegates the prompt and request signal to the configured mod
   assert.deepEqual(calls, [
     {
       prompt: '讲解缓存雪崩',
-      options: { providerId: 'deepseek', modelId: 'deepseek-chat', signal },
+      options: { providerId: 'deepseek', modelId: 'deepseek-flash', signal },
     },
   ]);
 });

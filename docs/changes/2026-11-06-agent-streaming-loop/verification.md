@@ -234,11 +234,41 @@ npx cross-env TEACHFORGE_AGENT_LIVE_TEST=1 npm run verify:agent-stream --workspa
 - Backend L1: PASS, 5/5 (`npm run test:agent-stream --workspace @teachforge/backend`).
 - Desktop L1: PASS, 8/8 (`npm run test:agent-stream --workspace @teachforge/desktop`).
 - Local HTTP L2: PASS (`npm run verify:agent-stream --workspace @teachforge/backend`), including Agent stream endpoint, health, and Course routes.
-- DeepSeek adapter configuration: the registered Pi provider now uses the same `DEEPSEEK_API_KEY` value checked by the adapter; no literal credential remains in the adapter source. Rotation/revocation of the historical credential is not verified here.
+- L003 credential check (historical): at that point the adapter was recorded as using `DEEPSEEK_API_KEY`; the L004 live-test re-anchor found a source fallback. Do not infer that the source is currently free of a literal credential. The value is intentionally omitted from this document.
 - DeepSeek v2 L2: NOT RUN; the opted-in subprocess reported `DEEPSEEK_API_KEY is required`. No credential was read or exposed by this verification attempt.
 - Electron L3: PARTIAL; the desktop app and Agent page launched, but the page reported the local backend connection unavailable, so end-to-end tool activity and streamed answer display could not be observed.
 - Visual inspection: development preview inspected at 1440, 768, and 390 px; 0 FAIL, 1 WARN (development server; production inspection recommended). The UI was in its empty state because the backend was disconnected.
 - Remaining: repeat the DeepSeek v2 stream with the configured key available to the launched process, then verify tool activity and streamed text in Electron; exercise Stop and restart memory behavior from the v1 checklist.
+
+## L004 Real Electron Follow-up
+
+### Evidence
+
+- The user corrected the configured model ID. Current provider registration and Agent request use the shared `DEEPSEEK_MODEL_ID` value `deepseek-flash`.
+- Backend and desktop production builds completed successfully. Backend Agent stream tests passed 5/5; desktop Agent stream tests passed 8/8.
+- Runtime inspection after `resourceLoader.reload()` showed the allowlisted tools, including `subagent` and `bg_wait`, loaded in the Agent session.
+- In the Electron window, the Redis documentation request displayed `subagent` and `bg_wait` activity, including tool parameters. The task completed and created `E:\Redis-Introduction.md` (55,623 bytes; 1,418 lines; 1 H1, 11 H2, 44 H3; 53 fenced code blocks). The assistant displayed a completion response with file size and contents summary.
+- During a separate no-tool Redis request, the UI was observed mid-generation with partial text, `正在生成回答`, and the Stop control. The next observation showed the completed text in the same assistant response. A direct backend stream probe also emitted multiple `message_update` events with text deltas.
+- Three sequential direct `LlmService` no-tool stream probes completed successfully. This does not establish Electron backend process stability after extension tool use.
+- After the tool-writing request, two additional UI prompts failed. The Electron-launched backend subprocess had exited with code 1; the captured stack pointed to the Pi SDK extension loader stale-context runtime guard. Root cause is not confirmed. Restarting the app restored the backend connection for the no-tool stream check.
+- The real request used the source-level credential fallback at the user’s explicit direction. No credential value is included here. Removal and rotation are unverified.
+
+### Result
+
+- Tool activity visible in UI: PASS.
+- Redis file written to the requested E: path and verified: PASS.
+- Final assistant completion response visible: PASS.
+- Assistant text visible before generation completed: PASS (mid-generation partial content and active status observed; direct backend deltas independently observed).
+- Backend process remains healthy after a tool-using run: FAIL (unexpected exit code 1; stale-context guard in stack, cause unconfirmed).
+- Stop/cancel behavior and restart memory behavior: NOT TESTED.
+- Overall L3: PASS_WITH_WARNINGS; user-facing task completed, with a backend stability defect requiring investigation.
+
+## L005 Pi SDK Built-in File Tools
+
+- Pi SDK 1.5.0 provides built-in `read`, `edit`, and `write`; `createAgentSession()` enables its default built-ins unless overridden. The prior `noTools: 'builtin'` setting explicitly disabled them. See the [Pi SDK session configuration](https://pi.dev/docs/latest/sdk) and its [tools example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/05-tools.ts).
+- `apps/backend/src/llm/tools/default-tools.ts` now declares `+read`, `+edit`, and `+write` tool modifiers. `LlmService` excludes `bash` while leaving extension tools enabled; the SDK file tools are reused directly rather than reimplemented.
+- Backend build: PASS (`npm run build:backend`). Runtime inspection of a created Pi session showed active `read`, `edit`, and `write` plus the configured extension tools; `bash` was absent.
+- The session inspection did not send a model request. Existing Agent event projection still excludes tool results from the Renderer; final assistant text remains the user-facing output.
 
 ## Known Guardrails
 

@@ -8,6 +8,10 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { DeepseekLLMAdapter } from './adapters/deepseek-llm.adapter';
 import { CustomLLMAdapter } from './adapters/custom-llm.adapter';
+import {
+  DEFAULT_LLM_TOOL_MODIFIERS,
+  EXCLUDED_LLM_TOOLS,
+} from './tools/default-tools';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 type BillionContextPi = typeof import('billion-context-pi');
@@ -231,6 +235,8 @@ export class LlmService {
       additionalPromptTemplatePaths: [join(PI_SUBAGENTS_ROOT, 'prompts')],
       systemPrompt: SYSTEM_PROMPT,
     });
+    // The SDK does not reload an explicitly supplied resourceLoader; load only these allowlisted extensions before session creation.
+    await resourceLoader.reload();
 
     const { session } = await sdk.createAgentSession({
       cwd,
@@ -240,7 +246,8 @@ export class LlmService {
       thinkingLevel: options.thinkingLevel ?? 'medium',
       resourceLoader,
       sessionManager: sdk.SessionManager.inMemory(),
-      noTools: 'builtin',
+      tools: [...DEFAULT_LLM_TOOL_MODIFIERS],
+      excludeTools: [...EXCLUDED_LLM_TOOLS],
     });
 
     return session;

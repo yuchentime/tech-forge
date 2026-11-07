@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  DEEPSEEK_MODEL_ID,
+  DEEPSEEK_PROVIDER_ID,
+} from '../llm/adapters/llm-adapter';
 import { LlmService } from '../llm/llm.service';
 import { projectAgentSessionEvent } from './agent-events';
 import type { AgentStreamEvent } from './agent-events';
@@ -15,8 +19,8 @@ export class AgentService {
     signal: AbortSignal,
   ): AsyncGenerator<AgentStreamEvent> {
     const piEvents = this.llm.stream(prompt, {
-      providerId: 'deepseek',
-      modelId: 'deepseek-chat',
+      providerId: DEEPSEEK_PROVIDER_ID,
+      modelId: DEEPSEEK_MODEL_ID,
       signal,
     });
 

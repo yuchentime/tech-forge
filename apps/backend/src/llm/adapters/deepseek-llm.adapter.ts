@@ -3,12 +3,11 @@ import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   createOpenAiCompatibleModel,
   DEEPSEEK_BASE_URL,
+  DEEPSEEK_MODEL_ID,
   DEEPSEEK_PROVIDER_ID,
   type LLMAdapter,
   type PiProviderConfig,
 } from './llm-adapter';
-
-const DEFAULT_MODEL_ID = 'deepseek-chat';
 
 @Injectable()
 export class DeepseekLLMAdapter implements LLMAdapter {
@@ -21,7 +20,7 @@ export class DeepseekLLMAdapter implements LLMAdapter {
       baseUrl: DEEPSEEK_BASE_URL,
       api: 'openai-completions',
       apiKey: this.apiKey ?? '',
-      models: [createOpenAiCompatibleModel(DEFAULT_MODEL_ID, 'DeepSeek Chat')],
+      models: [createOpenAiCompatibleModel(DEEPSEEK_MODEL_ID, 'DeepSeek Flash')],
     };
     runtime.registerProvider(this.providerId, config);
   }
