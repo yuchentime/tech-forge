@@ -9,10 +9,11 @@ related:
   - docs/current/platform/agent-runtime.md
   - docs/current/domains/conversations/backend-behavior.md
   - docs/changes/2026-11-07-agent-flow-logging/verification.md
+  - docs/current/domains/system-settings/index.md
   - docs/source/data-model-design.md
   - docs/source/data-model-fields.md
   - docs/source/system-configuration-design.md
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 ---
 
 # TeachForge 当前架构与代码放置指南
@@ -69,7 +70,8 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 |---|---|---|
 | `apps/desktop/src/main.tsx` | React renderer 入口，挂载 `App` 和全局样式 | 保持为应用启动与根组件装配点 |
 | `apps/desktop/src/App.tsx` | 装配 Agent `LocalRuntime`、`AssistantRuntimeProvider` 与占满窗口的 `AgentChatPage` | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
-| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换和新建；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；选中历史后仅恢复 user/assistant 文本，不恢复旧工具活动 |
+| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换、新建和设置入口；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；设置视图只替换右侧主区域，根 Conversation Runtime 保持挂载 |
+| `apps/desktop/src/features/settings/` | 本机模型 Provider、工作空间路径和 `SOULS.md` 风格编辑页 | 只使用 `window.teachforge.request()` 访问本地设置 API；GET 将已保存密钥回填到普通文本控件；只在本机设置页明文显示 |
 | `apps/desktop/src/types/desktop-bridge.ts` 与 `agent-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
 | `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
 | `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
@@ -87,10 +89,11 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `rehearsals` | Rehearsal/RehearsalTurn、提问、回答和轮次评估 | Entity 已注册；Service 为空壳。评估直接属于 RehearsalTurn |
 | `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | Entity 已注册；Service 为空壳，文件导入和检索流程未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
+| `settings` | 本机模型 Provider、Agent 默认输出路径与风格偏好文件 | `SettingsController` 暴露 `GET/PUT /api/settings`；`SettingsService` 独占 `.tech-forge/config.toml` 和 `SOULS.md`，默认输出目录为 `.tech-forge/workspace/`，并提供 `getWorkspacePath()` 与托管文件路径；API Key 仅由本机设置 API 返回设置页，不进入 Agent SSE、日志或 SQLite |
 | `retrieval` | 按 Conversation 资料范围组合检索上下文 | Service 为空壳 |
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | Service 为空壳 |
-| `llm` | 模型运行时及提供商适配 | `LlmService` 已有 generate/stream；DeepSeek 与 OpenAI 兼容 Adapter 已注册。当前 DeepSeek Adapter 还保留源码 credential fallback，具体值不记录在文档中。Pi session 创建和运行阶段通过结构化日志提供 requestId、阶段和耗时 |
+| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护 |
 | `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`AgentService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
@@ -116,14 +119,14 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
 - 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。此迁移不代表对应业务流程已实现。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。
-- Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。系统设计草案中的用户可选工作空间和 `config.toml` 还未由此处实现。
+- Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。独立于 SQLite 数据目录，本机模型设置在用户主目录 `.tech-forge/config.toml`，风格偏好在同目录 `SOULS.md`；每个新 Pi session 读取模型、风格和 workspace 配置。`config.toml` 的 `[workspace].path` 默认是 `.tech-forge/workspace/`，旧默认值映射到该目录；Pi cwd 和文件工具都使用此路径。config.toml 与 SOULS.md 仍固定归 SettingsService 所有。API Key 按用户要求明文写入 TOML，并经本机设置 API 返回 Renderer 设置页显示；候选草案建议使用操作系统安全存储，差异记录在[系统设置当前事实](../domains/system-settings/index.md)。
 - `Course` API 与桌面端课程原型不再注册或调用；不要把它复制成新的 Course/Class/Lesson 依赖路径。
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
 - Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并按 SSE 帧增量解析，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 可收到 `conversation` 元数据、`agent_start`、`turn_start/end`、`tool_execution_start/end`、text-only `message_update`、`agent_end` 与安全终态事件；未知事件和非白名单字段不会穿过桌面桥，Renderer 不能指定本地 HTTP 地址或读取 token。
 - Agent 页面使用 `@assistant-ui/react` 的本地运行时和 Renderer `AgentEventBus`。每轮工具活动以 user message id 为键保存在进程内；页面按消息 id 读取对应活动，避免新轮覆盖旧轮。活动显示在对应用户消息下方，默认展开且可折叠；标题显示本轮动态/最终耗时，工具行仅呈现安全动作、路径和状态，不显示工具参数或结果。助手回答使用 `@assistant-ui/react-markdown` 的 `MarkdownTextPrimitive` 渲染 GFM Markdown，移除外层卡片边框；Renderer 阻止不安全 URL scheme 与图片加载。文本 delta 仍累积到 assistant-ui 回答。
 - `ConversationStore` 在 Agent 页面启动时加载 `/api/conversations`，在 localStorage 保存活动 conversation ID，并在会话选择时从 `/api/conversations/:id/messages` 加载最近最多 30 条可见历史后调用 `runtime.thread.reset()`；`beforeMessageId` 支持按需读取并前置更早消息。新建空线程会清除活动 ID。列表在会话元数据事件和流终止后刷新。选中历史时不恢复先前工具活动。
 - Backend 将用户消息和 Pi assistant/toolResult 原生消息按事件写入 SQLite，工具执行状态单独记录；Pi `SessionManager.inMemory()` 在后续请求恢复所有历史消息。下一请求会对账中断行和未完成 tool call，不会重启原 provider 调用。
-- Pi session 使用 SDK 原生 `read`、`edit`、`write` 工具定义，并通过 `src/llm/tools/workspace-file-tools.ts` 将文件 I/O 限制到 backend `process.cwd()` 的真实目录内；工作区根层写文件不会执行根目录 `mkdir`，允许创建子目录，越界路径与符号链接路径被拒绝。工作区内不需要逐次授权。为避免绕过边界，`bash`、`subagent`、`subagents_enable` 不可用。创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。开发环境 Electron 将 backend cwd 设为 `apps/backend/dist`；打包版工作区可写性尚未验证，应在面向用户前配置专用可写目录。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见本变更 L004 验证记录。
+- Pi session 使用 SDK 原生 `read`、`edit`、`write` 工具定义，并通过 `src/llm/tools/workspace-file-tools.ts` 强制文件权限。`read` 可读取任意来源普通文件，但拒绝 config.toml、SOULS.md 及其链接/硬链接别名；`edit`、`write`、`mkdir` 默认只在 Agent workspace 中执行，并拒绝路径穿越、符号链接和特殊文件。当前用户请求明确给出唯一绝对外部目标时，可在本轮临时写入授权目录或文件；外部文件的父目录须已存在。`bash`、`subagent`、`subagents_enable` 不可用；创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。Electron 进程 cwd 仍由 Main 设置，但不作为 Agent 文件写入根目录。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见 [Agent 单轮流式变更 L004](../../changes/2026-11-06-agent-streaming-loop/worklog.md)。
 
 ## 7. 新增业务时的落点清单
 

@@ -16,5 +16,6 @@ last_verified: 2026-11-07
 |---|---|
 | 前后端代码放置 | [架构与代码放置指南](architecture-and-code-placement.md) |
 | Agent 运行与扩展边界 | [Agent Runtime](agent-runtime.md) |
+| 本机模型与风格设置 | [本机 Agent 设置](../domains/system-settings/index.md) |
 
-本页及其链接描述扫描时的代码现状。目标产品流程、数据建模和系统设置仍以[设计草案索引](../../source/index.md)中的文档为准；实现状态需回到代码确认。
+本页及其链接描述代码核对后的当前行为。其它目标产品流程与数据建模仍以[设计草案索引](../../source/index.md)中的文档为准；未列入当前事实页的目标能力不代表已经实现。

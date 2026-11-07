@@ -158,3 +158,46 @@ routes:
       - docs/changes/2026-11-06-agent-streaming-loop/verification.md
       - docs/changes/2026-11-07-agent-chat-presentation/worklog.md
     history_on_demand: []
+  local-agent-settings:
+    description: "Configure local Agent providers and style, and enforce workspace file access boundaries"
+    token_budget: 22000
+    code_globs:
+      - "apps/backend/src/settings/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/agent/agent.service.ts"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/features/settings/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/system-settings/index.md
+      - docs/changes/2026-11-07-local-agent-settings/design.md
+      - docs/changes/2026-11-07-local-agent-settings/verification.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/source/system-configuration-design.md
+      - docs/changes/2026-11-07-local-agent-settings/tasks.md
+      - docs/changes/2026-11-07-local-agent-settings/worklog.md
+    history_on_demand: []
+  local-workspace-setting:
+    description: "Configure the Agent output workspace and enforce current-turn file read/write boundaries"
+    token_budget: 24000
+    code_globs:
+      - "apps/backend/src/settings/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/agent/agent.service.ts"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/features/settings/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/system-settings/index.md
+      - docs/changes/2026-11-07-local-workspace-setting/design.md
+      - docs/changes/2026-11-07-local-workspace-setting/verification.md
+    optional:
+      - docs/changes/2026-11-07-local-workspace-setting/tasks.md
+      - docs/changes/2026-11-07-local-workspace-setting/worklog.md
+    history_on_demand: []

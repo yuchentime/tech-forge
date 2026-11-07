@@ -156,7 +156,10 @@ function startBackend(): Promise<void> {
       output = lines.pop() ?? '';
 
       for (const line of lines) {
-        if (!line.startsWith(READY_PREFIX)) continue;
+        if (!line.startsWith(READY_PREFIX)) {
+          console.log(`[backend] ${line}`);
+          continue;
+        }
         try {
           const message = JSON.parse(line.slice(READY_PREFIX.length)) as { port?: unknown };
           if (!Number.isInteger(message.port) || Number(message.port) < 1 || Number(message.port) > 65_535) {

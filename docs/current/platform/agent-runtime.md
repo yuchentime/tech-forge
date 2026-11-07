@@ -8,13 +8,14 @@ canonical_for:
 related:
   - docs/current/platform/index.md
   - docs/current/platform/architecture-and-code-placement.md
-  - docs/current/domains/conversations/backend-behavior.md
+  - docs/current/domains/system-settings/index.md
+  - docs/changes/2026-11-07-local-agent-settings/verification.md
   - docs/current/domains/conversations/api-contract.md
   - docs/current/domains/conversations/backend-behavior.md
   - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 ---
 
 # Agent Runtime 运行链路
@@ -25,13 +26,15 @@ last_verified: 2026-11-07
 
 | 组件 | 职责 |
 |---|---|
-| `AgentChatPage` / `ConversationStore` | 启动时读取 Conversation 摘要并恢复仍存在的活动 ID；选择会话时读取最近最多 30 条可见消息，以 Message ID 按需前置更早历史；新线程清除活动 ID。页面采用全高双栏，侧栏列表与消息视口独立滚动，输入区保持可见。 |
+| `AgentChatPage` / `ConversationStore` | 启动时读取 Conversation 摘要并恢复仍存在的活动 ID；选择会话时读取最近最多 30 条可见消息，以 Message ID 按需前置更早历史；新线程清除活动 ID。页面采用全高双栏，侧栏列表与消息视口独立滚动，输入区保持可见；设置按钮切换右侧聊天/设置主视图，不卸载根 Conversation Runtime。 |
+| `SettingsPage` / `ConversationSidebar` | 通过侧栏底部设置入口切换视图；从本地设置 API 加载 Provider 字段、密钥配置状态与 SOULS 文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
 | Desktop Agent adapter | 发送最新用户输入和活动 `conversationId`；保存后端返回的 ID；将安全流事件转换为 UI 更新，并在元数据/终止事件后刷新侧栏摘要。 |
 | Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
 | `AgentController` | 校验并流式处理 `POST /api/agent/stream`；客户端断开时中止请求。 |
 | `AgentService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 为每次请求创建 Pi session，恢复传入历史，注册持久化钩子，并将 Pi 事件交给 AgentService。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider、SOULS.md 和 workspace；以 workspace 统一 Pi cwd，组合系统提示词并注册扩展和持久化钩子。 |
+| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置但拒绝应用托管设置；写入默认限制在 workspace，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
 ## 运行日志
@@ -105,6 +108,8 @@ sequenceDiagram
     DB-->>Conv: 提交完成
 ```
 
+Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
+
 ## 持久化与恢复约定
 
 `beginTurn()` 按 `sequenceNo` 读取该对话的全部消息行，对账上次中断的轮次，然后在模型调用前保存新的 `user/completed` 行和 `assistantTurn/pending` 标记。
@@ -112,6 +117,15 @@ sequenceDiagram
 `LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `AgentService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
+
+`LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
+
+## 文件读写边界
+
+- 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml` 与 `SOULS.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
+- Agent 默认输出根是 `~/.tech-forge/workspace/` 或用户设置的其他绝对路径。`read` 可读取任意来源的普通文件；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
+- 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
+- `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 
 Renderer 的会话摘要通过 `GET /api/conversations` 读取。选中会话时，`GET /api/conversations/:conversationId/messages` 默认返回最近最多 30 条可见 user/assistant 纯文本和 `hasMore`；用户点击“查看更早的消息”后，Renderer 以最早已加载消息 ID 查询前一页并前置到 LocalRuntime。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload。该 UI 分页不改变下一轮 Agent 请求从 SQLite 恢复完整模型历史的行为。
 
@@ -134,7 +148,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
 2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
 3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `AgentStreamEvent`、桥接校验和 adapter。
-4. 工具操作必须限制在 backend 配置的工作区。当前通过 `workspace-file-tools.ts` 启用原生 `read`、`edit`、`write` 工具；`bash`、`subagent`、`subagents_enable` 被排除。不得增加绕开此边界的能力。
+4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/SOULS；创建、编辑和建目录默认必须位于 backend 配置的 Agent workspace。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 
@@ -149,6 +163,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`
 - 会话侧栏与 Renderer 查询状态：`apps/desktop/src/features/agent/AgentChatPage.tsx`、`ConversationSidebar.tsx`、`conversation-store.ts`
+- 本机设置 UI 和 backend 文件配置：`apps/desktop/src/features/settings/SettingsPage.tsx`、`apps/backend/src/settings/`
 
 ## Pi SDK 官方文档
 

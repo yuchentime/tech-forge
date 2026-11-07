@@ -1,11 +1,23 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
+/** Supplies model fields used to register the DeepSeek OpenAI-compatible API. */
+export interface DeepseekAdapterSettings {
+  modelId: string;
+  apiKey: string;
+}
+
+/** Supplies model fields used to register a user-defined OpenAI-compatible API. */
+export interface CustomAdapterSettings {
+  name: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}
+
 /** Connects one provider's configuration to the Pi SDK model runtime. */
-export interface LLMAdapter {
+export interface LLMAdapter<TSettings> {
   readonly providerId: string;
-  register(runtime: ModelRuntime): void;
-  isConfigured(): boolean;
-  getConfigurationError(): string | undefined;
+  register(runtime: ModelRuntime, settings: TSettings): void;
 }
 
 export type PiProviderConfig = Parameters<ModelRuntime['registerProvider']>[1];
@@ -17,6 +29,7 @@ export const CUSTOM_PROVIDER_ID = 'custom';
 
 const defaultCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+/** Builds the Pi model descriptor for one OpenAI-compatible chat completion model. */
 export function createOpenAiCompatibleModel(
   id: string,
   name: string,

@@ -3,35 +3,26 @@ import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   createOpenAiCompatibleModel,
   DEEPSEEK_BASE_URL,
-  DEEPSEEK_MODEL_ID,
   DEEPSEEK_PROVIDER_ID,
   type LLMAdapter,
   type PiProviderConfig,
+  type DeepseekAdapterSettings,
 } from './llm-adapter';
 
+/** Registers the selected DeepSeek model from user-owned local settings. */
 @Injectable()
-export class DeepseekLLMAdapter implements LLMAdapter {
+export class DeepseekLLMAdapter implements LLMAdapter<DeepseekAdapterSettings> {
   readonly providerId = DEEPSEEK_PROVIDER_ID;
-  private readonly apiKey = process.env.DEEPSEEK_API_KEY ?? 'sk-564a13cf77f34c5e88d064e99551f0af';
 
-  register(runtime: ModelRuntime): void {
+  /** Adds the configured DeepSeek credentials and model to one Pi runtime. */
+  register(runtime: ModelRuntime, settings: DeepseekAdapterSettings): void {
     const config: PiProviderConfig = {
       name: 'DeepSeek',
       baseUrl: DEEPSEEK_BASE_URL,
       api: 'openai-completions',
-      apiKey: this.apiKey,
-      models: [createOpenAiCompatibleModel(DEEPSEEK_MODEL_ID, 'DeepSeek Flash')],
+      apiKey: settings.apiKey,
+      models: [createOpenAiCompatibleModel(settings.modelId, settings.modelId)],
     };
     runtime.registerProvider(this.providerId, config);
-  }
-
-  isConfigured(): boolean {
-    return Boolean(this.apiKey);
-  }
-
-  getConfigurationError(): string | undefined {
-    return this.isConfigured()
-      ? undefined
-      : 'Set DEEPSEEK_API_KEY to use the DeepSeek provider.';
   }
 }

@@ -14,6 +14,7 @@ import { MemoryModule } from './memory/memory.module';
 import { PlatformModule } from './platform/platform.module';
 import { RehearsalsModule } from './rehearsals/rehearsals.module';
 import { RetrievalModule } from './retrieval/retrieval.module';
+import { SettingsModule } from './settings/settings.module';
 import { TeachingModule } from './teaching/teaching.module';
 
 /** Composes the active backend platform and domain modules. */
@@ -28,6 +29,7 @@ import { TeachingModule } from './teaching/teaching.module';
     EmbeddingModule,
     ConversationsModule,
     RehearsalsModule,
+    SettingsModule,
     AssessmentsModule,
     ArtifactsModule,
     MemoryModule,

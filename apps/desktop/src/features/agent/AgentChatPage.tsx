@@ -27,6 +27,7 @@ import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ConversationSidebar } from './ConversationSidebar';
 import { toThreadMessage } from './conversation-history';
+import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   conversationStore,
@@ -47,6 +48,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     agentEventBus.getTurnSnapshots,
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
@@ -298,134 +300,146 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       <ConversationSidebar
         isBusy={isRunning || isHistoryLoading || isInitialListLoading}
+        isSettingsOpen={isSettingsOpen}
         loadingConversationId={loadingConversationId}
-        onNewConversation={startNewConversation}
+        onNewConversation={() => {
+          setIsSettingsOpen(false);
+          startNewConversation();
+        }}
         onRefresh={() => void conversationStore.refresh()}
-        onSelect={(conversationId) => void loadConversation(conversationId)}
+        onSelect={(conversationId) => {
+          setIsSettingsOpen(false);
+          void loadConversation(conversationId);
+        }}
+        onToggleSettings={() => setIsSettingsOpen((open) => !open)}
         state={conversationState}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
-        <header className="mb-3 flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-3 md:mb-4 md:pb-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
-            <p className="mt-1 text-sm text-stone-500">对话上下文保存在本机，重启后可继续提问。</p>
-          </div>
-        </header>
-
-        {historyError && (
-          <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
-            <span className="min-w-0 flex-1">{historyError}</span>
-            {historyErrorConversationId && (
-              <button
-                className="shrink-0 font-medium underline underline-offset-2"
-                onClick={() => void loadConversation(historyErrorConversationId)}
-                type="button"
-              >
-                重试
-              </button>
-            )}
-          </div>
-        )}
-
-        {isHistoryLoading || isInitialListLoading ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
-            {isInitialListLoading
-              ? conversationState.listStatus === 'error'
-                ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
-                : '正在加载对话列表…'
-              : '正在加载历史消息…'}
-          </div>
-        ) : (
-          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <ThreadPrimitive.Viewport
-              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
-              ref={messageViewportRef}
-            >
-              {hasEarlierMessages && (
-                <div className="flex shrink-0 flex-col items-center gap-2 py-2">
-                  {earlierMessagesError && (
-                    <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
-                      <span>{earlierMessagesError}</span>
-                      <button
-                        className="font-medium underline underline-offset-2"
-                        disabled={isLoadingEarlierMessages}
-                        onClick={() => void loadEarlierMessages()}
-                        type="button"
-                      >
-                        重试
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    className="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-600 transition hover:border-stone-400 hover:text-stone-900 disabled:cursor-wait disabled:opacity-50"
-                    disabled={isLoadingEarlierMessages || isRunning}
-                    onClick={() => void loadEarlierMessages()}
-                    type="button"
-                  >
-                    {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
-                  </button>
-                </div>
-              )}
-
-              <AuiIf condition={(state) => state.thread.isEmpty}>
-                <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
-                  <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
-                  <p className="mt-2 text-sm leading-6 text-stone-500">
-                    例如：帮我用一个生活中的例子解释缓存雪崩。
-                  </p>
-                </div>
-              </AuiIf>
-
-              <ThreadPrimitive.Messages>
-                {({ message }) => {
-                  if (message.role === 'user') {
-                    return (
-                      <div className="space-y-4" key={message.id}>
-                        <UserMessage />
-                        <AgentActivity activity={activity[message.id]} />
-                      </div>
-                    );
-                  }
-
-                  return <AssistantMessage key={message.id} />;
-                }}
-              </ThreadPrimitive.Messages>
-            </ThreadPrimitive.Viewport>
-
-            <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
-              <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
-                <ComposerPrimitive.Input
-                  aria-label="发送给备课助手"
-                  className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
-                  disabled={isLoadingEarlierMessages}
-                  placeholder="写下你正在准备的内容或问题…"
-                  rows={3}
-                  submitMode="ctrlEnter"
-                />
-                <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
-                  <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
-                  <div className="flex items-center gap-2">
-                    <AuiIf condition={(state) => state.thread.isRunning}>
-                      <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
-                        停止生成
-                      </ComposerPrimitive.Cancel>
-                    </AuiIf>
-                    <AuiIf condition={(state) => !state.thread.isRunning}>
-                      <ComposerPrimitive.Send
-                        className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={isLoadingEarlierMessages}
-                      >
-                        发送
-                      </ComposerPrimitive.Send>
-                    </AuiIf>
-                  </div>
-                </div>
-              </ComposerPrimitive.Root>
+      {isSettingsOpen ? (
+        <SettingsPage />
+      ) : (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
+          <header className="mb-3 flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-3 md:mb-4 md:pb-4">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
+              <p className="mt-1 text-sm text-stone-500">对话上下文保存在本机，重启后可继续提问。</p>
             </div>
-          </ThreadPrimitive.Root>
-        )}
-      </div>
+          </header>
+
+          {historyError && (
+            <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+              <span className="min-w-0 flex-1">{historyError}</span>
+              {historyErrorConversationId && (
+                <button
+                  className="shrink-0 font-medium underline underline-offset-2"
+                  onClick={() => void loadConversation(historyErrorConversationId)}
+                  type="button"
+                >
+                  重试
+                </button>
+              )}
+            </div>
+          )}
+
+          {isHistoryLoading || isInitialListLoading ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
+              {isInitialListLoading
+                ? conversationState.listStatus === 'error'
+                  ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
+                  : '正在加载对话列表…'
+                : '正在加载历史消息…'}
+            </div>
+          ) : (
+            <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ThreadPrimitive.Viewport
+                className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
+                ref={messageViewportRef}
+              >
+                {hasEarlierMessages && (
+                  <div className="flex shrink-0 flex-col items-center gap-2 py-2">
+                    {earlierMessagesError && (
+                      <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
+                        <span>{earlierMessagesError}</span>
+                        <button
+                          className="font-medium underline underline-offset-2"
+                          disabled={isLoadingEarlierMessages}
+                          onClick={() => void loadEarlierMessages()}
+                          type="button"
+                        >
+                          重试
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      className="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-600 transition hover:border-stone-400 hover:text-stone-900 disabled:cursor-wait disabled:opacity-50"
+                      disabled={isLoadingEarlierMessages || isRunning}
+                      onClick={() => void loadEarlierMessages()}
+                      type="button"
+                    >
+                      {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
+                    </button>
+                  </div>
+                )}
+
+                <AuiIf condition={(state) => state.thread.isEmpty}>
+                  <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
+                    <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
+                    <p className="mt-2 text-sm leading-6 text-stone-500">
+                      例如：帮我用一个生活中的例子解释缓存雪崩。
+                    </p>
+                  </div>
+                </AuiIf>
+
+                <ThreadPrimitive.Messages>
+                  {({ message }) => {
+                    if (message.role === 'user') {
+                      return (
+                        <div className="space-y-4" key={message.id}>
+                          <UserMessage />
+                          <AgentActivity activity={activity[message.id]} />
+                        </div>
+                      );
+                    }
+
+                    return <AssistantMessage key={message.id} />;
+                  }}
+                </ThreadPrimitive.Messages>
+              </ThreadPrimitive.Viewport>
+
+              <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
+                <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+                  <ComposerPrimitive.Input
+                    aria-label="发送给备课助手"
+                    className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
+                    disabled={isLoadingEarlierMessages}
+                    placeholder="写下你正在准备的内容或问题…"
+                    rows={3}
+                    submitMode="ctrlEnter"
+                  />
+                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
+                    <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                    <div className="flex items-center gap-2">
+                      <AuiIf condition={(state) => state.thread.isRunning}>
+                        <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+                          停止生成
+                        </ComposerPrimitive.Cancel>
+                      </AuiIf>
+                      <AuiIf condition={(state) => !state.thread.isRunning}>
+                        <ComposerPrimitive.Send
+                          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={isLoadingEarlierMessages}
+                        >
+                          发送
+                        </ComposerPrimitive.Send>
+                      </AuiIf>
+                    </div>
+                  </div>
+                </ComposerPrimitive.Root>
+              </div>
+            </ThreadPrimitive.Root>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { ArrowClockwise, ChatCircle, Plus } from '@phosphor-icons/react';
+import { ArrowClockwise, ChatCircle, GearSix, Plus } from '@phosphor-icons/react';
 import type {
   ConversationStoreSnapshot,
   ConversationSummary,
@@ -12,6 +12,8 @@ export function ConversationSidebar({
   onNewConversation,
   onRefresh,
   onSelect,
+  isSettingsOpen,
+  onToggleSettings,
 }: {
   state: ConversationStoreSnapshot;
   isBusy: boolean;
@@ -19,6 +21,8 @@ export function ConversationSidebar({
   onNewConversation: () => void;
   onRefresh: () => void;
   onSelect: (conversationId: string) => void;
+  isSettingsOpen: boolean;
+  onToggleSettings: () => void;
 }) {
   return (
     <aside
@@ -89,6 +93,24 @@ export function ConversationSidebar({
           </ul>
         )}
       </div>
+
+      <footer className="shrink-0 border-t border-stone-200 px-2 py-2">
+        <button
+          aria-label={isSettingsOpen ? '返回对话' : '打开设置'}
+          aria-pressed={isSettingsOpen}
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 ${
+            isSettingsOpen
+              ? 'bg-stone-200 text-stone-900'
+              : 'text-stone-600 hover:bg-stone-200/70 hover:text-stone-900'
+          }`}
+          onClick={onToggleSettings}
+          title={isSettingsOpen ? '返回对话' : '设置'}
+          type="button"
+        >
+          <GearSix aria-hidden="true" className="size-4 shrink-0" />
+          <span>设置</span>
+        </button>
+      </footer>
     </aside>
   );
 }

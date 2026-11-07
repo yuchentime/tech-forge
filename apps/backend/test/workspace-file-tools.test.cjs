@@ -62,7 +62,7 @@ test('writes at workspace root without mkdir and creates nested workspace folder
   );
 });
 
-test('rejects absolute and traversal paths outside the workspace for each file tool', async (t) => {
+test('reads external files but rejects ungranted external writes and edits', async (t) => {
   const { parent, workspace } = await createWorkspace(t);
   const outsideFile = path.join(parent, 'outside.txt');
   await fs.writeFile(outsideFile, 'original', 'utf8');
@@ -80,10 +80,7 @@ test('rejects absolute and traversal paths outside the workspace for each file t
     executeTool(writeTool, { path: path.join('..', 'outside.txt'), content: 'changed' }, workspace),
     (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
   );
-  await assert.rejects(
-    executeTool(readTool, { path: outsideFile }, workspace),
-    (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
-  );
+  await executeTool(readTool, { path: outsideFile }, workspace);
   await assert.rejects(
     executeTool(
       editTool,

@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
-import {
-  DEEPSEEK_MODEL_ID,
-  DEEPSEEK_PROVIDER_ID,
-} from '../llm/adapters/llm-adapter';
 import { ConversationsService } from '../conversations/conversations.service';
 import { LlmService } from '../llm/llm.service';
 import {
@@ -152,14 +148,10 @@ export class AgentService {
       const llmStartedAt = Date.now();
       writeStructuredEvent(this.logger, 'log', 'agent.llm.stream.started', {
         ...logContext,
-        providerId: DEEPSEEK_PROVIDER_ID,
-        modelId: DEEPSEEK_MODEL_ID,
         historyMessageCount: turn.history.length,
       });
       const piEvents = this.llm.stream(prompt, {
         requestId,
-        providerId: DEEPSEEK_PROVIDER_ID,
-        modelId: DEEPSEEK_MODEL_ID,
         signal,
         conversation: {
           id: resolvedConversationId,
