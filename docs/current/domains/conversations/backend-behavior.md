@@ -44,9 +44,11 @@ last_verified: 2026-11-07
 Conversation 查询接口由 `ConversationsController` 暴露，并经现有本地 token 与 loopback HTTP 边界访问：
 
 - `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要。标题优先使用非空 `Conversation.title`，否则使用首条 user 消息的文本（折叠空白并限制为 80 个字符），没有文本时为 `新对话`。该读取不回写标题。
-- `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。消息只包括 `user`/`assistant` 角色和 `completed`/`failed`/`cancelled` 状态，按 `sequenceNo ASC` 返回 `id`、`role`、纯文本 `content`、`status`、`createdAt`。不存在的会话不隐式创建。
+- `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。默认读取最近最多 30 条有可见文本的 `user`/`assistant` 终态消息，按 `sequenceNo ASC` 返回 `{ messages, hasMore }`。最多向后端查询 31 条可见消息以准确计算 `hasMore`，响应仍最多 30 条。
+- 可选 `beforeMessageId` 必须是目标会话中的现存 Message ID。服务定位该行的 `sequenceNo`，严格读取它之前最近一页；非法 UUID 或跨会话/不存在的游标返回 400。页间使用稳定消息 ID，不使用可能漂移的 offset。
+- 候选行按 `sequenceNo DESC` 分批读取并在后端投影为可见文本，直到获得 31 条或耗尽候选，再将最多 30 条反转为升序。查询仍只读本地 SQLite，不更改模型侧的全量历史读取。
 - 消息查询仅输出文本内容；内部 `toolExecution`、`toolResult`、`assistantTurn`、pending 状态、thinking 和工具调用内容不进入 API 响应。无可显示文本的 assistant 行会被省略。
-- 列表和消息历史当前全部读取，不分页；空列表返回 `[]`，空历史返回 `[]`。
+- 会话列表仍完整返回；消息历史固定分页。空列表返回 `[]`，无可见历史时返回 `messages: []` 且 `hasMore: false`。
 
 ## 诊断日志
 
@@ -56,6 +58,6 @@ Agent 请求由 `AgentController` 生成 `requestId`，沿轮次编排、Pi/LLM 
 
 - 同一对话的串行化只覆盖当前 backend 进程，不适用于多进程并发写入场景。
 - 进程崩溃不会恢复同一个 provider 调用；清理和历史对账在该 Conversation 的下一次请求开始时执行。
-- 每次请求读取完整历史；长对话可能超过模型上下文窗口。当前没有持久化摘要或裁剪。
+- Agent 每次新请求仍从 SQLite 读取完整可恢复历史，不因 Renderer 的 30 条页面而截断；长对话仍可能超过模型上下文窗口。当前没有持久化摘要或裁剪。
 - 中断时工具产生的外部副作用无法回滚；恢复会为无结果调用写入错误 toolResult，避免自动重复执行。
 - Renderer localStorage 只保存一个活动对话 ID；Agent 页面启动时读取列表并恢复该 ID 的可见消息，用户可通过侧栏加载其他会话。

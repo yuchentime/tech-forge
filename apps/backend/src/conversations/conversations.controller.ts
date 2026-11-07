@@ -1,10 +1,18 @@
-import { Controller, Get, Logger, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Logger,
+  Param,
+  ParseUUIDPipe,
+  Query,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ConversationsService } from './conversations.service';
 import type {
-  ConversationMessageDto,
+  ConversationMessagePageDto,
   ConversationSummaryDto,
 } from './conversation-query.dto';
+import { ConversationMessagesQueryDto } from './conversation-query.dto';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
 
 /** Exposes read-only conversation summaries and visible message history. */
@@ -41,22 +49,26 @@ export class ConversationsController {
     }
   }
 
-  /** Returns visible user and assistant text for one existing UUIDv4 conversation. */
+  /** Returns one bounded visible-message page for an existing UUIDv4 conversation. */
   @Get(':conversationId/messages')
   getMessages(
     @Param('conversationId', new ParseUUIDPipe({ version: '4' }))
     conversationId: string,
-  ): Promise<ConversationMessageDto[]> {
+    @Query() query: ConversationMessagesQueryDto,
+  ): Promise<ConversationMessagePageDto> {
     const requestId = randomUUID();
     const startedAt = Date.now();
     writeStructuredEvent(
       this.logger,
       'log',
       'conversations.http.messages.accepted',
-      { requestId, conversationId },
+      { requestId, conversationId, hasCursor: Boolean(query.beforeMessageId) },
     );
     return this.conversations
-      .getConversationMessages(conversationId, { requestId, conversationId })
+      .getConversationMessages(conversationId, query.beforeMessageId, {
+        requestId,
+        conversationId,
+      })
       .then((result) => {
         writeStructuredEvent(
           this.logger,
@@ -65,7 +77,8 @@ export class ConversationsController {
           {
             requestId,
             conversationId,
-            messageCount: result.length,
+            messageCount: result.messages.length,
+            hasMore: result.hasMore,
             elapsedMs: Date.now() - startedAt,
           },
         );

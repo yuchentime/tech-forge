@@ -16,7 +16,7 @@ last_verified: 2026-11-07
 ## Scope
 
 - 覆盖本地个人工作台中 Agent 会话摘要列表与选中会话历史读取。
-- 不包含会话创建、重命名、删除、分页、工具活动或 Pi 原始消息格式。
+- 不包含会话创建、重命名、删除、摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史按固定页大小读取。
 - 两个端点通过现有 Electron JSON bridge 调用，并受本地随机 token 和 loopback origin 检查保护；当前产品为单人 Personal Agent，没有用户或租户参数。
 - 当前没有单独的跨领域 API conventions 页面；响应遵循本项目现有 JSON bridge 的 `{ status, data }` 包装。
 
@@ -25,7 +25,7 @@ last_verified: 2026-11-07
 - JSON 字段使用 camelCase。
 - 时间以 ISO 8601 字符串返回。
 - Conversation 与 Message ID 使用 UUIDv4。
-- 接口只读 SQLite；列表与消息历史均返回完整数组，目前不分页。
+- 接口只读 SQLite；摘要列表完整返回，消息历史每页最多返回 30 条并提供 hasMore。
 
 ## Conversation Query API
 
@@ -99,7 +99,7 @@ HTTP 200 的响应体为 Conversation 摘要数组；无记录时为空数组。
 
 - **方法**：`GET`
 - **路径**：`/api/conversations/:conversationId/messages`
-- **功能职责**：用户选中侧栏会话时，加载完整可见文本历史并替换 Agent LocalRuntime 当前线程。
+- **功能职责**：用户选中侧栏会话时，加载最近一页可见文本；用户可按需继续读取更早内容。
 - **鉴权/归属**：经 Electron 本地认证桥接调用；只读取给定 ID 的本地 Conversation。
 
 #### Request Summary
@@ -107,6 +107,7 @@ HTTP 200 的响应体为 Conversation 摘要数组；无记录时为空数组。
 | 位置 | 名称 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
 | Path | `conversationId` | `String` | 是 | 要读取的 Conversation UUIDv4。 |
+| Query | `beforeMessageId` | `String` | 否 | 同一 Conversation 中的消息 ID；读取其之前最近一页。缺省时读取最新一页。 |
 | Header | `x-teachforge-token` | `String` | 是 | Electron Main 注入的本地随机 token；Renderer 不直接接触 token。 |
 
 #### Request Schema
@@ -123,40 +124,50 @@ HTTP 200 的响应体为 Conversation 摘要数组；无记录时为空数组。
 |---|---|---|---|---|---|---|
 | `conversationId` | `String` | 是 | URL path | 要读取的 Conversation ID | UUIDv4 | 缺失或格式错误返回 400 |
 
-##### Query Params / Request Body
+##### Query Params
+
+| 字段 | 类型 | 必填 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|
+| `beforeMessageId` | `String` | 否 | 查询此消息之前更早的一页 | 属于目标 Conversation 的 Message UUIDv4 | 缺省时读取最近一页 |
+
+##### Request Body
 
 无。
 
 #### Response Schema
 
-HTTP 200 的响应体为按 `sequenceNo ASC` 排列的可见消息数组；无可见消息时为空数组。Electron JSON bridge 会将 HTTP 状态和响应体包装为 `{ "status": 200, "data": [...] }`。
+HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，最多 30 条；`hasMore` 表示是否还有更早的可见消息。Electron JSON bridge 会将 HTTP 状态和响应体包装为 `{ "status": 200, "data": { "messages": [...], "hasMore": true } }`。
 
 ```json
-[
-  {
-    "id": "4b4f9b9b-1789-45c6-9afd-54f4ca881cf5",
-    "role": "user",
-    "content": "帮我设计一节关于缓存的课",
-    "status": "completed",
-    "createdAt": "2026-11-07T02:30:00.000Z"
-  },
-  {
-    "id": "a9efeaeb-8bfd-43dc-a311-461f18f9dadb",
-    "role": "assistant",
-    "content": "可以从缓存击穿、雪崩和穿透三个概念展开。",
-    "status": "completed",
-    "createdAt": "2026-11-07T02:30:05.000Z"
-  }
-]
+{
+  "messages": [
+    {
+      "id": "4b4f9b9b-1789-45c6-9afd-54f4ca881cf5",
+      "role": "user",
+      "content": "帮我设计一节关于缓存的课",
+      "status": "completed",
+      "createdAt": "2026-11-07T02:30:00.000Z"
+    },
+    {
+      "id": "a9efeaeb-8bfd-43dc-a311-461f18f9dadb",
+      "role": "assistant",
+      "content": "可以从缓存击穿、雪崩和穿透三个概念展开。",
+      "status": "completed",
+      "createdAt": "2026-11-07T02:30:05.000Z"
+    }
+  ],
+  "hasMore": true
+}
 ```
 
 | 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
 |---|---|---|---|---|---|---|
-| `[]` | `ConversationMessage[]` | 是 | ConversationsService 消息投影 | 当前 Conversation 的可见消息 | JSON 数组，按消息序号升序 | 无可见文本消息时为 `[]` |
+| `messages` | `ConversationMessage[]` | 是 | ConversationsService 消息投影 | 当前页的可见消息 | 最多 30 条，按消息序号升序 | 无可见文本消息时为 `[]` |
+| `hasMore` | `Boolean` | 是 | ConversationsService 分页查询 | 是否还有更早的可见消息 | `true` / `false` | 不为空 |
 
 #### Nested Objects
 
-##### `[]` (`ConversationMessage`)
+##### `messages[]` (`ConversationMessage`)
 
 | 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
 |---|---|---|---|---|---|---|
@@ -171,6 +182,8 @@ HTTP 200 的响应体为按 `sequenceNo ASC` 排列的可见消息数组；无�
 | 场景 | code | 说明 |
 |---|---|---|
 | `conversationId` 不是 UUIDv4 | `400` | `ParseUUIDPipe` 在 Service 查询前拒绝该路径参数。 |
+| `beforeMessageId` 不是 UUIDv4 | `400` | Query DTO 校验在 Service 查询前拒绝游标。 |
+| 游标不存在或属于其他会话 | `400` | 不接受不存在或跨 Conversation 的锚点，避免错误分页或跨会话数据访问。 |
 | ID 格式正确但 Conversation 不存在 | `404` | 返回 not found；不会创建 Conversation 或消息。 |
 | 本地 token 缺失或错误 | `401` | 后端拒绝未认证的本地请求。 |
 | 请求带有 Origin header | `403` | 后端拒绝来自浏览器跨域路径的请求。 |
@@ -179,5 +192,5 @@ HTTP 200 的响应体为按 `sequenceNo ASC` 排列的可见消息数组；无�
 
 - 返回 `user` 与 `assistant` 的 `completed`、`failed`、`cancelled` 终态文本，按 `sequenceNo ASC` 排列。
 - 不返回 `toolExecution`、`toolResult`、`assistantTurn`、pending 行、thinking、工具调用参数、原始 `contentJson` 或非文本 Pi blocks。
-- 当前不分页，响应历史完整文本；工具活动只显示当前运行时事件，恢复历史时不重建工具活动 UI。
+- 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。工具活动只显示当前运行时事件，恢复历史时不重建工具活动 UI。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。

@@ -114,7 +114,7 @@ routes:
       - docs/changes/2026-11-07-conversation-session-persistence/worklog.md
     history_on_demand: []
   conversation-history-sidebar:
-    description: "Read Conversation history into desktop Agent UI; diagnose HTTP-success/UI-failure across Electron IPC and runtime message conversion"
+    description: "Read and page Conversation history in the desktop Agent UI; keep chat scroll bounded and diagnose HTTP-success/UI-failure across Electron IPC and runtime message conversion"
     token_budget: 18000
     code_globs:
       - "apps/backend/src/conversations/**"
@@ -135,6 +135,8 @@ routes:
       - docs/current/platform/architecture-and-code-placement.md
       - docs/changes/2026-11-07-conversation-history-sidebar/worklog.md
       - docs/changes/2026-11-07-conversation-history-sidebar/handoff.md
+      - docs/changes/2026-11-07-agent-chat-layout-history-pagination/design.md
+      - docs/changes/2026-11-07-agent-chat-layout-history-pagination/verification.md
       - docs/changes/2026-11-07-conversation-session-persistence/design.md
       - docs/changes/2026-11-07-conversation-session-persistence/verification.md
     history_on_demand:

@@ -17,6 +17,12 @@ export interface ConversationHistoryMessage {
   createdAt: string;
 }
 
+/** Describes one bounded history page and whether an earlier page remains. */
+export interface ConversationHistoryPage {
+  messages: ConversationHistoryMessage[];
+  hasMore: boolean;
+}
+
 /** Exposes conversation list state to the Agent page and streamed adapter. */
 export interface ConversationStoreSnapshot {
   conversations: readonly ConversationSummary[];

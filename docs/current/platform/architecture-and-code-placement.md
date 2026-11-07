@@ -68,10 +68,10 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 | 位置 | 当前内容 | 后续边界 |
 |---|---|---|
 | `apps/desktop/src/main.tsx` | React renderer 入口，挂载 `App` 和全局样式 | 保持为应用启动与根组件装配点 |
-| `apps/desktop/src/App.tsx` | 装配常驻的 Agent `LocalRuntime`，提供 Agent/Course 标签、health、Course 列表和创建原型 | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
-| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；`ConversationSidebar` 负责切换和新建；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；选中历史后仅恢复 user/assistant 文本，不恢复旧工具活动 |
+| `apps/desktop/src/App.tsx` | 装配 Agent `LocalRuntime`、`AssistantRuntimeProvider` 与占满窗口的 `AgentChatPage` | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
+| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换和新建；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；选中历史后仅恢复 user/assistant 文本，不恢复旧工具活动 |
 | `apps/desktop/src/types/desktop-bridge.ts` 与 `agent-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
-| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
+| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
 | `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
@@ -83,7 +83,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | 模块 | 应拥有的业务责任 | 扫描到的实现状态 |
 |---|---|---|
 | `platform` / `health` | 进程级能力及健康状态 | `PlatformModule` 装配 `HealthModule`；当前提供 health endpoint |
-| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供 `GET /api/conversations` 摘要列表和 `GET /api/conversations/:id/messages` 可见文本历史；Entity 与 `ConversationsService` 管理 SQLite 持久化、查询投影、pending 对账及 Pi 历史恢复 |
+| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供 `GET /api/conversations` 摘要列表和 `GET /api/conversations/:id/messages` 每页最多 30 条的可见文本历史；Entity 与 `ConversationsService` 管理 SQLite 持久化、查询投影、pending 对账及 Pi 历史恢复 |
 | `rehearsals` | Rehearsal/RehearsalTurn、提问、回答和轮次评估 | Entity 已注册；Service 为空壳。评估直接属于 RehearsalTurn |
 | `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | Entity 已注册；Service 为空壳，文件导入和检索流程未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
@@ -121,7 +121,7 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
 - Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并按 SSE 帧增量解析，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 可收到 `conversation` 元数据、`agent_start`、`turn_start/end`、`tool_execution_start/end`、text-only `message_update`、`agent_end` 与安全终态事件；未知事件和非白名单字段不会穿过桌面桥，Renderer 不能指定本地 HTTP 地址或读取 token。
 - Agent 页面使用 `@assistant-ui/react` 的本地运行时和 Renderer `AgentEventBus`。每轮工具活动以 user message id 为键保存在进程内；页面按消息 id 读取对应活动，避免新轮覆盖旧轮。活动显示在对应用户消息下方，默认展开且可折叠；标题显示本轮动态/最终耗时，工具行仅呈现安全动作、路径和状态，不显示工具参数或结果。助手回答使用 `@assistant-ui/react-markdown` 的 `MarkdownTextPrimitive` 渲染 GFM Markdown，移除外层卡片边框；Renderer 阻止不安全 URL scheme 与图片加载。文本 delta 仍累积到 assistant-ui 回答。
-- `ConversationStore` 在 Agent 页面启动时加载 `/api/conversations`，在 localStorage 保存活动 conversation ID，并在会话选择时从 `/api/conversations/:id/messages` 加载可见历史后调用 `runtime.thread.reset()`；新建空线程会清除活动 ID。列表在会话元数据事件和流终止后刷新。选中历史时不恢复先前工具活动。
+- `ConversationStore` 在 Agent 页面启动时加载 `/api/conversations`，在 localStorage 保存活动 conversation ID，并在会话选择时从 `/api/conversations/:id/messages` 加载最近最多 30 条可见历史后调用 `runtime.thread.reset()`；`beforeMessageId` 支持按需读取并前置更早消息。新建空线程会清除活动 ID。列表在会话元数据事件和流终止后刷新。选中历史时不恢复先前工具活动。
 - Backend 将用户消息和 Pi assistant/toolResult 原生消息按事件写入 SQLite，工具执行状态单独记录；Pi `SessionManager.inMemory()` 在后续请求恢复所有历史消息。下一请求会对账中断行和未完成 tool call，不会重启原 provider 调用。
 - Pi session 使用 SDK 原生 `read`、`edit`、`write` 工具定义，并通过 `src/llm/tools/workspace-file-tools.ts` 将文件 I/O 限制到 backend `process.cwd()` 的真实目录内；工作区根层写文件不会执行根目录 `mkdir`，允许创建子目录，越界路径与符号链接路径被拒绝。工作区内不需要逐次授权。为避免绕过边界，`bash`、`subagent`、`subagents_enable` 不可用。创建 session 前会 reload resource loader，再装载 allowlist 中的 `billion-context-pi` 和 `pi-subagents` 扩展。开发环境 Electron 将 backend cwd 设为 `apps/backend/dist`；打包版工作区可写性尚未验证，应在面向用户前配置专用可写目录。真实 Electron 验证曾观察到工具任务后 backend 子进程异常退出，Pi SDK 扩展 loader 报 stale-context guard；根因未确认，详见本变更 L004 验证记录。
 

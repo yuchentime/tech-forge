@@ -1,7 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
-import { DataSource, In, type EntityManager } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import {
   createAssistantTurnMarker,
   createRecoveredToolResult,
@@ -17,6 +22,7 @@ import {
 import { ConversationEntity } from './conversation.entity';
 import { MessageEntity } from './message.entity';
 import type {
+  ConversationMessagePageDto,
   ConversationMessageDto,
   ConversationSummaryDto,
 } from './conversation-query.dto';
@@ -25,6 +31,9 @@ import {
   writeStructuredEvent,
   type RequestLogContext,
 } from '../logging/structured-logger';
+
+const CONVERSATION_HISTORY_PAGE_SIZE = 30;
+const CONVERSATION_HISTORY_SCAN_BATCH_SIZE = 64;
 
 /** Carries the ordered history and turn marker for one Agent request. */
 export interface ConversationTurn {
@@ -125,13 +134,18 @@ export class ConversationsService {
     }
   }
 
-  /** Returns ordered text-only chat messages for one existing conversation. */
+  /** Returns one ordered text-only message page for an existing conversation. */
   async getConversationMessages(
     conversationId: string,
+    beforeMessageId?: string,
     logContext?: RequestLogContext,
-  ): Promise<ConversationMessageDto[]> {
+  ): Promise<ConversationMessagePageDto> {
     const startedAt = Date.now();
-    const context = { ...logContext, conversationId };
+    const context = {
+      ...logContext,
+      conversationId,
+      hasCursor: Boolean(beforeMessageId),
+    };
     writeStructuredEvent(
       this.logger,
       'log',
@@ -152,42 +166,101 @@ export class ConversationsService {
         throw new NotFoundException('Conversation was not found.');
       }
 
-      const messages = await this.dataSource.getRepository(MessageEntity).find({
-        where: {
+      const messages = this.dataSource.getRepository(MessageEntity);
+      let beforeSequenceNo: number | null = null;
+      if (beforeMessageId) {
+        const anchor = await messages.findOneBy({
+          id: beforeMessageId,
           conversationId,
-          role: In(['user', 'assistant']),
-          status: In(['completed', 'failed', 'cancelled']),
-        },
-        order: { sequenceNo: 'ASC' },
-      });
+        });
+        if (!anchor) {
+          throw new BadRequestException(
+            'beforeMessageId must belong to the requested conversation.',
+          );
+        }
+        beforeSequenceNo = anchor.sequenceNo;
+      }
 
-      const result = messages.flatMap((message) => {
-        const content = extractVisibleMessageText(message.contentJson);
-        if (!content.trim()) return [];
-        return [
-          {
+      const visibleRows: Array<{
+        message: MessageEntity;
+        content: string;
+      }> = [];
+      let scannedMessageCount = 0;
+      let queryBatchCount = 0;
+      let hasExhaustedCandidates = false;
+
+      while (
+        visibleRows.length < CONVERSATION_HISTORY_PAGE_SIZE + 1 &&
+        !hasExhaustedCandidates
+      ) {
+        const query = messages
+          .createQueryBuilder('message')
+          .where('message.conversationId = :conversationId', { conversationId })
+          .andWhere('message.role IN (:...roles)', {
+            roles: ['user', 'assistant'],
+          })
+          .andWhere('message.status IN (:...statuses)', {
+            statuses: ['completed', 'failed', 'cancelled'],
+          });
+        if (beforeSequenceNo !== null) {
+          query.andWhere('message.sequenceNo < :beforeSequenceNo', {
+            beforeSequenceNo,
+          });
+        }
+
+        const batch = await query
+          .orderBy('message.sequenceNo', 'DESC')
+          .take(CONVERSATION_HISTORY_SCAN_BATCH_SIZE)
+          .getMany();
+        queryBatchCount += 1;
+        scannedMessageCount += batch.length;
+        hasExhaustedCandidates =
+          batch.length < CONVERSATION_HISTORY_SCAN_BATCH_SIZE;
+
+        for (const message of batch) {
+          beforeSequenceNo = message.sequenceNo;
+          const content = extractVisibleMessageText(message.contentJson);
+          if (!content.trim()) continue;
+          visibleRows.push({ message, content });
+          if (visibleRows.length === CONVERSATION_HISTORY_PAGE_SIZE + 1) break;
+        }
+      }
+
+      const hasMore = visibleRows.length > CONVERSATION_HISTORY_PAGE_SIZE;
+      const result: ConversationMessagePageDto = {
+        messages: visibleRows
+          .slice(0, CONVERSATION_HISTORY_PAGE_SIZE)
+          .reverse()
+          .map(({ message, content }): ConversationMessageDto => ({
             id: message.id,
             role: message.role as 'user' | 'assistant',
             content,
             status: message.status as ConversationMessageDto['status'],
             createdAt: message.createdAt.toISOString(),
-          },
-        ];
-      });
+          })),
+        hasMore,
+      };
       writeStructuredEvent(
         this.logger,
         'log',
         'conversations.messages.query.completed',
         {
           ...context,
-          storedMessageCount: messages.length,
-          visibleMessageCount: result.length,
+          scannedMessageCount,
+          queryBatchCount,
+          visibleMessageCount: result.messages.length,
+          hasMore,
           elapsedMs: Date.now() - startedAt,
         },
       );
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) throw error;
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
       writeStructuredEvent(
         this.logger,
         'error',

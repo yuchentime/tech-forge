@@ -25,7 +25,7 @@ last_verified: 2026-11-07
 
 | 组件 | 职责 |
 |---|---|
-| `AgentChatPage` / `ConversationStore` | 启动时读取 Conversation 摘要并恢复仍存在的活动 ID；选择会话时读取可见消息并替换 LocalRuntime 线程；新线程清除活动 ID。 |
+| `AgentChatPage` / `ConversationStore` | 启动时读取 Conversation 摘要并恢复仍存在的活动 ID；选择会话时读取最近最多 30 条可见消息，以 Message ID 按需前置更早历史；新线程清除活动 ID。页面采用全高双栏，侧栏列表与消息视口独立滚动，输入区保持可见。 |
 | Desktop Agent adapter | 发送最新用户输入和活动 `conversationId`；保存后端返回的 ID；将安全流事件转换为 UI 更新，并在元数据/终止事件后刷新侧栏摘要。 |
 | Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
 | `AgentController` | 校验并流式处理 `POST /api/agent/stream`；客户端断开时中止请求。 |
@@ -40,7 +40,7 @@ Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `
 
 `AgentController` 记录 HTTP 接收、SSE 终态和客户端断开；`AgentService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
 
-Renderer 的 backend health、会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
+Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
 常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
@@ -113,7 +113,7 @@ sequenceDiagram
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `AgentService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-Renderer 的会话摘要通过 `GET /api/conversations` 读取，选中会话后再通过 `GET /api/conversations/:conversationId/messages` 读取按序排列的 user/assistant 纯文本历史。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload；加载成功后页面调用 LocalRuntime `thread.reset()` 替换当前可见线程。
+Renderer 的会话摘要通过 `GET /api/conversations` 读取。选中会话时，`GET /api/conversations/:conversationId/messages` 默认返回最近最多 30 条可见 user/assistant 纯文本和 `hasMore`；用户点击“查看更早的消息”后，Renderer 以最早已加载消息 ID 查询前一页并前置到 LocalRuntime。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload。该 UI 分页不改变下一轮 Agent 请求从 SQLite 恢复完整模型历史的行为。
 
 `conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`，调用实际安装包的消息转换链路。
 

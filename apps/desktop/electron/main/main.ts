@@ -539,7 +539,7 @@ function createWindow(): void {
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
     void mainWindow.loadURL(devUrl).then(() => {
-      mainWindow?.webContents.openDevTools();
+      mainWindow?.webContents.openDevTools({ mode: 'detach' });
     });
   } else {
     void mainWindow.loadFile(path.join(__dirname, '../../../dist/index.html'));

@@ -1,3 +1,5 @@
+import { IsOptional, IsUUID } from 'class-validator';
+
 /** Describes one sidebar row returned by the Conversation list API. */
 export interface ConversationSummaryDto {
   id: string;
@@ -13,4 +15,17 @@ export interface ConversationMessageDto {
   content: string;
   status: 'completed' | 'failed' | 'cancelled';
   createdAt: string;
+}
+
+/** Describes one bounded visible-message page and whether an older page exists. */
+export interface ConversationMessagePageDto {
+  messages: ConversationMessageDto[];
+  hasMore: boolean;
+}
+
+/** Validates the optional same-conversation message cursor for history paging. */
+export class ConversationMessagesQueryDto {
+  @IsOptional()
+  @IsUUID('4')
+  beforeMessageId?: string;
 }

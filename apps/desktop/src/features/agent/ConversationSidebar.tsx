@@ -23,7 +23,7 @@ export function ConversationSidebar({
   return (
     <aside
       aria-label="对话列表"
-      className="flex max-h-60 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:max-h-none md:w-64 md:border-b-0 md:border-r"
+      className="flex h-48 min-h-0 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3">
         <h2 className="min-w-0 flex-1 text-sm font-semibold text-stone-800">对话</h2>

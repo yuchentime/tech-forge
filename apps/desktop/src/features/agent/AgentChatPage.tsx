@@ -15,7 +15,14 @@ import {
   WarningCircle,
   XCircle,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ConversationSidebar } from './ConversationSidebar';
@@ -23,6 +30,7 @@ import { toThreadMessage } from './conversation-history';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   conversationStore,
+  type ConversationHistoryPage,
   type ConversationHistoryMessage,
 } from './conversation-store';
 
@@ -42,15 +50,23 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
+  const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
+  const [isLoadingEarlierMessages, setIsLoadingEarlierMessages] = useState(false);
+  const [earlierMessagesError, setEarlierMessagesError] = useState<string | null>(null);
+  const [historyPageRevision, setHistoryPageRevision] = useState(0);
   const [hasLoadedInitialList, setHasLoadedInitialList] = useState(false);
   const requestVersion = useRef(0);
   const restoredInitialConversation = useRef(false);
+  const messageViewportRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollAnchor = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
   /** Fetches one history snapshot and replaces the visible local thread on success. */
   const loadConversation = useCallback(async (conversationId: string) => {
     if (isRunning) return;
     const version = ++requestVersion.current;
     setLoadingConversationId(conversationId);
+    setIsLoadingEarlierMessages(false);
+    setEarlierMessagesError(null);
     setHistoryError(null);
     setHistoryErrorConversationId(null);
     let failureMessage = '历史消息加载失败，请重试。';
@@ -66,7 +82,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
     let httpStatus: number | null = null;
     try {
-      const response = await window.teachforge.request<ConversationHistoryMessage[]>({
+      const response = await window.teachforge.request<ConversationHistoryPage>({
         method: 'GET',
         path: `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
       });
@@ -101,13 +117,15 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         failureMessage = `历史消息加载失败（HTTP ${response.status}），请重试。`;
         throw new Error(failureMessage);
       }
-      if (!Array.isArray(response.data)) {
+      if (!isConversationHistoryPage(response.data)) {
         failureMessage = '历史消息响应格式异常，请重试。';
         throw new Error(failureMessage);
       }
       if (version !== requestVersion.current) return;
 
-      runtime.thread.reset(response.data.map(toThreadMessage));
+      pendingScrollAnchor.current = null;
+      runtime.thread.reset(response.data.messages.map(toThreadMessage));
+      setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
     } catch (error) {
       if (version !== requestVersion.current) return;
@@ -126,6 +144,105 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       if (version === requestVersion.current) setLoadingConversationId(null);
     }
   }, [isRunning, runtime]);
+
+  /** Loads and prepends the page immediately before the oldest visible message. */
+  const loadEarlierMessages = useCallback(async () => {
+    if (isRunning || isLoadingEarlierMessages || !hasEarlierMessages) return;
+    const conversationId = conversationStore.getSnapshot().activeConversationId;
+    const currentMessages = runtime.thread.getState().messages;
+    const beforeMessageId = currentMessages[0]?.id;
+    if (!conversationId || !beforeMessageId) return;
+
+    const version = requestVersion.current;
+    setIsLoadingEarlierMessages(true);
+    setEarlierMessagesError(null);
+    let httpStatus: number | null = null;
+    let failureMessage = '更早的消息加载失败，请重试。';
+
+    if (!hasDesktopBridge()) {
+      failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
+      setEarlierMessagesError(failureMessage);
+      setIsLoadingEarlierMessages(false);
+      console.error('[TeachForge][conversation.history.earlier] desktop_bridge_unavailable');
+      return;
+    }
+
+    try {
+      const response = await window.teachforge.request<ConversationHistoryPage>({
+        method: 'GET',
+        path: `/api/conversations/${encodeURIComponent(conversationId)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`,
+      });
+      httpStatus = response.status;
+      if (response.status === 404) {
+        await conversationStore.refresh();
+        if (version !== requestVersion.current) return;
+        failureMessage = '该会话已不存在，对话列表已刷新。';
+        throw new Error(failureMessage);
+      }
+      if (response.status !== 200) {
+        failureMessage = `更早的消息加载失败（HTTP ${response.status}），请重试。`;
+        throw new Error(failureMessage);
+      }
+      if (!isConversationHistoryPage(response.data)) {
+        failureMessage = '历史消息响应格式异常，请重试。';
+        throw new Error(failureMessage);
+      }
+      if (version !== requestVersion.current) return;
+
+      if (response.data.messages.length === 0) {
+        setHasEarlierMessages(false);
+        return;
+      }
+
+      const latestMessages = runtime.thread.getState().messages;
+      const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
+      const earlierThreadMessages = response.data.messages
+        .map(toThreadMessage)
+        .filter(({ id }) => !id || !latestMessageIds.has(id));
+      if (earlierThreadMessages.length === 0) {
+        setHasEarlierMessages(false);
+        return;
+      }
+
+      const viewport = messageViewportRef.current;
+      if (viewport) {
+        pendingScrollAnchor.current = {
+          scrollHeight: viewport.scrollHeight,
+          scrollTop: viewport.scrollTop,
+        };
+      }
+      runtime.thread.reset([...earlierThreadMessages, ...latestMessages]);
+      setHasEarlierMessages(response.data.hasMore);
+      setHistoryPageRevision((revision) => revision + 1);
+    } catch (error) {
+      if (version !== requestVersion.current) return;
+      const bridgeUnavailable = !hasDesktopBridge();
+      if (bridgeUnavailable) {
+        failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
+      }
+      console.error('[TeachForge][conversation.history.earlier] load_failed', {
+        code: bridgeUnavailable ? 'desktop_bridge_unavailable' : 'history_request_failed',
+        httpStatus,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      setEarlierMessagesError(failureMessage);
+    } finally {
+      if (version === requestVersion.current) {
+        setIsLoadingEarlierMessages(false);
+      }
+    }
+  }, [hasEarlierMessages, isLoadingEarlierMessages, isRunning, runtime]);
+
+  /** Restores the first visible message after older rows are prepended. */
+  useLayoutEffect(() => {
+    const anchor = pendingScrollAnchor.current;
+    const viewport = messageViewportRef.current;
+    if (!anchor || !viewport) return;
+
+    viewport.scrollTop =
+      anchor.scrollTop + viewport.scrollHeight - anchor.scrollHeight;
+    pendingScrollAnchor.current = null;
+  }, [historyPageRevision]);
 
   /** Loads sidebar rows when the Agent page first mounts. */
   useEffect(() => {
@@ -146,11 +263,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     const savedConversationId = conversationState.activeConversationId;
     if (!savedConversationId) {
       runtime.thread.reset([]);
+      setHasEarlierMessages(false);
       return;
     }
     if (!conversationState.conversations.some(({ id }) => id === savedConversationId)) {
       conversationStore.setActiveConversationId(null);
       runtime.thread.reset([]);
+      setHasEarlierMessages(false);
       return;
     }
 
@@ -162,6 +281,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     if (isRunning) return;
     requestVersion.current += 1;
     setLoadingConversationId(null);
+    setIsLoadingEarlierMessages(false);
+    setHasEarlierMessages(false);
+    setEarlierMessagesError(null);
     setHistoryError(null);
     setHistoryErrorConversationId(null);
     conversationStore.setActiveConversationId(null);
@@ -169,10 +291,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   }, [isRunning, runtime]);
 
   const isHistoryLoading = loadingConversationId !== null;
-  const isInitialListLoading = !hasLoadedInitialList;
+  const isInitialListLoading =
+    !hasLoadedInitialList && conversationState.listStatus !== 'error';
 
   return (
-    <section className="flex h-full w-full flex-col md:flex-row">
+    <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       <ConversationSidebar
         isBusy={isRunning || isHistoryLoading || isInitialListLoading}
         loadingConversationId={loadingConversationId}
@@ -182,8 +305,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         state={conversationState}
       />
 
-      <div className="mx-auto flex min-h-0 w-full max-w-none flex-1 flex-col px-5 py-5 md:px-8">
-        <header className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
+        <header className="mb-3 flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-3 md:mb-4 md:pb-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
             <p className="mt-1 text-sm text-stone-500">对话上下文保存在本机，重启后可继续提问。</p>
@@ -191,7 +314,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         </header>
 
         {historyError && (
-          <div className="mb-3 flex items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+          <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
             <span className="min-w-0 flex-1">{historyError}</span>
             {historyErrorConversationId && (
               <button
@@ -214,8 +337,37 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               : '正在加载历史消息…'}
           </div>
         ) : (
-          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-            <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-3">
+          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <ThreadPrimitive.Viewport
+              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
+              ref={messageViewportRef}
+            >
+              {hasEarlierMessages && (
+                <div className="flex shrink-0 flex-col items-center gap-2 py-2">
+                  {earlierMessagesError && (
+                    <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
+                      <span>{earlierMessagesError}</span>
+                      <button
+                        className="font-medium underline underline-offset-2"
+                        disabled={isLoadingEarlierMessages}
+                        onClick={() => void loadEarlierMessages()}
+                        type="button"
+                      >
+                        重试
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    className="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-600 transition hover:border-stone-400 hover:text-stone-900 disabled:cursor-wait disabled:opacity-50"
+                    disabled={isLoadingEarlierMessages || isRunning}
+                    onClick={() => void loadEarlierMessages()}
+                    type="button"
+                  >
+                    {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
+                  </button>
+                </div>
+              )}
+
               <AuiIf condition={(state) => state.thread.isEmpty}>
                 <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
                   <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
@@ -239,38 +391,86 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   return <AssistantMessage key={message.id} />;
                 }}
               </ThreadPrimitive.Messages>
-
-              <ThreadPrimitive.ViewportFooter className="sticky bottom-0 pt-3">
-                <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
-                  <ComposerPrimitive.Input
-                    aria-label="发送给备课助手"
-                    className="min-h-24 w-full resize-y bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
-                    placeholder="写下你正在准备的内容或问题…"
-                    rows={3}
-                    submitMode="ctrlEnter"
-                  />
-                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
-                    <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
-                    <div className="flex items-center gap-2">
-                      <AuiIf condition={(state) => state.thread.isRunning}>
-                        <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
-                          停止生成
-                        </ComposerPrimitive.Cancel>
-                      </AuiIf>
-                      <AuiIf condition={(state) => !state.thread.isRunning}>
-                        <ComposerPrimitive.Send className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40">
-                          发送
-                        </ComposerPrimitive.Send>
-                      </AuiIf>
-                    </div>
-                  </div>
-                </ComposerPrimitive.Root>
-              </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>
+
+            <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
+              <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+                <ComposerPrimitive.Input
+                  aria-label="发送给备课助手"
+                  className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
+                  disabled={isLoadingEarlierMessages}
+                  placeholder="写下你正在准备的内容或问题…"
+                  rows={3}
+                  submitMode="ctrlEnter"
+                />
+                <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
+                  <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                  <div className="flex items-center gap-2">
+                    <AuiIf condition={(state) => state.thread.isRunning}>
+                      <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+                        停止生成
+                      </ComposerPrimitive.Cancel>
+                    </AuiIf>
+                    <AuiIf condition={(state) => !state.thread.isRunning}>
+                      <ComposerPrimitive.Send
+                        className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={isLoadingEarlierMessages}
+                      >
+                        发送
+                      </ComposerPrimitive.Send>
+                    </AuiIf>
+                  </div>
+                </div>
+              </ComposerPrimitive.Root>
+            </div>
           </ThreadPrimitive.Root>
         )}
       </div>
     </section>
+  );
+}
+
+/** Validates the stable response envelope used by the history paging API. */
+function isConversationHistoryPage(
+  value: unknown,
+): value is ConversationHistoryPage {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const page = value as Partial<ConversationHistoryPage>;
+  return (
+    Array.isArray(page.messages) &&
+    page.messages.every(isConversationHistoryMessage) &&
+    typeof page.hasMore === 'boolean'
+  );
+}
+
+/** Validates one visible history item before passing it to LocalRuntime. */
+function isConversationHistoryMessage(
+  value: unknown,
+): value is ConversationHistoryMessage {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const message = value as Partial<ConversationHistoryMessage>;
+  return (
+    typeof message.id === 'string' &&
+    (message.role === 'user' || message.role === 'assistant') &&
+    typeof message.content === 'string' &&
+    (message.status === 'completed' ||
+      message.status === 'failed' ||
+      message.status === 'cancelled') &&
+    typeof message.createdAt === 'string'
   );
 }
 
