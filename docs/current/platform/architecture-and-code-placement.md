@@ -84,13 +84,14 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 
 | 模块 | 应拥有的业务责任 | 扫描到的实现状态 |
 |---|---|---|
-| `platform` / `health` | 进程级能力及健康状态 | `PlatformModule` 装配 `HealthModule`；当前提供 health endpoint |
+| `platform` / `health` | 进程级能力及健康状态 | `PlatformModule` 装配 `HealthModule` 与 `DocumentParserModule`；health 提供 `/api/health` |
+| `platform` / `document-parser` | 文件解析适配层：把 PDF/DOCX/MD/TXT 转成按页文本与质量告警 | `DocumentParserModule` 导出 `DocumentParserService`；v1 使用 `pdfjs-dist` 与 `mammoth`，无 Python、无子进程、无模型下载；`documents` 域尚未接入 |
 | `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供摘要列表和每页最多 30 条的可见文本历史；user 行可嵌套安全工具摘要。Entity 与 `ConversationsService` 管理 SQLite 持久化、历史投影、pending 对账及 Pi 历史恢复 |
 | `rehearsals` | Rehearsal/RehearsalTurn、提问、回答和轮次评估 | Entity 已注册；Service 为空壳。评估直接属于 RehearsalTurn |
-| `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | Entity 已注册；Service 为空壳，文件导入和检索流程未实现 |
+| `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | `DocumentsService.ingestFile()` 实现"本地文件路径 → 解析 → 分块（500 tokens、10% 重叠）→ 事务写 `documents` / `document_versions` / `document_chunks` / `chunk_search_terms`"，状态 `parsing → chunking → indexed`（失败 `failed` + `processingError`），按 `contentHash` 幂等，可指定 `documentId` 追加版本；`listDocuments` / `getDocumentDetail` / `listVersionChunks` 提供读取。向量化、检索接口、上传入口与会话关联未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
 | `settings` | 本机模型 Provider、Agent 默认输出路径与风格偏好文件 | `SettingsController` 暴露 `GET/PUT /api/settings`；`SettingsService` 独占 `.tech-forge/config.toml` 和 `SOULS.md`，默认输出目录为 `.tech-forge/workspace/`，并提供 `getWorkspacePath()` 与托管文件路径；API Key 仅由本机设置 API 返回设置页，不进入 Agent SSE、日志或 SQLite |
-| `retrieval` | 按 Conversation 资料范围组合检索上下文 | Service 为空壳 |
+| `retrieval` | 按 Conversation 资料范围组合检索上下文 | `Service` 为空壳；已有纯函数模块 `text-normalizer.ts`（NFKC/清洗、中文 bigram、英文整词、FTS5 MATCH 构造），当前由入库流程写入词法索引时使用 |
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | Service 为空壳 |
 | `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护 |
@@ -116,6 +117,8 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 ## 6. 当前装配与重要差异
 
 - [数据库选项](../../../apps/backend/src/database/database.options.ts)注册当前 10 个目标实体；SQLite 启用 WAL、外键和 busy timeout，自动运行 migration，关闭 schema synchronize。
+- 文档解析适配层位于 [platform/document-parser](../../../apps/backend/src/platform/document-parser/)，由 `PlatformModule` 装配并导出 `DocumentParserService`。v1 只做文本层提取（`pdfjs-dist` 逐页重建行/段、`mammoth` 转 Markdown），PDF 无文本层返回 `NO_TEXT_LAYER`；解析结果按 `pages[]` 返回，页码锚点由 Documents 域写入 `locatorJson`。MinerU 子进程方案保留为触发式升级路径，见[解析适配层设计](../../changes/2026-11-08-document-parser-adapter/design.md)。
+- 后端测试统一编译到 `.test-dist`（`BACKEND_TEST_BUILD_DIR` 可覆盖），因为开发模式下运行中的 backend 会锁住 `dist`。
 - Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
 - 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。[Pi session 快照迁移](../../../apps/backend/src/database/migrations/1793940000000-pi-session-snapshots.ts)另行创建 `pi_session_snapshots` 表；`LlmService` 每轮结束后 upsert Pi `getEntries()`，下一轮优先使用快照（含 compaction），仅当快照落后于 SQLite 最新消息时回退重建。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。

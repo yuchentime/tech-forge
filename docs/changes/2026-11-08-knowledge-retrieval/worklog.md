@@ -1,0 +1,9 @@
+# Worklog: knowledge-retrieval
+
+| Loop | 本轮目标 | 主要改动 | 验证结果 | 评审结论 | 下一轮动作 | 风险/待评估点 | Commit | Re-anchor |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| L001 | 固化本地检索选型与参数 | 产出设计：中文 bigram 分词契约、FTS5 + 向量 + RRF、模型实测对比、代际切换改为行级模型戳记、external content FTS | 设计阶段；模型与 SQLite 行为在本机实测（见设计 Evidence 一节） | `pending review` | 实现落库闭环 | 中文 PDF 的 cmaps 未在无 ToUnicode 样本上验证 | n/a | n/a |
+| L002 | 打通文件路径到分片落库 | 新增 `documents/chunking/document-chunker.ts`；实现 `DocumentsService.ingestFile()`（解析 → 分块 → 事务写三表 → 状态机）；`DocumentsModule` 装配 `DocumentParserModule`；新增两套脚本 | 7/7 用例通过；真实 313 页 PDF 771 分片 / 2.3 s，50 KB DOCX 43 分片 / 110 ms；SHA-256 与 contentHash 一致 | `pending review` | 补完业务线：追加版本、读取入口、真实集成测试 | 索引写入与检索未实现，状态名不得声称可检索 | n/a | n/a |
+| L003 | 补齐"资料入库"业务线并改为真实集成验收 | 状态名 `indexed` 修正为 `chunked`（无索引时不得声称可检索）；`ingestFile({ documentId })` 支持追加版本；新增 `listDocuments` / `getDocumentDetail` / `listVersionChunks`；测试改为真实 Nest 上下文 + 真实 SQLite 文件 + 生产 migration + 磁盘真实文件 + raw SQL 断言；PDF/DOCX fixture 抽到 `test/helpers/document-fixtures.cjs` | 10/10 通过（903 ms）；真实文件 771 / 43 分片；重复入库 4 ms 返回 duplicate；两版本各自保留分片 | `pending review` | 按 token 重新定义分片预算 | 未指定 `documentId` 时内容变更会新建资料，调用方需显式指定 | n/a | n/a |
+| L004 | 分片预算改为 embedding token | `@huggingface/tokenizers`（纯 JS）+ 仓库内 `tokenizer.json`；目标/上限 500 tokens、重叠 50 tokens；超长段落按 token 二分切分；重叠回退实现；尾部分片合并；`locatorJson` 增加 `tokenCount` | 10/10 通过；真实 PDF 961 分片（p50 461、max 500、超限 0）、重叠上限 50 tokens 零违规；DOCX 55 分片 | `pending review` | 写词法索引 | 重叠窗口为 10% 目标值的上限，实测 p50 重叠 61 字符 | n/a | n/a |
+| L005 | 词法索引业务线 | 迁移 `1793950000000-chunk-search-index.ts`（`chunk_search_terms` + external content FTS5 + 两个触发器）；`retrieval/text-normalizer.ts`（NFKC/清洗/中文 bigram/英文整词/MATCH 构造）；入库事务内写词法行并把状态推进到 `indexed` | 11/11 通过；真实语料 `智能体` / `编排模式` / `Harness` 命中、`量子纠缠` 0 命中；`chunk_search_terms` 与 `chunk_fts` 行数均 1016 且与分片数一致；删除来源行后命中消失（触发器生效） | `pending review` | 向量化与 RRF 检索 | 多词英文按 AND 组合，跨分片同现不会命中 | n/a | n/a |

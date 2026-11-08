@@ -19,6 +19,26 @@ routes:
       - docs/changes/2026-11-07-local-agent-settings/design.md
       - docs/changes/2026-11-07-local-workspace-setting/design.md
     history_on_demand: []
+  knowledge-retrieval:
+    description: "Design or implement local knowledge retrieval: chunking, SQLite FTS5 with Chinese bigram normalization, local Transformers.js embeddings, and RRF fusion"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/retrieval/**"
+      - "apps/backend/src/embedding/**"
+      - "apps/backend/src/knowledge/**"
+      - "apps/backend/src/documents/**"
+      - "apps/backend/src/database/migrations/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/source/data-model-design.md
+      - docs/source/data-model-fields.md
+      - docs/changes/2026-11-08-knowledge-retrieval/design.md
+    optional:
+      - docs/changes/2026-11-08-document-parser-adapter/design.md
+      - docs/changes/2026-11-08-knowledge-retrieval/brief.md
+    history_on_demand: []
   frontend-backend-code-placement:
     description: "Current Electron, React, NestJS runtime and code-placement guide"
     token_budget: 10000

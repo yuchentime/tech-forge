@@ -1,9 +1,9 @@
 ---
-status: draft
+status: implemented
 layer: change
 domain: document-parser-adapter
 created_at: 2026-11-08
-version: 1.0
+version: 1.1
 updates_current:
   - docs/current/platform/architecture-and-code-placement.md
 ---
@@ -20,7 +20,129 @@ TeachForge 尚无统一的文件解析能力。现有 `documents` 模块只有�
 工具；图片语义理解可能调用用户已配置的 DeepSeek。需要一个清楚的适配层，
 隔离解析器差异、凭据读取、进程启动和应用打包细节。
 
+## 修订 2026-11-08：v1 采用文本层提取，解析器可替换
+
+初版把 MinerU 作为默认解析器。按"初期不过度设计、后续可替换"重新评估后调整为：v1 用纯 JS 文本层提取，**但契约按"未来会换成子进程解析器"来设计**，替换成本压到新增一个实现文件。
+
+### 为什么纯 JS 先上
+
+- `pdfjs-dist` 6.5.438（Apache-2.0）在 Node 内实测：28 页英文论文 open 75 ms、提取 210 ms、101k 字符；18 页 142 ms。打包构成 `legacy/build` + `cmaps`（中文必需 1.2 MB）+ `standard_fonts` 0.8 MB ≈ 20 MB。
+- `mammoth`（BSD-2-Clause）处理 DOCX，1.6 MB。
+- 对比 MinerU 组件：1.5–2.5 GB、AGPL-3.0、Python 冷启动 10–30 s、三平台各自构建。
+- 触发以下条件才启用下方 MinerU 方案：扫描件占比升高、双栏/表格还原质量不达标、需要公式结构。
+
+### 契约（v1 即按最终形状定义）
+
+关键决定：**结果按页返回，而不是一根字符串**。这样 pdfjs（逐页）与 MinerU（Markdown + 页码标记）都能满足同一形状，未来换实现时下游分块与引用不受影响。
+
+```ts
+interface ParseDocumentRequest {
+  inputPath: string;          // 应用管理的临时文件，不接受 Renderer 任意路径
+  originalName: string;
+  mimeType?: string;
+  signal?: AbortSignal;
+}
+
+interface ParsedPage {
+  pageNo: number;             // 1 起
+  text: string;               // 该页重建后的文本（Markdown 或纯文本）
+}
+
+interface ParseDocumentResult {
+  text: string;               // pages[].text 的拼接，供不关心分页的调用方使用
+  pages: ParsedPage[];        // 分块与 locator 的唯一来源
+  format: 'markdown' | 'plain_text';
+  parser: { id: 'pdf-text' | 'docx' | 'plain-text' | 'mineru-kit'; versionOrModel: string };
+  source: { mediaType: string; pageCount: number; byteSize: number };
+  warnings: Array<{ code: string; message: string }>;
+}
+```
+
+调用方（Documents 域）只依赖 `ParseDocumentResult`；分块器按 `pages[]` 切分并直接得到 `pageStart`/`pageEnd`，不需要解析器提供页码之外的任何排版信息。
+
+### 格式与定位语义
+
+`pages[]` 是"定位单元"，不是"PDF 页"的同义词：
+
+| 格式 | `pages[]` | `source.pageCount` | 可用定位字段 |
+|---|---|---|---|
+| PDF | 每页一项，`pageNo` 即真实页码 | 实际页数 | `pageStart`/`pageEnd` + `headingPath` + 字符偏移 |
+| DOCX | 单一项，`pageNo = 1`（docx 无分页语义） | `1` | `headingPath` + 字符偏移（**无页码**） |
+| MD / TXT | 单一项，`pageNo = 1` | `1` | `headingPath` + 字符偏移 |
+
+分块器据此决定 `locatorJson` 写不写页码：只有 PDF 会产出 `pageStart/pageEnd`，其余格式留空。这避免了"给 docx 编造页码"这类会污染引用的取值。
+
+### 实测：中文样本（2026-11-08）
+
+| 样本 | 规模 | 结果 |
+|---|---|---|
+| `AI-Agents-in-Depth-zh-CN.pdf` | 11 MB / 313 页 | open 8 ms、文本 **503,320 字符**、**12,185 行**、**1,455 段**、含行段重建总耗时 **1.7 s**（≈5.4 ms/页） |
+| `AI员工平台_作业背景文档_脱敏版_v1.docx` | 50 KB | 转换 87 ms、**29,881 字符**、标题 0 个、**18 个表格**、warnings 0 |
+
+由此确认的三条实现规则：
+
+1. **必须按 y 坐标聚行、按行距聚段**。直接 `items.join(' ')` 每页只会得到一行，段落信息全丢；按 y 聚行 + 中位行距 ×1.6 阈值聚段后，才得到上表的段落分布。
+2. **cmaps 不是这个样本的必需项**，但必须随包。该 PDF 自带 ToUnicode，加载与不加载 cmaps 输出完全一致（28,299 字符逐字相同）。曾据此认为"漏 cmaps 必然乱码"的推断不成立：乱码发生在仅有预定义 CJK CMap、没有 ToUnicode 的 PDF 上。cmaps 只占 1.2 MB，仍然随包，并用另一份样本验证兜底。
+3. **目录页会产生点线噪声**：TOC 段落形如 `7.3.2 人机交互型… . . . . . 190`，单段可达数百字符且占比很高。检测规则：单段内 `" . "` 出现次数占字符数超过阈值时标记 `TOC_LIKE` warning，分块器可选择不入库（避免目录污染检索），但**不静默丢弃**。
+
+DOCX 侧的两条实现规则：
+
+- 该样本**零标题样式、18 个表格**：`convertToMarkdown` 会把 18 个表全部拍平，因此 `UNSTRUCTURED_TABLE` 不是理论风险而是必然触发；同时因无标题，分块只能靠段落回退。
+- 该样本用加粗段落充当标题（`__0. 关于本文档__`）。规则：**仅由加粗构成的短段落**（≤40 字符、无句末标点）作为 `headingPath` 的伪标题，否则段落层级全丢。
+
+### DOCX 处理
+
+- `mammoth` 1.13.0 `convertToMarkdown`，实测：25 KB 中文 docx 50 ms / 4.6k 字符；594 KB 手册 31 ms / 798k 字符，标题层级（`#`/`##`/`###`）保留。
+- **表格结构会丢**：实测 `convertToMarkdown` 把每个单元格降级为独立段落（内容不丢，行列关系丢）；`convertToHtml` 保留 `<table>`。v1 选择前者，并通过 `transformDocument` 检测到表格元素时产出 `UNSTRUCTURED_TABLE` warning。若将来表格结构成为硬需求，改为 `convertToHtml` + 本地表格→Markdown 转换，改动只在这个 parser 文件内。
+- 需要清理的产物（否则污染分词与字符计数）：Markdown 转义（`178\-2119`）、`<a id="...">` 锚点、零宽字符（`U+200B`/`U+200D`/`U+FEFF`/`U+2060`）。属归一化器职责，见检索设计的分词契约。
+- 标题稀疏的文档（实测 798k 字符仅 9 个标题）不能只按标题切块，分块器需要段落级回退。
+
+### 模块布局
+
+| 文件 | 职责 |
+|---|---|
+| `platform/document-parser/document-parser.service.ts` | 校验输入、格式路由、临时文件与超时、错误映射、结果规整。不含任何具体解析逻辑 |
+| `platform/document-parser/parser.types.ts` | 上述契约与 `DocumentParser` 接口 |
+| `platform/document-parser/parser.registry.ts` | 单一路由表：扩展名/签名 → parser 实例；新增格式只改这里 |
+| `platform/document-parser/parsers/pdf-text.parser.ts` | `pdfjs-dist`：逐页 `getTextContent()`；单栏按 item `transform` 的 (y 降序, x 升序) 重排；x 分布呈双峰时判定为两列，改为按 (列, y 降序, x 升序)；行距阈值判段落 |
+| `platform/document-parser/parsers/docx.parser.ts` | `mammoth` → Markdown |
+| `platform/document-parser/parsers/plain-text.parser.ts` | Markdown / TXT 直读 |
+| `platform/document-parser/parsers/mineru.parser.ts` | **未来**：子进程实现，接口不变 |
+
+`DocumentParser` 接口只有一个方法：
+
+```ts
+interface DocumentParser {
+  id: ParseDocumentResult['parser']['id'];
+  supports(input: { extension: string; mediaType: string }): boolean;
+  parse(input: ParseDocumentRequest): Promise<ParseDocumentResult>;
+}
+```
+
+### 替换成本
+
+将来接 MinerU 只需要：新增 `mineru.parser.ts` + 在 registry 里加一行路由 + 打包资源。`DocumentsService`、分块器、索引、检索全部不动——因为它们只消费 `pages[]` 与 `warnings[]`。
+
+### 一致性验收（保证可替换）
+
+同一组 fixture 用例必须对**任何** parser 实现生效：
+
+- 单栏带文本层 PDF → `pages.length === pageCount`、每页文本非空、页面顺序正确。
+- 双栏 PDF → 按列优先输出而非逐行交错；若列检测失败则必须产出 `MULTI_COLUMN_SUSPECTED` warning，不静默输出错序文本。
+- 含表格页面 → 输出行文本且带 `UNSTRUCTURED_TABLE` warning（v1 不假装识别表格）。
+- 扫描件 PDF → `NO_TEXT_LAYER`（不返回空文本，不静默入库）。
+- DOCX / MD / TXT → `format` 与 `warnings` 符合预期。
+- 超限文件 / 越界路径 / 取消信号 → 对应类型化错误。
+
+### v1 明确不做
+
+- 无文本层的扫描件（返回 `NO_TEXT_LAYER`，提示暂不支持）。
+- 图片与 PPTX（契约保留 `imageMode` 等字段的位置，但不实现）。
+- 表格结构识别、公式还原、版面分栏识别（只做行序重建）。
+
 ## Goals
+
+> 下列 Goal 中涉及 MinerU 的条目已被上方修订取代，仅在触发条件成立时适用。
 
 - 建立后端内部解析契约，解析成功时统一返回 Markdown 或纯文本及解析元数据。
 - PDF 默认使用 MinerU 本地 CLI 的 Flash tier；调用方可显式请求 Basic。
