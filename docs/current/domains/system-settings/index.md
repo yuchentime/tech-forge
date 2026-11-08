@@ -23,14 +23,14 @@ last_verified: 2026-11-08
 
 设置入口位于 Agent 对话侧栏底部。打开后主区域显示模型配置和风格偏好；侧栏仍可切换设置与对话。设置由本机 backend 管理，不属于 SQLite 业务数据，也不通过 renderer 文件系统访问。
 
-backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页直接显示和编辑。工作空间默认与配置文件分开，指向 `.tech-forge/workspace/`，可在设置页编辑并保存。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
+backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页编辑。密钥输入框默认遮蔽内容，用户可点击输入框右侧的眼睛图标临时显示或再次隐藏。工作空间默认与配置文件分开，指向 `.tech-forge/workspace/`，可在设置页编辑并保存。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
 
 | 配置 | 当前行为 |
 |---|---|
 | Provider | 可选 deepseek 或 custom；默认 deepseek |
 | DeepSeek | 模型 ID 默认 deepseek-flash，可编辑；首次使用前需配置 API Key |
 | 自定义 Provider | 保存名称、HTTP(S) Base URL、模型 ID 和可选 API Key；缺少名称、URL 或模型 ID 时新 session 报配置错误 |
-| API Key | 依用户要求以明文保存在 config.toml；省略或留空表示保留已存值，明确清除操作才删除；仅经本机设置 API 回传给设置页，不进入 Agent SSE、普通日志或 SQLite |
+| API Key | 依用户要求以明文保存在 config.toml；设置页默认遮蔽，点击眼睛图标后才显示明文；省略或留空表示保留已存值，明确清除操作才删除；仅经本机设置 API 回传给设置页，不进入 Agent SSE、普通日志或 SQLite |
 | 工作空间 | 保存在 `[workspace].path`；默认值为 `.tech-forge/workspace/`；路径必须绝对，不能是 `.tech-forge` 本身或其祖先；`SettingsService.getWorkspacePath()` 返回规范化路径，LlmService 将它用于 Pi cwd 与 Agent 文件工具 |
 | 风格偏好 | SOULS.md 的非空文本在每个新 Pi session 的固定系统提示词之后追加；空白内容不改变提示词 |
 

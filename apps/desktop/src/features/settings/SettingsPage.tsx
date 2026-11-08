@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Eye, EyeClosed } from '@phosphor-icons/react';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 type ProviderId = 'deepseek' | 'custom';
@@ -331,7 +332,7 @@ export function SettingsPage() {
                     Agent 默认在此目录创建和修改文件；默认目录与本机配置分开存放。读取仍可使用其他来源，写入目录外的文件需要在本轮请求中明确给出目标绝对路径。
                   </p>
                 </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <TextField
                       autoComplete="off"
@@ -371,25 +372,15 @@ export function SettingsPage() {
                     写下希望助手长期遵循的表达方式或备课习惯。内容会作为系统提示词的补充，用于之后新建的模型会话。
                   </p>
                 </div>
-                <label className="block text-sm font-medium text-stone-800" htmlFor="souls-content">
-                  SOULS.md
-                </label>
                 <textarea
-                  className="mt-2 min-h-52 w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+                  aria-label="风格偏好内容"
+                  className="min-h-52 w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
                   disabled={isSaving}
                   id="souls-content"
                   onChange={(event) => updateSouls(event.target.value)}
                   placeholder={'例如：\n- 先用贴近课堂的例子解释新概念\n- 重点内容分层说明，避免一次给出过长答案'}
                   value={settings.souls}
                 />
-                <div className="mt-3 space-y-1 text-xs leading-5 text-stone-500">
-                  <p>
-                    模型配置： <code className="break-all font-mono">{settings.configFilePath}</code>
-                  </p>
-                  <p>
-                    风格偏好： <code className="break-all font-mono">{settings.soulsFilePath}</code>
-                  </p>
-                </div>
               </section>
 
               <div aria-live="polite" className="min-h-6 text-sm" role="status">
@@ -494,7 +485,7 @@ function TextField({
   );
 }
 
-/** Shows the saved plaintext key and supports replacing or explicitly removing it. */
+/** Keeps API Keys masked by default while supporting reveal, replacement and explicit removal. */
 function SecretField({
   clearRequested,
   configured,
@@ -512,29 +503,48 @@ function SecretField({
   onKeyChange: (value: string) => void;
   value: string;
 }) {
+  const [isRevealed, setIsRevealed] = useState(false);
+
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-stone-800" htmlFor={`key-${label}`}>
         {label}
       </label>
-      <input
-        autoComplete="off"
-        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
-        disabled={disabled || clearRequested}
-        id={`key-${label}`}
-        onChange={(event) => onKeyChange(event.target.value)}
-        autoCapitalize="none"
-        placeholder={configured ? '已保存，留空可保持不变' : '输入本机 API Key'}
-        spellCheck={false}
-        type="text"
-        value={value}
-      />
+      <div className="relative">
+        <input
+          autoComplete="off"
+          autoCapitalize="none"
+          className="w-full rounded-lg border border-stone-300 bg-white py-2.5 pl-3 pr-11 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+          disabled={disabled || clearRequested}
+          id={`key-${label}`}
+          onChange={(event) => onKeyChange(event.target.value)}
+          placeholder={configured ? '已保存，留空可保持不变' : '输入本机 API Key'}
+          spellCheck={false}
+          type={isRevealed ? 'text' : 'password'}
+          value={value}
+        />
+        <button
+          aria-label={isRevealed ? '隐藏 API Key' : '显示 API Key'}
+          aria-pressed={isRevealed}
+          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-stone-500 transition hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled || clearRequested}
+          onClick={() => setIsRevealed((revealed) => !revealed)}
+          title={isRevealed ? '隐藏 API Key' : '显示 API Key'}
+          type="button"
+        >
+          {isRevealed ? (
+            <EyeClosed aria-hidden="true" size={20} />
+          ) : (
+            <Eye aria-hidden="true" size={20} />
+          )}
+        </button>
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span>
           {clearRequested
             ? '保存后移除已保存密钥'
             : configured
-              ? '已保存密钥以明文显示，可直接编辑'
+              ? '已保存密钥默认隐藏，可通过右侧眼睛图标显示并编辑'
               : '密钥保存在本机配置文件中'}
         </span>
         {configured && (

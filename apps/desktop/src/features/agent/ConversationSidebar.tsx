@@ -1,4 +1,4 @@
-import { ArrowClockwise, ChatCircle, GearSix, Plus } from '@phosphor-icons/react';
+import { ArrowClockwise, ChatCircle, GearSix, NotePencil } from '@phosphor-icons/react';
 import type {
   ConversationStoreSnapshot,
   ConversationSummary,
@@ -30,24 +30,16 @@ export function ConversationSidebar({
       className="flex h-48 min-h-0 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3">
-        <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-stone-800">
-          <img
-            alt=""
-            aria-hidden="true"
-            className="size-7 shrink-0 object-contain"
-            src="./logo.ico"
-          />
-          <span className="truncate">TeachForge</span>
-        </h2>
         <button
-          aria-label="新建对话"
-          className="flex size-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-200 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="新建课题"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-sm text-stone-700 transition hover:bg-stone-200/70 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={isBusy}
           onClick={onNewConversation}
-          title="新建对话"
+          title="新建课题"
           type="button"
         >
-          <Plus aria-hidden="true" className="size-4" weight="bold" />
+          <NotePencil aria-hidden="true" className="size-4 shrink-0" />
+          <span className="truncate">新建课题</span>
         </button>
         <button
           aria-label="刷新对话列表"

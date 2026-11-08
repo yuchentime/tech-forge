@@ -322,13 +322,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         <SettingsPage />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
-          <header className="mb-3 flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-3 md:mb-4 md:pb-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-stone-900">备课助手</h1>
-              <p className="mt-1 text-sm text-stone-500">对话上下文保存在本机，重启后可继续提问。</p>
-            </div>
-          </header>
-
           {historyError && (
             <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               <span className="min-w-0 flex-1">{historyError}</span>
