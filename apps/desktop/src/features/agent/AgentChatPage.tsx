@@ -519,6 +519,7 @@ function isConversationToolActivity(
 function restoreHistoryToolActivities(messages: ConversationHistoryMessage[]): void {
   for (const message of messages) {
     if (message.role !== 'user' || !message.toolActivities?.length) continue;
+    // 历史 API 使用数据库 message ID，而实时活动可能使用另一 renderer ID，因此要按历史 ID 重建。
     agentEventBus.restoreHistoryActivity(message.id, message.toolActivities);
   }
 }

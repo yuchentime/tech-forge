@@ -194,6 +194,7 @@ export class ConversationsService {
         visibleRows.length < CONVERSATION_HISTORY_PAGE_SIZE + 1 &&
         !hasExhaustedCandidates
       ) {
+        // 工具执行行不是可见聊天消息；先分页 user/assistant，避免工具数量改变页大小和 hasMore。
         const query = messages
           .createQueryBuilder('message')
           .where('message.conversationId = :conversationId', { conversationId })
@@ -231,6 +232,7 @@ export class ConversationsService {
       const pageRows = visibleRows
         .slice(0, CONVERSATION_HISTORY_PAGE_SIZE)
         .reverse();
+      // 先确定文本页，再补工具摘要；工具执行行不占用 30 条可见消息配额。
       const toolActivitiesByUserId = await this.getToolActivitiesByUserMessageId(
         conversationId,
         pageRows
@@ -312,6 +314,7 @@ export class ConversationsService {
     const repository = this.dataSource.getRepository(MessageEntity);
     const firstUserSequence = userMessages[0].sequenceNo;
     const lastUserSequence = userMessages[userMessages.length - 1].sequenceNo;
+    // 最后一条已选 user 之后的下一条 user 是右边界，防止活动串入下一轮。
     const nextUserMessage = await repository
       .createQueryBuilder('message')
       .where('message.conversationId = :conversationId', { conversationId })
@@ -361,12 +364,14 @@ export class ConversationsService {
       if (!execution) continue;
 
       let owner: MessageEntity | undefined;
+      // 按序号找最近的前置 user 行，作为这条工具执行记录所属轮次。
       for (const userMessage of userMessages) {
         if (userMessage.sequenceNo > toolMessage.sequenceNo) break;
         owner = userMessage;
       }
       if (!owner) continue;
 
+      // 只投影 UI 需要的白名单字段，不将存储中的参数或执行结果带入 API。
       const activity: ConversationToolActivityDto = {
         toolCallId: execution.toolCallId,
         toolName: execution.toolName,

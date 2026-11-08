@@ -408,6 +408,7 @@ export class ChatService {
         return;
       case 'tool_execution_start': {
         const displayPath = getToolDisplayPath(event.args);
+        // 历史 UI 只需要路径标签；不把其他工具参数持久化到工具记录。
         const messageId = await this.conversations.startToolExecution(
           conversationId,
           {

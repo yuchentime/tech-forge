@@ -49,6 +49,7 @@ export class AgentEventBus {
     turnId: string,
     activities: readonly ConversationToolActivity[],
   ): void {
+    // ToolActivityRow 从 args.path 读取路径，因此历史 DTO 只映射回这一项参数。
     const tools: AgentToolActivity[] = activities.map((activity) => ({
       toolCallId: activity.toolCallId,
       toolName: activity.toolName,
@@ -59,6 +60,7 @@ export class AgentEventBus {
         : { durationMs: activity.durationMs }),
     }));
     if (!this.activeRequestId) this.lastTurnId = turnId;
+    // 整轮耗时未持久化；null 让历史活动隐藏运行时计时而不伪造时间。
     this.updateTurnSnapshot({
       turnId,
       requestId: null,
