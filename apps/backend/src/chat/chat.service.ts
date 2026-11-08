@@ -8,11 +8,11 @@ import {
   writeStructuredEvent,
   type RequestLogContext,
 } from '../logging/structured-logger';
-import { projectAgentSessionEvent } from './agent-events';
-import type { AgentStreamEvent } from './agent-events';
+import { projectChatSessionEvent } from './chat-events';
+import type { ChatStreamEvent } from './chat-events';
 
 /** Tracks one active Pi message and durable tool rows during a streamed turn. */
-interface AgentTurnPersistenceState {
+interface ChatTurnPersistenceState {
   logContext: RequestLogContext;
   activePiMessageId?: string;
   activePiMessageStartedAt?: number;
@@ -25,10 +25,10 @@ interface AgentTurnPersistenceState {
   >;
 }
 
-/** 持久化 Agent 对话轮次，并将安全 Pi 事件交给流式调用方。 */
+/** 持久化 Chat 对话轮次，并将安全 Pi 事件交给流式调用方。 */
 @Injectable()
-export class AgentService {
-  private readonly logger = new Logger(AgentService.name);
+export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
   private readonly conversationTails = new Map<string, Promise<void>>();
 
   /** Injects persistence and model services used by one streamed conversation turn. */
@@ -43,7 +43,7 @@ export class AgentService {
     conversationId: string | undefined,
     signal: AbortSignal,
     requestId: string = randomUUID(),
-  ): AsyncGenerator<AgentStreamEvent> {
+  ): AsyncGenerator<ChatStreamEvent> {
     const startedAt = Date.now();
     const resolvedConversationId = conversationId ?? randomUUID();
     const logContext: RequestLogContext = {
@@ -55,7 +55,7 @@ export class AgentService {
     let turn:
       | Awaited<ReturnType<ConversationsService['beginTurn']>>
       | undefined;
-    const persistenceState: AgentTurnPersistenceState = {
+    const persistenceState: ChatTurnPersistenceState = {
       logContext,
       messageUpdateCount: 0,
       lastMessageProgressLoggedAt: 0,
@@ -65,7 +65,7 @@ export class AgentService {
     let assistantStatus: 'completed' | 'failed' | 'cancelled' = 'failed';
     const eventCounts = new Map<string, number>();
 
-    writeStructuredEvent(this.logger, 'log', 'agent.turn.accepted', {
+    writeStructuredEvent(this.logger, 'log', 'chat.turn.accepted', {
       ...logContext,
       requestedConversation: conversationId !== undefined,
       promptLength: Array.from(prompt).length,
@@ -74,7 +74,7 @@ export class AgentService {
     try {
       if (signal.aborted) {
         assistantStatus = 'cancelled';
-        writeStructuredEvent(this.logger, 'warn', 'agent.turn.cancelled', {
+        writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
           ...logContext,
           phase,
           reason: 'aborted_before_queue',
@@ -90,14 +90,14 @@ export class AgentService {
       writeStructuredEvent(
         this.logger,
         'log',
-        'agent.conversation.queue.waiting',
+        'chat.conversation.queue.waiting',
         { ...logContext, queuedBehindCurrent },
       );
       releaseLock = await this.acquireConversationLock(resolvedConversationId);
       writeStructuredEvent(
         this.logger,
         'log',
-        'agent.conversation.queue.acquired',
+        'chat.conversation.queue.acquired',
         {
           ...logContext,
           queuedBehindCurrent,
@@ -106,7 +106,7 @@ export class AgentService {
       );
       if (signal.aborted) {
         assistantStatus = 'cancelled';
-        writeStructuredEvent(this.logger, 'warn', 'agent.turn.cancelled', {
+        writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
           ...logContext,
           phase,
           reason: 'aborted_while_queued',
@@ -115,7 +115,7 @@ export class AgentService {
       }
 
       phase = 'conversation.begin_turn';
-      writeStructuredEvent(this.logger, 'log', 'agent.turn.begin.started', {
+      writeStructuredEvent(this.logger, 'log', 'chat.turn.begin.started', {
         ...logContext,
         createIfMissing: conversationId === undefined,
       });
@@ -125,14 +125,14 @@ export class AgentService {
         conversationId === undefined,
         logContext,
       );
-      writeStructuredEvent(this.logger, 'log', 'agent.turn.begin.completed', {
+      writeStructuredEvent(this.logger, 'log', 'chat.turn.begin.completed', {
         ...logContext,
         historyMessageCount: turn.history.length,
         assistantTurnId: turn.assistantTurnId,
       });
       if (signal.aborted) {
         assistantStatus = 'cancelled';
-        writeStructuredEvent(this.logger, 'warn', 'agent.turn.cancelled', {
+        writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
           ...logContext,
           phase,
           reason: 'aborted_after_turn_begin',
@@ -146,7 +146,7 @@ export class AgentService {
 
       phase = 'llm.stream';
       const llmStartedAt = Date.now();
-      writeStructuredEvent(this.logger, 'log', 'agent.llm.stream.started', {
+      writeStructuredEvent(this.logger, 'log', 'chat.llm.stream.started', {
         ...logContext,
         historyMessageCount: turn.history.length,
       });
@@ -178,12 +178,12 @@ export class AgentService {
           piEvent.type === 'turn_end' ||
           piEvent.type === 'agent_end'
         ) {
-          writeStructuredEvent(this.logger, 'log', 'agent.pi.lifecycle', {
+          writeStructuredEvent(this.logger, 'log', 'chat.pi.lifecycle', {
             ...logContext,
             eventType: piEvent.type,
           });
         }
-        const event = projectAgentSessionEvent(piEvent);
+        const event = projectChatSessionEvent(piEvent);
         if (event) yield event;
       }
 
@@ -191,7 +191,7 @@ export class AgentService {
       writeStructuredEvent(
         this.logger,
         assistantStatus === 'completed' ? 'log' : 'warn',
-        'agent.llm.stream.terminated',
+        'chat.llm.stream.terminated',
         {
           ...logContext,
           outcome: assistantStatus,
@@ -205,8 +205,8 @@ export class AgentService {
         this.logger,
         assistantStatus === 'cancelled' ? 'warn' : 'error',
         assistantStatus === 'cancelled'
-          ? 'agent.turn.cancelled'
-          : 'agent.turn.failed',
+          ? 'chat.turn.cancelled'
+          : 'chat.turn.failed',
         {
           ...logContext,
           phase,
@@ -223,7 +223,7 @@ export class AgentService {
           writeStructuredEvent(
             this.logger,
             'log',
-            'agent.turn.finalization.started',
+            'chat.turn.finalization.started',
             {
               ...logContext,
               assistantTurnId: turn.assistantTurnId,
@@ -240,7 +240,7 @@ export class AgentService {
             writeStructuredEvent(
               this.logger,
               'log',
-              'agent.turn.finalization.completed',
+              'chat.turn.finalization.completed',
               {
                 ...logContext,
                 assistantTurnId: turn.assistantTurnId,
@@ -252,7 +252,7 @@ export class AgentService {
             writeStructuredEvent(
               this.logger,
               'error',
-              'agent.turn.finalization.failed',
+              'chat.turn.finalization.failed',
               {
                 ...logContext,
                 assistantTurnId: turn.assistantTurnId,
@@ -271,7 +271,7 @@ export class AgentService {
             : assistantStatus === 'cancelled'
               ? 'warn'
               : 'log',
-          'agent.turn.terminated',
+          'chat.turn.terminated',
           {
             ...logContext,
             status: assistantStatus,
@@ -286,7 +286,7 @@ export class AgentService {
   /** Commits one Pi message/tool snapshot before forwarding its public event. */
   private async persistPiEvent(
     conversationId: string,
-    state: AgentTurnPersistenceState,
+    state: ChatTurnPersistenceState,
     event: import('@earendil-works/pi-coding-agent').AgentSessionEvent,
   ): Promise<void> {
     switch (event.type) {
@@ -303,7 +303,7 @@ export class AgentService {
         state.activePiMessageStartedAt = Date.now();
         state.messageUpdateCount = 0;
         state.lastMessageProgressLoggedAt = state.activePiMessageStartedAt;
-        writeStructuredEvent(this.logger, 'log', 'agent.message.started', {
+        writeStructuredEvent(this.logger, 'log', 'chat.message.started', {
           ...state.logContext,
           messageId: state.activePiMessageId,
           role: event.message.role,
@@ -321,7 +321,7 @@ export class AgentService {
           state.activePiMessageStartedAt = Date.now();
           state.messageUpdateCount = 0;
           state.lastMessageProgressLoggedAt = 0;
-          writeStructuredEvent(this.logger, 'log', 'agent.message.started', {
+          writeStructuredEvent(this.logger, 'log', 'chat.message.started', {
             ...state.logContext,
             messageId: state.activePiMessageId,
             role: event.message.role,
@@ -338,7 +338,7 @@ export class AgentService {
         state.messageUpdateCount += 1;
         if (Date.now() - state.lastMessageProgressLoggedAt >= 5_000) {
           state.lastMessageProgressLoggedAt = Date.now();
-          writeStructuredEvent(this.logger, 'debug', 'agent.message.progress', {
+          writeStructuredEvent(this.logger, 'debug', 'chat.message.progress', {
             ...state.logContext,
             messageId: state.activePiMessageId,
             updateCount: state.messageUpdateCount,
@@ -358,7 +358,7 @@ export class AgentService {
             state.logContext,
           );
           state.activePiMessageStartedAt = Date.now();
-          writeStructuredEvent(this.logger, 'log', 'agent.message.started', {
+          writeStructuredEvent(this.logger, 'log', 'chat.message.started', {
             ...state.logContext,
             messageId: state.activePiMessageId,
             role: event.message.role,
@@ -389,7 +389,7 @@ export class AgentService {
           writeStructuredEvent(
             this.logger,
             status === 'completed' ? 'log' : 'warn',
-            'agent.message.terminated',
+            'chat.message.terminated',
             {
               ...state.logContext,
               messageId,
@@ -407,11 +407,13 @@ export class AgentService {
         state.lastMessageProgressLoggedAt = 0;
         return;
       case 'tool_execution_start': {
+        const displayPath = getToolDisplayPath(event.args);
         const messageId = await this.conversations.startToolExecution(
           conversationId,
           {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
+            ...(displayPath === undefined ? {} : { displayPath }),
             ...(event.parentToolCallId
               ? { parentToolCallId: event.parentToolCallId }
               : {}),
@@ -425,7 +427,7 @@ export class AgentService {
           lastLoggedAt: toolStartedAt,
           startedAt: toolStartedAt,
         });
-        writeStructuredEvent(this.logger, 'log', 'agent.tool.started', {
+        writeStructuredEvent(this.logger, 'log', 'chat.tool.started', {
           ...state.logContext,
           messageId,
           toolCallId: event.toolCallId,
@@ -464,7 +466,7 @@ export class AgentService {
         progress.updateCount += 1;
         if (Date.now() - progress.lastLoggedAt >= 5_000) {
           progress.lastLoggedAt = Date.now();
-          writeStructuredEvent(this.logger, 'debug', 'agent.tool.progress', {
+          writeStructuredEvent(this.logger, 'debug', 'chat.tool.progress', {
             ...state.logContext,
             messageId,
             toolCallId: event.toolCallId,
@@ -506,7 +508,7 @@ export class AgentService {
         writeStructuredEvent(
           this.logger,
           event.isError ? 'warn' : 'log',
-          'agent.tool.terminated',
+          'chat.tool.terminated',
           {
             ...state.logContext,
             messageId,
@@ -530,7 +532,7 @@ export class AgentService {
   /** Creates a fallback tool row if Pi reports progress without a start event. */
   private async getToolExecutionRowId(
     conversationId: string,
-    state: AgentTurnPersistenceState,
+    state: ChatTurnPersistenceState,
     toolCallId: string,
     toolName: string,
     parentToolCallId: string | undefined,
@@ -554,7 +556,7 @@ export class AgentService {
       lastLoggedAt: toolStartedAt,
       startedAt: toolStartedAt,
     });
-    writeStructuredEvent(this.logger, 'warn', 'agent.tool.start_missing', {
+    writeStructuredEvent(this.logger, 'warn', 'chat.tool.start_missing', {
       ...state.logContext,
       messageId,
       toolCallId,
@@ -625,4 +627,18 @@ function getPiMessageMetrics(
 function getSafeStringLength(value: unknown): number | undefined {
   if (typeof value === 'string') return Array.from(value).length;
   return undefined;
+}
+
+/** Keeps only a string path from tool arguments for later safe history display. */
+function getToolDisplayPath(args: unknown): string | undefined {
+  if (
+    typeof args !== 'object' ||
+    args === null ||
+    Array.isArray(args)
+  ) {
+    return undefined;
+  }
+
+  const path = (args as Record<string, unknown>).path;
+  return typeof path === 'string' ? path : undefined;
 }

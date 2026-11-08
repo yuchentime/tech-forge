@@ -15,6 +15,16 @@ export interface ConversationHistoryMessage {
   content: string;
   status: 'completed' | 'failed' | 'cancelled';
   createdAt: string;
+  toolActivities?: ConversationToolActivity[];
+}
+
+/** Describes a safe tool lifecycle summary attached to a persisted user message. */
+export interface ConversationToolActivity {
+  toolCallId: string;
+  toolName: string;
+  path?: string;
+  status: 'completed' | 'failed';
+  durationMs?: number;
 }
 
 /** Describes one bounded history page and whether an earlier page remains. */

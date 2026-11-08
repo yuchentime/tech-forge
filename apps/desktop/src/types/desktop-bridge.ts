@@ -1,4 +1,4 @@
-import type { AgentStreamEvent } from './agent-stream-event';
+import type { ChatStreamEvent } from './chat-stream-event';
 
 export type BackendRequest = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -11,19 +11,19 @@ export type BackendResponse<T = unknown> = {
   data: T;
 };
 
-export type { AgentStreamEvent } from './agent-stream-event';
+export type { ChatStreamEvent } from './chat-stream-event';
 
 export type DesktopBridge = {
   getBackendState(): Promise<{ ready: boolean; port: number | null }>;
   request<T = unknown>(input: BackendRequest): Promise<BackendResponse<T>>;
-  /** Starts one validated Agent stream and returns its cancellation request ID. */
-  streamAgent(
+  /** Starts one validated chat stream and returns its cancellation request ID. */
+  streamChat(
     prompt: string,
-    onEvent: (event: AgentStreamEvent) => void,
+    onEvent: (event: ChatStreamEvent) => void,
     conversationId?: string,
   ): string;
   /** Cancels an active stream started by this Renderer. */
-  cancelAgentStream(requestId: string): void;
+  cancelChatStream(requestId: string): void;
 };
 
 /** Detects whether this renderer was launched with the restricted Electron preload bridge. */
@@ -34,8 +34,8 @@ export function hasDesktopBridge(): boolean {
     bridge &&
       typeof bridge.getBackendState === 'function' &&
       typeof bridge.request === 'function' &&
-      typeof bridge.streamAgent === 'function' &&
-      typeof bridge.cancelAgentStream === 'function',
+      typeof bridge.streamChat === 'function' &&
+      typeof bridge.cancelChatStream === 'function',
   );
 }
 

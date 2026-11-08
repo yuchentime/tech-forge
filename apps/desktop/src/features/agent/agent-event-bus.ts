@@ -1,4 +1,5 @@
-import type { AgentStreamEvent } from '../../types/agent-stream-event';
+import type { ChatStreamEvent } from '../../types/chat-stream-event';
+import type { ConversationToolActivity } from './conversation-store';
 
 export type AgentToolActivity = {
   toolCallId: string;
@@ -14,7 +15,7 @@ export type AgentActivitySnapshot = {
   phase: 'idle' | 'working' | 'responding';
   tools: AgentToolActivity[];
   startedAt: number;
-  elapsedMs: number;
+  elapsedMs: number | null;
 };
 
 /** Keeps one immutable activity snapshot per user message during this app run. */
@@ -43,6 +44,31 @@ export class AgentEventBus {
   /** Returns the immutable per-turn map consumed by the message list. */
   getTurnSnapshots = (): AgentActivityState => this.snapshot;
 
+  /** Restores durable tool summaries under their persisted user message IDs. */
+  restoreHistoryActivity(
+    turnId: string,
+    activities: readonly ConversationToolActivity[],
+  ): void {
+    const tools: AgentToolActivity[] = activities.map((activity) => ({
+      toolCallId: activity.toolCallId,
+      toolName: activity.toolName,
+      args: activity.path === undefined ? {} : { path: activity.path },
+      status: activity.status,
+      ...(activity.durationMs === undefined
+        ? {}
+        : { durationMs: activity.durationMs }),
+    }));
+    if (!this.activeRequestId) this.lastTurnId = turnId;
+    this.updateTurnSnapshot({
+      turnId,
+      requestId: null,
+      phase: 'idle',
+      tools,
+      startedAt: 0,
+      elapsedMs: null,
+    });
+  }
+
   /** Starts one activity record, optionally tied to its initiating user message. */
   begin(turnIdOrRequestId: string, requestId?: string): void {
     if (this.activeRequestId) this.clear(this.activeRequestId);
@@ -64,7 +90,7 @@ export class AgentEventBus {
   }
 
   /** Applies only events from the active request and preserves older turn records. */
-  publish(requestId: string, event: AgentStreamEvent): void {
+  publish(requestId: string, event: ChatStreamEvent): void {
     const activity = this.getActiveSnapshot(requestId);
     if (!activity) return;
 

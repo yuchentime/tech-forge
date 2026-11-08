@@ -16,27 +16,27 @@ import {
   type WebContents,
 } from 'electron';
 import type {
-  AgentStreamEvent,
+  ChatStreamEvent,
   BackendRequest,
 } from '../../src/types/desktop-bridge';
 import { SseParser } from './sse-parser';
-import { decodeAgentSseMessage } from './stream-protocol';
-import { routeAgentStreamEvent } from './stream-routing';
+import { decodeChatSseMessage } from './stream-protocol';
+import { routeChatStreamEvent } from './stream-routing';
 
 const READY_PREFIX = 'TEACHFORGE_BACKEND_READY=';
 const STARTUP_TIMEOUT_MS = 20_000;
 const MAX_REQUEST_BYTES = 1_048_576;
-const MAX_AGENT_PROMPT_LENGTH = 10_000;
+const MAX_CHAT_PROMPT_LENGTH = 10_000;
 const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-const agentRequestIdPattern = /^agent-\d+-\d+$/;
+const chatRequestIdPattern = /^chat-\d+-\d+$/;
 
 type BackendChild = UtilityProcess | ChildProcess;
-type AgentStreamStart = {
+type ChatStreamStart = {
   requestId: string;
   prompt: string;
   conversationId?: string;
 };
-type ActiveAgentStream = {
+type ActiveChatStream = {
   requestId: string;
   sender: WebContents;
   controller: AbortController;
@@ -49,7 +49,7 @@ let backendPort: number | undefined;
 let backendToken: string | undefined;
 let mainWindow: BrowserWindow | undefined;
 let quitting = false;
-const activeAgentStreams = new Map<string, ActiveAgentStream>();
+const activeChatStreams = new Map<string, ActiveChatStream>();
 const conversationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -228,7 +228,7 @@ function startBackend(): Promise<void> {
   });
 }
 
-/** Registers the existing JSON bridge and the dedicated Agent stream IPC. */
+/** Registers the existing JSON bridge and the dedicated chat stream IPC. */
 function registerBackendIpc(): void {
   ipcMain.handle('backend:state', () => ({
     ready: backendPort !== undefined,
@@ -261,27 +261,27 @@ function registerBackendIpc(): void {
     return { status: response.status, data };
   });
 
-  ipcMain.on('agent:stream:start', (event, value: unknown) => {
-    startAgentStream(event, value);
+  ipcMain.on('chat:stream:start', (event, value: unknown) => {
+    startChatStream(event, value);
   });
-  ipcMain.on('agent:stream:cancel', (event, value: unknown) => {
+  ipcMain.on('chat:stream:cancel', (event, value: unknown) => {
     if (typeof value === 'string') {
-      cancelBackendAgentStream(value, event.sender);
+      cancelBackendChatStream(value, event.sender);
     }
   });
 }
 
 /** Validates the narrow Renderer request before creating a stream channel. */
-function parseAgentStreamStart(value: unknown): AgentStreamStart | undefined {
+function parseChatStreamStart(value: unknown): ChatStreamStart | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const input = value as Partial<AgentStreamStart>;
+  const input = value as Partial<ChatStreamStart>;
   const keys = Object.keys(value);
   if (
     keys.some((key) => !['requestId', 'prompt', 'conversationId'].includes(key)) ||
     keys.length < 2 ||
     keys.length > 3 ||
     typeof input.requestId !== 'string' ||
-    !agentRequestIdPattern.test(input.requestId) ||
+    !chatRequestIdPattern.test(input.requestId) ||
     typeof input.prompt !== 'string' ||
     (input.conversationId !== undefined &&
       (typeof input.conversationId !== 'string' ||
@@ -291,7 +291,7 @@ function parseAgentStreamStart(value: unknown): AgentStreamStart | undefined {
   }
 
   const prompt = input.prompt.trim();
-  if (!prompt || Array.from(prompt).length > MAX_AGENT_PROMPT_LENGTH) {
+  if (!prompt || Array.from(prompt).length > MAX_CHAT_PROMPT_LENGTH) {
     return undefined;
   }
   return {
@@ -301,36 +301,36 @@ function parseAgentStreamStart(value: unknown): AgentStreamStart | undefined {
   };
 }
 
-/** Starts a single Agent stream only for the main application frame. */
-function startAgentStream(event: IpcMainEvent, value: unknown): void {
+/** Starts a single chat stream only for the main application frame. */
+function startChatStream(event: IpcMainEvent, value: unknown): void {
   const requestId =
     value && typeof value === 'object'
       ? (value as { requestId?: unknown }).requestId
       : undefined;
-  if (typeof requestId !== 'string' || !agentRequestIdPattern.test(requestId)) {
+  if (typeof requestId !== 'string' || !chatRequestIdPattern.test(requestId)) {
     return;
   }
   if (
     event.sender !== mainWindow?.webContents ||
     event.senderFrame !== event.sender.mainFrame
   ) {
-    event.sender.send('agent:stream:failure', {
+    event.sender.send('chat:stream:failure', {
       requestId,
       message: 'Agent 请求来源无效。',
     });
     return;
   }
 
-  const input = parseAgentStreamStart(value);
+  const input = parseChatStreamStart(value);
   if (!input) {
-    event.sender.send('agent:stream:failure', {
+    event.sender.send('chat:stream:failure', {
       requestId,
       message: '输入内容无效，请检查后重试。',
     });
     return;
   }
-  if (activeAgentStreams.has(input.requestId)) {
-    event.sender.send('agent:stream:failure', {
+  if (activeChatStreams.has(input.requestId)) {
+    event.sender.send('chat:stream:failure', {
       requestId: input.requestId,
       message: '该 Agent 请求正在运行，请稍后重试。',
     });
@@ -338,54 +338,54 @@ function startAgentStream(event: IpcMainEvent, value: unknown): void {
   }
 
   const channel = new MessageChannelMain();
-  const active: ActiveAgentStream = {
+  const active: ActiveChatStream = {
     requestId: input.requestId,
     sender: event.sender,
     controller: new AbortController(),
     port: channel.port1,
   };
-  activeAgentStreams.set(active.requestId, active);
-  active.port.on('close', () => cancelBackendAgentStream(active.requestId, active.sender));
+  activeChatStreams.set(active.requestId, active);
+  active.port.on('close', () => cancelBackendChatStream(active.requestId, active.sender));
   active.port.start();
 
   try {
     event.sender.postMessage(
-      'agent:stream:port',
+      'chat:stream:port',
       { requestId: active.requestId },
       [channel.port2],
     );
   } catch {
-    cancelBackendAgentStream(active.requestId, active.sender);
+    cancelBackendChatStream(active.requestId, active.sender);
     return;
   }
-  void forwardAgentStream(active, input.prompt, input.conversationId);
+  void forwardChatStream(active, input.prompt, input.conversationId);
 }
 
 /** Posts one normalized event and closes its resources at terminal events. */
-function postAgentStreamEvent(
-  active: ActiveAgentStream,
-  event: AgentStreamEvent,
+function postChatStreamEvent(
+  active: ActiveChatStream,
+  event: ChatStreamEvent,
 ): boolean {
-  if (activeAgentStreams.get(active.requestId) !== active) return false;
+  if (activeChatStreams.get(active.requestId) !== active) return false;
   try {
-    if (!routeAgentStreamEvent(activeAgentStreams, active.requestId, event)) {
+    if (!routeChatStreamEvent(activeChatStreams, active.requestId, event)) {
       return false;
     }
   } catch {
-    cancelBackendAgentStream(active.requestId, active.sender);
+    cancelBackendChatStream(active.requestId, active.sender);
     return false;
   }
 
   if (event.type === 'done' || event.type === 'error') {
-    completeBackendAgentStream(active);
+    completeBackendChatStream(active);
     return false;
   }
   return true;
 }
 
-/** Reads the fixed Agent endpoint incrementally and forwards only typed events. */
-async function forwardAgentStream(
-  active: ActiveAgentStream,
+/** Reads the fixed Chat endpoint incrementally and forwards only typed events. */
+async function forwardChatStream(
+  active: ActiveChatStream,
   prompt: string,
   conversationId?: string,
 ): Promise<void> {
@@ -393,7 +393,7 @@ async function forwardAgentStream(
   let finished = false;
   try {
     if (!backendPort || !backendToken) {
-      postAgentStreamEvent(active, {
+      postChatStreamEvent(active, {
         type: 'error',
         message: '本地服务暂不可用，请稍后重试。',
       });
@@ -401,7 +401,7 @@ async function forwardAgentStream(
     }
 
     const response = await fetch(
-      `http://127.0.0.1:${backendPort}/api/agent/stream`,
+      `http://127.0.0.1:${backendPort}/api/chat/stream`,
       {
         method: 'POST',
         headers: {
@@ -420,7 +420,7 @@ async function forwardAgentStream(
       !response.headers.get('content-type')?.includes('text/event-stream') ||
       !response.body
     ) {
-      postAgentStreamEvent(active, {
+      postChatStreamEvent(active, {
         type: 'error',
         message: '本地 Agent 请求失败，请检查输入和服务状态。',
       });
@@ -436,16 +436,16 @@ async function forwardAgentStream(
       const text = chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       const messages = parser.feed(text);
       for (const message of messages) {
-        const streamEvent = decodeAgentSseMessage(message);
+        const streamEvent = decodeChatSseMessage(message);
         if (!streamEvent) {
-          postAgentStreamEvent(active, {
+          postChatStreamEvent(active, {
             type: 'error',
             message: '本地 Agent 返回了无法识别的流事件。',
           });
           finished = true;
           return;
         }
-        const shouldContinue = postAgentStreamEvent(active, streamEvent);
+        const shouldContinue = postChatStreamEvent(active, streamEvent);
         if (!shouldContinue) {
           finished = streamEvent.type === 'done' || streamEvent.type === 'error';
           return;
@@ -456,14 +456,14 @@ async function forwardAgentStream(
     parser.finish();
 
     if (!active.controller.signal.aborted && !finished) {
-      postAgentStreamEvent(active, {
+      postChatStreamEvent(active, {
         type: 'error',
         message: 'Agent 响应意外结束，请重试。',
       });
     }
   } catch {
     if (!active.controller.signal.aborted) {
-      postAgentStreamEvent(active, {
+      postChatStreamEvent(active, {
         type: 'error',
         message: '无法连接本地 Agent 服务，请检查服务状态后重试。',
       });
@@ -478,33 +478,33 @@ async function forwardAgentStream(
       reader.releaseLock();
     }
     active.reader = undefined;
-    completeBackendAgentStream(active);
+    completeBackendChatStream(active);
   }
 }
 
 /** Removes a completed request and closes its per-request MessagePort. */
-function completeBackendAgentStream(active: ActiveAgentStream): void {
-  if (activeAgentStreams.get(active.requestId) !== active) return;
-  activeAgentStreams.delete(active.requestId);
+function completeBackendChatStream(active: ActiveChatStream): void {
+  if (activeChatStreams.get(active.requestId) !== active) return;
+  activeChatStreams.delete(active.requestId);
   active.port.removeAllListeners();
   active.port.close();
 }
 
 /** Aborts one Renderer-owned stream and cancels its active response reader. */
-function cancelBackendAgentStream(requestId: string, sender: WebContents): void {
-  const active = activeAgentStreams.get(requestId);
+function cancelBackendChatStream(requestId: string, sender: WebContents): void {
+  const active = activeChatStreams.get(requestId);
   if (!active || active.sender !== sender) return;
-  activeAgentStreams.delete(requestId);
+  activeChatStreams.delete(requestId);
   active.controller.abort();
   if (active.reader) void active.reader.cancel().catch(() => undefined);
   active.port.removeAllListeners();
   active.port.close();
 }
 
-/** Cancels every active Agent stream before the application shuts down. */
-function cancelAllAgentStreams(): void {
-  for (const active of activeAgentStreams.values()) {
-    cancelBackendAgentStream(active.requestId, active.sender);
+/** Cancels every active chat stream before the application shuts down. */
+function cancelAllChatStreams(): void {
+  for (const active of activeChatStreams.values()) {
+    cancelBackendChatStream(active.requestId, active.sender);
   }
 }
 
@@ -535,7 +535,7 @@ function createWindow(): void {
     if (!isAllowedNavigation) event.preventDefault();
   });
   mainWindow.on('closed', () => {
-    cancelAllAgentStreams();
+    cancelAllChatStreams();
     mainWindow = undefined;
   });
 
@@ -571,7 +571,7 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
-  cancelAllAgentStreams();
+  cancelAllChatStreams();
   void stopBackend().finally(() => app.quit());
 });
 

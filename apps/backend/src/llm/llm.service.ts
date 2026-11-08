@@ -362,7 +362,7 @@ export class LlmService {
       }
 
       unsubscribe = session.subscribe((event) => {
-        // 所有 Pi 事件按回调顺序入队；AgentService 随后决定哪些字段可以出站。
+        // 所有 Pi 事件按回调顺序入队；ChatService 随后决定哪些字段可以出站。
         if (hasPersistenceError) {
           wake();
           return;
@@ -404,7 +404,7 @@ export class LlmService {
         }
 
         if (events.length > 0) {
-          // yield 将一个 Pi 事件交给 AgentService；消费方处理后再调用 next() 继续。
+          // yield 将一个 Pi 事件交给 ChatService；消费方处理后再调用 next() 继续。
           yield events.shift()!;
           continue;
         }

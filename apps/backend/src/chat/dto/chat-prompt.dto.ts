@@ -7,8 +7,8 @@ import {
   MaxLength,
 } from 'class-validator';
 
-/** Defines and normalizes prompt and optional conversation identity for Agent. */
-export class AgentPromptDto {
+/** Defines and normalizes prompt and optional conversation identity for Chat. */
+export class ChatPromptDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()

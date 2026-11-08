@@ -9,6 +9,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
+    "test:conversation-history": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-history.test.cjs",
     "test:agent-stream": "npm run build && node --test test/agent-stream.test.cjs test/workspace-file-tools.test.cjs",
     "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs"
   },

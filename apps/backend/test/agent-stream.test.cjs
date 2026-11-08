@@ -2,9 +2,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { plainToInstance } = require('class-transformer');
 const { validate } = require('class-validator');
-const { AgentService } = require('../dist/agent/agent.service.js');
-const { AgentPromptDto } = require('../dist/agent/dto/agent-prompt.dto.js');
-const { encodeAgentSseEvent } = require('../dist/agent/sse.js');
+const { ChatService } = require('../dist/chat/chat.service.js');
+const { ChatPromptDto } = require('../dist/chat/dto/chat-prompt.dto.js');
+const { encodeChatSseEvent } = require('../dist/chat/chat-sse.js');
 const { LlmService } = require('../dist/llm/llm.service.js');
 
 /** Collects every value from an async generator for one local test assertion. */
@@ -14,7 +14,7 @@ async function collect(generator) {
   return values;
 }
 
-test('AgentService delegates the prompt and request signal to the configured model', async () => {
+test('ChatService delegates the prompt and request signal to the configured model', async () => {
   const signal = new AbortController().signal;
   const calls = [];
   const piEvents = [
@@ -67,7 +67,7 @@ test('AgentService delegates the prompt and request signal to the configured mod
     },
   };
 
-  const service = new AgentService(llm);
+  const service = new ChatService(llm);
   assert.deepEqual(await collect(service.stream('讲解缓存雪崩', signal)), [
     { type: 'agent_start' },
     { type: 'turn_start' },
@@ -99,35 +99,35 @@ test('AgentService delegates the prompt and request signal to the configured mod
   ]);
 });
 
-test('AgentPromptDto trims input and counts Unicode characters', async () => {
-  const valid = plainToInstance(AgentPromptDto, { prompt: '  备课问题  ' });
+test('ChatPromptDto trims input and counts Unicode characters', async () => {
+  const valid = plainToInstance(ChatPromptDto, { prompt: '  备课问题  ' });
   assert.equal(valid.prompt, '备课问题');
   assert.deepEqual(await validate(valid), []);
 
-  const maxLength = plainToInstance(AgentPromptDto, {
+  const maxLength = plainToInstance(ChatPromptDto, {
     prompt: '😀'.repeat(10_000),
   });
   assert.deepEqual(await validate(maxLength), []);
 
-  const tooLong = plainToInstance(AgentPromptDto, {
+  const tooLong = plainToInstance(ChatPromptDto, {
     prompt: '😀'.repeat(10_001),
   });
   assert.ok((await validate(tooLong)).some((error) => error.property === 'prompt'));
 
-  const blank = plainToInstance(AgentPromptDto, { prompt: '  \n ' });
+  const blank = plainToInstance(ChatPromptDto, { prompt: '  \n ' });
   assert.ok((await validate(blank)).some((error) => error.property === 'prompt'));
 });
 
 test('SSE encoder preserves Pi event names and JSON-escapes text deltas', () => {
   assert.equal(
-    encodeAgentSseEvent({
+    encodeChatSseEvent({
       type: 'message_update',
       assistantMessageEvent: { type: 'text_delta', delta: '一行\n二行' },
     }),
     'event: message_update\ndata: {"assistantMessageEvent":{"type":"text_delta","delta":"一行\\n二行"}}\n\n',
   );
   assert.equal(
-    encodeAgentSseEvent({ type: 'done', finishReason: 'stop' }),
+    encodeChatSseEvent({ type: 'done', finishReason: 'stop' }),
     'event: done\ndata: {"finishReason":"stop"}\n\n',
   );
 });

@@ -1,5 +1,5 @@
 /** Defines the safe conversation metadata and Pi event fields that may cross the desktop bridge. */
-export type AgentStreamEvent =
+export type ChatStreamEvent =
   | { type: 'conversation'; conversationId: string }
   | { type: 'agent_start' }
   | { type: 'turn_start' }
@@ -26,7 +26,7 @@ export type AgentStreamEvent =
   | { type: 'error'; message: string };
 
 /** 严格校验事件字段，避免完整 Pi payload 越过桌面桥接。 */
-export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
+export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
 
   switch (value.type) {

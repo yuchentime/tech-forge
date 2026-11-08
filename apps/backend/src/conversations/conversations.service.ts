@@ -25,6 +25,7 @@ import type {
   ConversationMessagePageDto,
   ConversationMessageDto,
   ConversationSummaryDto,
+  ConversationToolActivityDto,
 } from './conversation-query.dto';
 import {
   getSafeErrorLogFields,
@@ -134,7 +135,7 @@ export class ConversationsService {
     }
   }
 
-  /** Returns one ordered text-only message page for an existing conversation. */
+  /** Returns one ordered text page with safe tool summaries on its user messages. */
   async getConversationMessages(
     conversationId: string,
     beforeMessageId?: string,
@@ -227,17 +228,29 @@ export class ConversationsService {
       }
 
       const hasMore = visibleRows.length > CONVERSATION_HISTORY_PAGE_SIZE;
+      const pageRows = visibleRows
+        .slice(0, CONVERSATION_HISTORY_PAGE_SIZE)
+        .reverse();
+      const toolActivitiesByUserId = await this.getToolActivitiesByUserMessageId(
+        conversationId,
+        pageRows
+          .map(({ message }) => message)
+          .filter((message) => message.role === 'user'),
+        logContext,
+      );
       const result: ConversationMessagePageDto = {
-        messages: visibleRows
-          .slice(0, CONVERSATION_HISTORY_PAGE_SIZE)
-          .reverse()
-          .map(({ message, content }): ConversationMessageDto => ({
+        messages: pageRows.map(
+          ({ message, content }): ConversationMessageDto => ({
             id: message.id,
             role: message.role as 'user' | 'assistant',
             content,
             status: message.status as ConversationMessageDto['status'],
             createdAt: message.createdAt.toISOString(),
-          })),
+            ...(message.role === 'user'
+              ? { toolActivities: toolActivitiesByUserId.get(message.id) ?? [] }
+              : {}),
+          }),
+        ),
         hasMore,
       };
       writeStructuredEvent(
@@ -249,6 +262,10 @@ export class ConversationsService {
           scannedMessageCount,
           queryBatchCount,
           visibleMessageCount: result.messages.length,
+          toolActivityCount: [...toolActivitiesByUserId.values()].reduce(
+            (count, activities) => count + activities.length,
+            0,
+          ),
           hasMore,
           elapsedMs: Date.now() - startedAt,
         },
@@ -273,6 +290,99 @@ export class ConversationsService {
       );
       throw error;
     }
+  }
+
+  /** Loads safe tool summaries for each selected user message without exposing tool payloads. */
+  private async getToolActivitiesByUserMessageId(
+    conversationId: string,
+    userMessages: MessageEntity[],
+    logContext?: RequestLogContext,
+  ): Promise<
+    Map<string, NonNullable<ConversationMessageDto['toolActivities']>>
+  > {
+    const activitiesByUserId = new Map<
+      string,
+      NonNullable<ConversationMessageDto['toolActivities']>
+    >();
+    for (const userMessage of userMessages) {
+      activitiesByUserId.set(userMessage.id, []);
+    }
+    if (userMessages.length === 0) return activitiesByUserId;
+
+    const repository = this.dataSource.getRepository(MessageEntity);
+    const firstUserSequence = userMessages[0].sequenceNo;
+    const lastUserSequence = userMessages[userMessages.length - 1].sequenceNo;
+    const nextUserMessage = await repository
+      .createQueryBuilder('message')
+      .where('message.conversationId = :conversationId', { conversationId })
+      .andWhere('message.role = :role', { role: 'user' })
+      .andWhere('message.sequenceNo > :sequenceNo', {
+        sequenceNo: lastUserSequence,
+      })
+      .orderBy('message.sequenceNo', 'ASC')
+      .getOne();
+    const toolQuery = repository
+      .createQueryBuilder('message')
+      .where('message.conversationId = :conversationId', { conversationId })
+      .andWhere('message.role = :role', { role: 'toolExecution' })
+      .andWhere('message.status IN (:...statuses)', {
+        statuses: ['completed', 'failed'],
+      })
+      .andWhere('message.sequenceNo > :firstUserSequence', {
+        firstUserSequence,
+      });
+    if (nextUserMessage) {
+      toolQuery.andWhere('message.sequenceNo < :nextUserSequence', {
+        nextUserSequence: nextUserMessage.sequenceNo,
+      });
+    }
+
+    const toolMessages = await toolQuery
+      .orderBy('message.sequenceNo', 'ASC')
+      .getMany();
+    for (const toolMessage of toolMessages) {
+      let execution: PersistedToolExecution | undefined;
+      try {
+        execution = parseToolExecution(toolMessage.contentJson);
+      } catch (error) {
+        writeStructuredEvent(
+          this.logger,
+          'warn',
+          'conversations.tool.history_projection.skipped',
+          {
+            ...logContext,
+            conversationId,
+            messageId: toolMessage.id,
+            ...getSafeErrorLogFields(error),
+          },
+        );
+        continue;
+      }
+      if (!execution) continue;
+
+      let owner: MessageEntity | undefined;
+      for (const userMessage of userMessages) {
+        if (userMessage.sequenceNo > toolMessage.sequenceNo) break;
+        owner = userMessage;
+      }
+      if (!owner) continue;
+
+      const activity: ConversationToolActivityDto = {
+        toolCallId: execution.toolCallId,
+        toolName: execution.toolName,
+        status: execution.status === 'completed' ? 'completed' : 'failed',
+        ...(execution.displayPath === undefined
+          ? {}
+          : { path: execution.displayPath }),
+        ...(typeof execution.durationMs === 'number' &&
+        Number.isFinite(execution.durationMs) &&
+        execution.durationMs >= 0
+          ? { durationMs: execution.durationMs }
+          : {}),
+      };
+      activitiesByUserId.get(owner.id)?.push(activity);
+    }
+    return activitiesByUserId;
   }
 
   /** Reconciles old interrupted rows, loads prior history, and starts a new turn. */

@@ -2,7 +2,7 @@ import type {
   ChatModelAdapter,
   ThreadMessage,
 } from '@assistant-ui/react';
-import type { AgentStreamEvent } from '../../types/desktop-bridge';
+import type { ChatStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
 import { conversationStore } from './conversation-store';
 
@@ -31,13 +31,13 @@ export const agentChatAdapter: ChatModelAdapter = {
     if (!userMessage?.prompt) throw new Error('请输入文本后再发送。');
     if (abortSignal.aborted) return;
 
-    const queuedEvents: AgentStreamEvent[] = [];
-    let nextEvent: ((event: AgentStreamEvent | null) => void) | undefined;
+    const queuedEvents: ChatStreamEvent[] = [];
+    let nextEvent: ((event: ChatStreamEvent | null) => void) | undefined;
     let requestId = '';
     let terminal = false;
     let accumulatedText = '';
 
-    const receiveEvent = (event: AgentStreamEvent): void => {
+    const receiveEvent = (event: ChatStreamEvent): void => {
       if (nextEvent) {
         const resolve = nextEvent;
         nextEvent = undefined;
@@ -46,7 +46,7 @@ export const agentChatAdapter: ChatModelAdapter = {
         queuedEvents.push(event);
       }
     };
-    const takeNextEvent = (): Promise<AgentStreamEvent | null> => {
+    const takeNextEvent = (): Promise<ChatStreamEvent | null> => {
       const event = queuedEvents.shift();
       if (event) return Promise.resolve(event);
       return new Promise((resolve) => {
@@ -54,13 +54,13 @@ export const agentChatAdapter: ChatModelAdapter = {
       });
     };
     const cancel = (): void => {
-      if (requestId) window.teachforge.cancelAgentStream(requestId);
+      if (requestId) window.teachforge.cancelChatStream(requestId);
       const resolve = nextEvent;
       nextEvent = undefined;
       resolve?.(null);
     };
 
-    requestId = window.teachforge.streamAgent(
+    requestId = window.teachforge.streamChat(
       userMessage.prompt,
       receiveEvent,
       conversationStore.getSnapshot().activeConversationId ?? undefined,

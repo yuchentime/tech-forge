@@ -33,6 +33,7 @@ import {
   conversationStore,
   type ConversationHistoryPage,
   type ConversationHistoryMessage,
+  type ConversationToolActivity,
 } from './conversation-store';
 
 /** Loads persisted conversation history into the long-lived Agent runtime. */
@@ -126,6 +127,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       if (version !== requestVersion.current) return;
 
       pendingScrollAnchor.current = null;
+      restoreHistoryToolActivities(response.data.messages);
       runtime.thread.reset(response.data.messages.map(toThreadMessage));
       setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
@@ -196,6 +198,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         return;
       }
 
+      restoreHistoryToolActivities(response.data.messages);
       const latestMessages = runtime.thread.getState().messages;
       const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
       const earlierThreadMessages = response.data.messages
@@ -484,8 +487,40 @@ function isConversationHistoryMessage(
     (message.status === 'completed' ||
       message.status === 'failed' ||
       message.status === 'cancelled') &&
-    typeof message.createdAt === 'string'
+    typeof message.createdAt === 'string' &&
+    (message.toolActivities === undefined ||
+      (Array.isArray(message.toolActivities) &&
+        message.toolActivities.every(isConversationToolActivity)))
   );
+}
+
+/** Validates the safe tool fields before the activity state receives API data. */
+function isConversationToolActivity(
+  value: unknown,
+): value is ConversationToolActivity {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const activity = value as Partial<ConversationToolActivity>;
+  return (
+    typeof activity.toolCallId === 'string' &&
+    typeof activity.toolName === 'string' &&
+    (activity.path === undefined || typeof activity.path === 'string') &&
+    (activity.status === 'completed' || activity.status === 'failed') &&
+    (activity.durationMs === undefined ||
+      (typeof activity.durationMs === 'number' &&
+        Number.isFinite(activity.durationMs) &&
+        activity.durationMs >= 0))
+  );
+}
+
+/** Rebuilds history activities for persisted user IDs before the message list renders. */
+function restoreHistoryToolActivities(messages: ConversationHistoryMessage[]): void {
+  for (const message of messages) {
+    if (message.role !== 'user' || !message.toolActivities?.length) continue;
+    agentEventBus.restoreHistoryActivity(message.id, message.toolActivities);
+  }
 }
 
 /** Shows one request's elapsed time and safe tool summaries below its user message. */
@@ -521,13 +556,15 @@ function AgentActivity({
         <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg py-1.5 text-sm text-stone-600 outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30">
           <Stack aria-hidden="true" className="size-5 shrink-0 text-stone-600" weight="regular" />
           <span>{isFinal ? '已工作' : '正在工作'}</span>
-          <time
-            aria-live="off"
-            className="tabular-nums"
-            dateTime={`PT${Math.floor(elapsedMs / 1000)}S`}
-          >
-            {formatDuration(elapsedMs)}
-          </time>
+          {elapsedMs !== null && (
+            <time
+              aria-live="off"
+              className="tabular-nums"
+              dateTime={`PT${Math.floor(elapsedMs / 1000)}S`}
+            >
+              {formatDuration(elapsedMs)}
+            </time>
+          )}
           <CaretDown
             aria-hidden="true"
             className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180"

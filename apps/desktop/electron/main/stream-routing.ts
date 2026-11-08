@@ -1,13 +1,13 @@
-import type { AgentStreamEvent } from '../../src/types/desktop-bridge';
+import type { ChatStreamEvent } from '../../src/types/desktop-bridge';
 
-type StreamPort = { postMessage(event: AgentStreamEvent): void };
+type StreamPort = { postMessage(event: ChatStreamEvent): void };
 type StreamRequest = { port: StreamPort };
 
 /** Routes an event through only the MessagePort registered to its request ID. */
-export function routeAgentStreamEvent(
+export function routeChatStreamEvent(
   streams: ReadonlyMap<string, StreamRequest>,
   requestId: string,
-  event: AgentStreamEvent,
+  event: ChatStreamEvent,
 ): boolean {
   const stream = streams.get(requestId);
   if (!stream) return false;

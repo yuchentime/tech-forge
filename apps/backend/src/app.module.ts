@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { buildDatabaseOptions } from './database/database.options';
-import { AgentModule } from './agent/agent.module';
+import { ChatModule } from './chat/chat.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { ConversationsModule } from './conversations/conversations.module';
@@ -33,7 +33,7 @@ import { TeachingModule } from './teaching/teaching.module';
     AssessmentsModule,
     ArtifactsModule,
     MemoryModule,
-    AgentModule,
+    ChatModule,
     LlmModule,
     JobsModule,
   ],

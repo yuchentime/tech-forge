@@ -176,6 +176,17 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 | `content` | `String` | 是 | `contentJson` 中的 text block 投影 | Renderer 展示的纯文本内容 | UTF-8 文本 | 空文本消息不返回 |
 | `status` | `String` | 是 | `MessageEntity.status` | 本条消息的完成状态 | `completed`、`failed`、`cancelled` | 不为空；pending 行不返回 |
 | `createdAt` | `String` | 是 | `MessageEntity.createdAt` | 消息创建时间 | ISO 8601 | 不为空 |
+| `toolActivities` | `ConversationToolActivity[]` | user 行是；assistant 行否 | user turn 中的 `toolExecution` 行 | 安全工具执行摘要 | 字段见下表 | 没有工具时 user 行返回 `[]` |
+
+##### `toolActivities[]` (`ConversationToolActivity`)
+
+| 字段 | 类型 | 必填 | 含义 |
+|---|---|---|---|
+| `toolCallId` | `String` | 是 | 对应 Pi 工具调用 ID |
+| `toolName` | `String` | 是 | 工具名 |
+| `path` | `String` | 否 | 仅当新持久记录含字符串 `args.path` 时返回 |
+| `status` | `String` | 是 | `completed` 或 `failed`；中断执行按失败展示 |
+| `durationMs` | `Number` | 否 | 工具自身耗时（毫秒） |
 
 #### Error Cases
 
@@ -191,6 +202,6 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 #### Notes
 
 - 返回 `user` 与 `assistant` 的 `completed`、`failed`、`cancelled` 终态文本，按 `sequenceNo ASC` 排列。
-- 不返回 `toolExecution`、`toolResult`、`assistantTurn`、pending 行、thinking、工具调用参数、原始 `contentJson` 或非文本 Pi blocks。
-- 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。工具活动只显示当前运行时事件，恢复历史时不重建工具活动 UI。
+- `toolExecution` 不作为顶层消息返回；仅在 user 行下投影 `toolActivities`。不返回原始工具参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking、原始 `contentJson` 或非文本 Pi blocks。
+- 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。加载最近页或更早页时，Renderer 按持久 user message ID 恢复活动摘要；整轮耗时未持久化，历史 UI 不显示该计时。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。

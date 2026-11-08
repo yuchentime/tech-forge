@@ -1,21 +1,21 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
-  AgentStreamEvent,
+  ChatStreamEvent,
   BackendRequest,
   BackendResponse,
   DesktopBridge,
 } from '../../src/types/desktop-bridge';
 
-type AgentStreamHandler = {
-  onEvent: (event: AgentStreamEvent) => void;
+type ChatStreamHandler = {
+  onEvent: (event: ChatStreamEvent) => void;
   port?: MessagePort;
 };
 
-const agentStreams = new Map<string, AgentStreamHandler>();
+const chatStreams = new Map<string, ChatStreamHandler>();
 let nextStreamId = 0;
 
 /** Validates the shared Agent event contract without importing a local module into the sandboxed preload. */
-function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
+function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
 
   switch (value.type) {
@@ -112,16 +112,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Closes one local port and drops its callback after a terminal condition. */
-function finishAgentStream(
+function finishChatStream(
   requestId: string,
-  handler: AgentStreamHandler,
+  handler: ChatStreamHandler,
 ): void {
-  if (agentStreams.get(requestId) === handler) agentStreams.delete(requestId);
+  if (chatStreams.get(requestId) === handler) chatStreams.delete(requestId);
   handler.port?.close();
 }
 
 /** Receives a per-request port from Main and forwards only typed stream events. */
-function receiveAgentStreamPort(
+function receiveChatStreamPort(
   event: IpcRendererEvent,
   value: unknown,
 ): void {
@@ -133,20 +133,20 @@ function receiveAgentStreamPort(
     return;
   }
 
-  const handler = agentStreams.get(requestId);
+  const handler = chatStreams.get(requestId);
   if (!handler) {
     port.close();
     return;
   }
   handler.port = port;
   port.onmessage = (messageEvent: MessageEvent<unknown>) => {
-    if (!isAgentStreamEvent(messageEvent.data)) {
+    if (!isChatStreamEvent(messageEvent.data)) {
       try {
         handler.onEvent({ type: 'error', message: '本地 Agent 流事件无效，请重试。' });
       } catch {
         // A Renderer callback failure must not keep the port alive.
       }
-      finishAgentStream(requestId, handler);
+      finishChatStream(requestId, handler);
       return;
     }
 
@@ -154,11 +154,11 @@ function receiveAgentStreamPort(
     try {
       handler.onEvent(streamEvent);
     } catch {
-      finishAgentStream(requestId, handler);
+      finishChatStream(requestId, handler);
       return;
     }
     if (streamEvent.type === 'done' || streamEvent.type === 'error') {
-      finishAgentStream(requestId, handler);
+      finishChatStream(requestId, handler);
     }
   };
   port.onmessageerror = () => {
@@ -167,51 +167,51 @@ function receiveAgentStreamPort(
     } catch {
       // A Renderer callback failure must not keep the port alive.
     }
-    finishAgentStream(requestId, handler);
+    finishChatStream(requestId, handler);
   };
   port.start();
 }
 
 /** Delivers a safe start failure when Main cannot establish a MessagePort. */
-function receiveAgentStreamFailure(_event: IpcRendererEvent, value: unknown): void {
+function receiveChatStreamFailure(_event: IpcRendererEvent, value: unknown): void {
   if (!value || typeof value !== 'object') return;
   const failure = value as { requestId?: unknown; message?: unknown };
   if (typeof failure.requestId !== 'string' || typeof failure.message !== 'string') {
     return;
   }
 
-  const handler = agentStreams.get(failure.requestId);
+  const handler = chatStreams.get(failure.requestId);
   if (!handler) return;
   try {
     handler.onEvent({ type: 'error', message: failure.message });
   } catch {
     // Start failures are terminal even when the Renderer callback throws.
   } finally {
-    finishAgentStream(failure.requestId, handler);
+    finishChatStream(failure.requestId, handler);
   }
 }
 
-ipcRenderer.on('agent:stream:port', receiveAgentStreamPort);
-ipcRenderer.on('agent:stream:failure', receiveAgentStreamFailure);
+ipcRenderer.on('chat:stream:port', receiveChatStreamPort);
+ipcRenderer.on('chat:stream:failure', receiveChatStreamFailure);
 
 const bridge: DesktopBridge = {
   getBackendState: () => ipcRenderer.invoke('backend:state'),
   request: <T = unknown>(input: BackendRequest) =>
     ipcRenderer.invoke('backend:request', input) as Promise<BackendResponse<T>>,
-  streamAgent: (prompt, onEvent, conversationId) => {
-    const requestId = `agent-${Date.now()}-${++nextStreamId}`;
-    agentStreams.set(requestId, { onEvent });
-    ipcRenderer.send('agent:stream:start', {
+  streamChat: (prompt, onEvent, conversationId) => {
+    const requestId = `chat-${Date.now()}-${++nextStreamId}`;
+    chatStreams.set(requestId, { onEvent });
+    ipcRenderer.send('chat:stream:start', {
       requestId,
       prompt,
       ...(conversationId ? { conversationId } : {}),
     });
     return requestId;
   },
-  cancelAgentStream: (requestId) => {
-    const handler = agentStreams.get(requestId);
-    if (handler) finishAgentStream(requestId, handler);
-    ipcRenderer.send('agent:stream:cancel', requestId);
+  cancelChatStream: (requestId) => {
+    const handler = chatStreams.get(requestId);
+    if (handler) finishChatStream(requestId, handler);
+    ipcRenderer.send('chat:stream:cancel', requestId);
   },
 };
 

@@ -12,16 +12,16 @@ related:
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/changes/2026-11-07-agent-flow-logging/design.md
   - docs/changes/2026-11-07-agent-flow-logging/verification.md
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 ---
 
 # Conversation 后端行为
 
 ## 写入流程
 
-`AgentController` 校验请求并将 `conversationId` 交给 `AgentService`。`AgentService` 在进程内按 ID 排队，然后调用 `ConversationsService.beginTurn()`：确认或创建 Conversation、对账遗留行、读取已有消息、按 `sequenceNo` 取最大值并加一，接着写入本轮 user 消息和 pending `assistantTurn` 标记。新 ID 由 backend 生成 UUIDv4。
+`ChatController` 校验请求并将 `conversationId` 交给 `ChatService`。`ChatService` 在进程内按 ID 排队，然后调用 `ConversationsService.beginTurn()`：确认或创建 Conversation、对账遗留行、读取已有消息、按 `sequenceNo` 取最大值并加一，接着写入本轮 user 消息和 pending `assistantTurn` 标记。新 ID 由 backend 生成 UUIDv4。
 
-事务结束后，`AgentService` 才调用 `LlmService.stream()`。`LlmService` 注册请求级 Pi 扩展钩子：每个 assistant/toolResult 的 `message_start/update/end` 以及工具执行 `start/update/end` 都先写入 `MessageEntity`，其中 `tool_execution_end` 的最终结果也先落库；SQLite 提交后 Pi 才继续后续事件处理或启动工具。`AgentService` 在已持久化的事件到达后再投影和转发安全字段。用户行在模型调用前已写入。
+事务结束后，`ChatService` 才调用 `LlmService.stream()`。`LlmService` 注册请求级 Pi 扩展钩子：每个 assistant/toolResult 的 `message_start/update/end` 以及工具执行 `start/update/end` 都先写入 `MessageEntity`，其中 `tool_execution_end` 的最终结果也先落库；SQLite 提交后 Pi 才继续后续事件处理或启动工具。`ChatService` 在已持久化的事件到达后再投影和转发安全字段。用户行在模型调用前已写入。
 
 流结束、失败或取消时，`finishTurn()` 在短事务内更新 `assistantTurn` 和仍处于 pending 的消息/工具行；助手快照保留已经生成的原生内容。`Conversation.updatedAt` 随每轮开始和结束更新。SQLite 写入失败会中止 Pi 请求并作为流错误处理。
 
@@ -35,7 +35,7 @@ last_verified: 2026-11-07
 
 | 边界 | 当前契约 |
 |---|---|
-| 请求 | `POST /api/agent/stream`：`prompt` 必填，`conversationId` 可选 UUIDv4 |
+| 请求 | `POST /api/chat/stream`：`prompt` 必填，`conversationId` 可选 UUIDv4 |
 | 首个 SSE 元数据 | `conversation`：仅包含 backend 确认的 `conversationId` |
 | 请求 ID 未找到 | 后端不隐式创建新对话；流发送通用 Agent error SSE 事件，请求不写入消息行 |
 | provider / 存储错误 | 通过安全错误 SSE 处理；provider 失败会结束 assistantTurn 为 failed；Pi 事件写入失败会触发 Pi abort 并作为流错误暴露 |
@@ -47,12 +47,14 @@ Conversation 查询接口由 `ConversationsController` 暴露，并经现有本�
 - `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。默认读取最近最多 30 条有可见文本的 `user`/`assistant` 终态消息，按 `sequenceNo ASC` 返回 `{ messages, hasMore }`。最多向后端查询 31 条可见消息以准确计算 `hasMore`，响应仍最多 30 条。
 - 可选 `beforeMessageId` 必须是目标会话中的现存 Message ID。服务定位该行的 `sequenceNo`，严格读取它之前最近一页；非法 UUID 或跨会话/不存在的游标返回 400。页间使用稳定消息 ID，不使用可能漂移的 offset。
 - 候选行按 `sequenceNo DESC` 分批读取并在后端投影为可见文本，直到获得 31 条或耗尽候选，再将最多 30 条反转为升序。查询仍只读本地 SQLite，不更改模型侧的全量历史读取。
-- 消息查询仅输出文本内容；内部 `toolExecution`、`toolResult`、`assistantTurn`、pending 状态、thinking 和工具调用内容不进入 API 响应。无可显示文本的 assistant 行会被省略。
+- 消息查询的顶层内容仅输出 user/assistant 文本；每个 user 行另附其 sequence 区间内已终态 `toolExecution` 的安全摘要。工具名、状态、耗时及可选 display path 可见；完整参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking 和原始 `contentJson` 不进入 API 响应。无可显示文本的 assistant 行会被省略。
+- 工具执行摘要按已返回 user 行的序列区间分组，并限制在最后一个已返回 user 与其后的下一个 user 之间；工具行不计入 30 条可见消息，也不改变 `hasMore` 或游标。
+- 新的工具执行记录只持久化字符串 `args.path` 作为可选 `displayPath`；旧记录没有该字段时仍返回工具名、终态和耗时。无法解析的工具行会被跳过并记录安全诊断，不影响文本历史。
 - 会话列表仍完整返回；消息历史固定分页。空列表返回 `[]`，无可见历史时返回 `messages: []` 且 `hasMore: false`。
 
 ## 诊断日志
 
-Agent 请求由 `AgentController` 生成 `requestId`，沿轮次编排、Pi/LLM 执行和消息/工具持久化传递；列表和历史查询分别使用自己的 requestId。Backend 通过 Nest `Logger` 输出 JSON 生命周期记录，包含阶段、状态、行数/事件数、耗时及安全错误类型，消息与工具进度按 debug 级别限速记录。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload 或凭据；日志不改变 API/SSE 契约。详见 [Agent Runtime 日志约定](../../platform/agent-runtime.md#运行日志) 和[变更验收](../../../changes/2026-11-07-agent-flow-logging/verification.md)。
+Agent 请求由 `ChatController` 生成 `requestId`，沿轮次编排、Pi/LLM 执行和消息/工具持久化传递；列表和历史查询分别使用自己的 requestId。Backend 通过 Nest `Logger` 输出 JSON 生命周期记录，包含阶段、状态、行数/事件数、耗时及安全错误类型，消息与工具进度按 debug 级别限速记录。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload 或凭据；日志不改变 API/SSE 契约。详见 [Agent Runtime 日志约定](../../platform/agent-runtime.md#运行日志) 和[变更验收](../../../changes/2026-11-07-agent-flow-logging/verification.md)。
 
 ### 已知边界
 

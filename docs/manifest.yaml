@@ -19,7 +19,7 @@ routes:
     description: "Extend the Agent and Pi SDK request, tool, stream, and persistence lifecycle"
     token_budget: 14000
     code_globs:
-      - "apps/backend/src/agent/**"
+      - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/llm/**"
       - "apps/desktop/src/features/agent/**"
@@ -34,12 +34,14 @@ routes:
       - docs/current/domains/conversations/backend-behavior.md
       - docs/changes/2026-11-07-conversation-session-persistence/verification.md
       - docs/source/agent-runtime-open-questions.md
-    history_on_demand: []
+    history_on_demand:
+      - docs/changes/2026-11-08-chat-api-rename/brief.md
+      - docs/changes/2026-11-08-chat-api-rename/worklog.md
   agent-flow-logging:
     description: "Trace Agent requests across backend queueing, persistence, Pi/LLM, tools, and terminal outcomes with safe structured logs"
     token_budget: 16000
     code_globs:
-      - "apps/backend/src/agent/**"
+      - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/llm/**"
       - "apps/backend/src/logging/**"
@@ -75,7 +77,7 @@ routes:
     code_globs:
       - "apps/desktop/src/**"
       - "apps/desktop/electron/**"
-      - "apps/backend/src/agent/**"
+      - "apps/backend/src/chat/**"
       - "apps/backend/src/llm/**"
     required:
       - docs/current/index.md
@@ -93,7 +95,7 @@ routes:
     description: "Persist streamed Pi conversation and tool state in SQLite, then rebuild or reconcile history on later requests"
     token_budget: 18000
     code_globs:
-      - "apps/backend/src/agent/**"
+      - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/llm/**"
       - "apps/desktop/src/features/agent/**"
@@ -114,10 +116,12 @@ routes:
       - docs/changes/2026-11-07-conversation-session-persistence/worklog.md
     history_on_demand: []
   conversation-history-sidebar:
-    description: "Read and page Conversation history in the desktop Agent UI; keep chat scroll bounded and diagnose HTTP-success/UI-failure across Electron IPC and runtime message conversion"
+    description: "Read and page Conversation history in the desktop Agent UI, restore persisted tool activity by user-message ID, and diagnose history/runtime conversion"
     token_budget: 18000
     code_globs:
       - "apps/backend/src/conversations/**"
+      - "apps/backend/src/chat/chat.service.ts"
+      - "apps/backend/test/conversation-history.test.cjs"
       - "apps/desktop/src/App.tsx"
       - "apps/desktop/src/features/agent/**"
       - "apps/desktop/test/conversation-history.test.cjs"
@@ -141,6 +145,14 @@ routes:
       - docs/changes/2026-11-07-conversation-session-persistence/verification.md
     history_on_demand:
       - docs/postmortems/2026-11-07-conversation-history-runtime.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/brief.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/design.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/verification.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/worklog.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/brief.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/design.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/verification.md
+      - docs/changes/2026-11-08-conversation-tool-activity-history/worklog.md
   agent-chat-presentation:
     description: "Render per-turn Agent tool activity and assistant Markdown in the desktop chat"
     token_budget: 12000
@@ -164,7 +176,7 @@ routes:
     code_globs:
       - "apps/backend/src/settings/**"
       - "apps/backend/src/llm/**"
-      - "apps/backend/src/agent/agent.service.ts"
+      - "apps/backend/src/chat/chat.service.ts"
       - "apps/desktop/src/features/agent/**"
       - "apps/desktop/src/features/settings/**"
     required:
@@ -186,7 +198,7 @@ routes:
     code_globs:
       - "apps/backend/src/settings/**"
       - "apps/backend/src/llm/**"
-      - "apps/backend/src/agent/agent.service.ts"
+      - "apps/backend/src/chat/chat.service.ts"
       - "apps/desktop/src/features/agent/**"
       - "apps/desktop/src/features/settings/**"
     required:

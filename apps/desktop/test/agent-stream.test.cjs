@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { SseParser } = require('../dist-electron/electron/main/sse-parser.js');
-const { decodeAgentSseMessage } = require('../dist-electron/electron/main/stream-protocol.js');
-const { routeAgentStreamEvent } = require('../dist-electron/electron/main/stream-routing.js');
-const { isAgentStreamEvent } = require('../dist-electron/src/types/agent-stream-event.js');
+const { decodeChatSseMessage } = require('../dist-electron/electron/main/stream-protocol.js');
+const { routeChatStreamEvent } = require('../dist-electron/electron/main/stream-routing.js');
+const { isChatStreamEvent } = require('../dist-electron/src/types/chat-stream-event.js');
 const { AgentEventBus } = require('../dist-electron/src/features/agent/agent-event-bus.js');
 const { agentChatAdapter } = require('../dist-electron/src/features/agent/agent-chat-adapter.js');
 
@@ -38,7 +38,7 @@ test('UTF-8 decoder and SSE parser preserve a character split across byte chunks
     },
   ]);
   assert.deepEqual(
-    decodeAgentSseMessage(second[0]),
+    decodeChatSseMessage(second[0]),
     {
       type: 'message_update',
       assistantMessageEvent: { type: 'text_delta', delta: '备课进行中' },
@@ -48,26 +48,26 @@ test('UTF-8 decoder and SSE parser preserve a character split across byte chunks
 
 test('Agent SSE protocol rejects unknown events and malformed payloads', () => {
   assert.equal(
-    decodeAgentSseMessage({ event: 'message_update', data: '{bad json' }),
+    decodeChatSseMessage({ event: 'message_update', data: '{bad json' }),
     undefined,
   );
   assert.equal(
-    decodeAgentSseMessage({ event: 'tool_call', data: '{"name":"subagent"}' }),
+    decodeChatSseMessage({ event: 'tool_call', data: '{"name":"subagent"}' }),
     undefined,
   );
   assert.deepEqual(
-    decodeAgentSseMessage({ event: 'error', data: '{"message":"network"}' }),
+    decodeChatSseMessage({ event: 'error', data: '{"message":"network"}' }),
     { type: 'error', message: 'network' },
   );
   assert.equal(
-    decodeAgentSseMessage({
+    decodeChatSseMessage({
       event: 'tool_execution_end',
       data: '{"toolCallId":"tool-1","toolName":"search","isError":false,"result":{"secret":"no"}}',
     }),
     undefined,
   );
   assert.deepEqual(
-    decodeAgentSseMessage({
+    decodeChatSseMessage({
       event: 'tool_execution_start',
       data: '{"toolCallId":"tool-1","toolName":"search","args":{"query":"q"}}',
     }),
@@ -82,7 +82,7 @@ test('Agent SSE protocol rejects unknown events and malformed payloads', () => {
 
 test('bridge event validator accepts only exact, safe Pi event projections', () => {
   assert.equal(
-    isAgentStreamEvent({
+    isChatStreamEvent({
       type: 'message_update',
       assistantMessageEvent: { type: 'text_delta', delta: 'x' },
       message: { hidden: true },
@@ -90,7 +90,7 @@ test('bridge event validator accepts only exact, safe Pi event projections', () 
     false,
   );
   assert.equal(
-    isAgentStreamEvent({
+    isChatStreamEvent({
       type: 'tool_execution_start',
       toolCallId: 'tool-1',
       toolName: 'search',
@@ -112,12 +112,12 @@ test('request IDs route stream events to only their own MessagePort', () => {
   const firstEvents = [];
   const secondEvents = [];
   const streams = new Map([
-    ['agent-1-1', { port: { postMessage: (event) => firstEvents.push(event) } }],
-    ['agent-1-2', { port: { postMessage: (event) => secondEvents.push(event) } }],
+    ['chat-1-1', { port: { postMessage: (event) => firstEvents.push(event) } }],
+    ['chat-1-2', { port: { postMessage: (event) => secondEvents.push(event) } }],
   ]);
 
   assert.equal(
-    routeAgentStreamEvent(streams, 'agent-1-2', {
+    routeChatStreamEvent(streams, 'chat-1-2', {
       type: 'tool_execution_start',
       toolCallId: 'tool-1',
       toolName: 'search',
@@ -135,7 +135,7 @@ test('request IDs route stream events to only their own MessagePort', () => {
     },
   ]);
   assert.equal(
-    routeAgentStreamEvent(streams, 'agent-missing-1', {
+    routeChatStreamEvent(streams, 'chat-missing-1', {
       type: 'done',
       finishReason: 'stop',
     }),
@@ -238,11 +238,11 @@ test('Assistant adapter shows tool activity separately and streams cumulative Pi
   ];
   global.window = {
     teachforge: {
-      streamAgent(_prompt, onEvent) {
+      streamChat(_prompt, onEvent) {
         setImmediate(() => events.forEach(onEvent));
         return 'run-adapter-1';
       },
-      cancelAgentStream() {},
+      cancelChatStream() {},
     },
   };
 

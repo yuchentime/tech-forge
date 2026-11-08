@@ -12,6 +12,7 @@ export interface PersistedToolExecution {
   toolCallId: string;
   toolName: string;
   parentToolCallId?: string;
+  displayPath?: string;
   status: 'running' | 'completed' | 'failed' | 'interrupted';
   durationMs?: number;
   partialResult?: unknown;
@@ -76,6 +77,7 @@ export function parseToolExecution(
   if (
     typeof value.toolCallId !== 'string' ||
     typeof value.toolName !== 'string' ||
+    (value.displayPath !== undefined && typeof value.displayPath !== 'string') ||
     (value.status !== 'running' &&
       value.status !== 'completed' &&
       value.status !== 'failed' &&

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { toThreadMessage } = require('../dist-electron/src/features/agent/conversation-history.js');
+const { AgentEventBus } = require('../dist-electron/src/features/agent/agent-event-bus.js');
 
 /** Creates a text-only API fixture without accessing a user's database or model. */
 function historyMessage(role, status, id) {
@@ -43,4 +44,34 @@ test('assistant completed, failed and cancelled partial text keeps its terminal 
 test('an empty history remains a valid empty runtime repository', async () => {
   const { ExportedMessageRepository } = await import('@assistant-ui/react');
   assert.deepEqual(ExportedMessageRepository.fromArray([].map(toThreadMessage)).messages, []);
+});
+
+test('history tool activity restores an idle snapshot by persisted user message ID', () => {
+  const bus = new AgentEventBus();
+  bus.restoreHistoryActivity('persisted-user-message-id', [
+    {
+      toolCallId: 'call-1',
+      toolName: 'write',
+      path: 'C:/workspace/file.txt',
+      status: 'completed',
+      durationMs: 42,
+    },
+  ]);
+
+  assert.deepEqual(bus.getTurnSnapshots()['persisted-user-message-id'], {
+    turnId: 'persisted-user-message-id',
+    requestId: null,
+    phase: 'idle',
+    tools: [
+      {
+        toolCallId: 'call-1',
+        toolName: 'write',
+        args: { path: 'C:/workspace/file.txt' },
+        status: 'completed',
+        durationMs: 42,
+      },
+    ],
+    startedAt: 0,
+    elapsedMs: null,
+  });
 });

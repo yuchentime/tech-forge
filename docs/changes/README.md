@@ -20,6 +20,8 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| Conversation Tool Activity History | 历史 API 将已持久化工具摘要附于 user turn，并在桌面切换/翻页时恢复活动 UI | [简报](2026-11-08-conversation-tool-activity-history/brief.md) · [设计](2026-11-08-conversation-tool-activity-history/design.md) · [验收](2026-11-08-conversation-tool-activity-history/verification.md) · [工作记录](2026-11-08-conversation-tool-activity-history/worklog.md) |
+| Chat API Rename | Chat 流式 API、NestJS 模块命名与 Electron bridge 契约 | [简报](2026-11-08-chat-api-rename/brief.md) · [工作记录](2026-11-08-chat-api-rename/worklog.md) |
 | Agent Flow Structured Logging | Agent HTTP、对话持久化、Pi/LLM 与工具流程的关联诊断日志 | [设计](2026-11-07-agent-flow-logging/design.md) · [验收](2026-11-07-agent-flow-logging/verification.md) · [工作记录](2026-11-07-agent-flow-logging/worklog.md) |
 | Conversation History Sidebar | Conversation 列表 API、历史消息 API 与桌面端会话选择/恢复 | [设计](2026-11-07-conversation-history-sidebar/design.md) · [验收](2026-11-07-conversation-history-sidebar/verification.md) · [工作记录](2026-11-07-conversation-history-sidebar/worklog.md) · [交接](2026-11-07-conversation-history-sidebar/handoff.md) |
 | Agent Chat Layout and History Pagination | Agent 全屏两栏布局、滚动边界与按需读取历史 | [设计](2026-11-07-agent-chat-layout-history-pagination/design.md) · [验收](2026-11-07-agent-chat-layout-history-pagination/verification.md) · [任务](2026-11-07-agent-chat-layout-history-pagination/tasks.md) · [工作记录](2026-11-07-agent-chat-layout-history-pagination/worklog.md) |

@@ -30,8 +30,8 @@ last_verified: 2026-11-08
 | `SettingsPage` / `ConversationSidebar` | 通过侧栏底部设置入口切换视图；从本地设置 API 加载 Provider 字段、密钥配置状态与 SOULS 文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
 | Desktop Agent adapter | 发送最新用户输入和活动 `conversationId`；保存后端返回的 ID；将安全流事件转换为 UI 更新，并在元数据/终止事件后刷新侧栏摘要。 |
 | Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
-| `AgentController` | 校验并流式处理 `POST /api/agent/stream`；客户端断开时中止请求。 |
-| `AgentService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
+| `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
+| `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
 | `LlmService` | 每次请求创建 Pi session 时重新读取 Provider、SOULS.md 和 workspace；以 workspace 统一 Pi cwd，组合系统提示词并注册扩展和持久化钩子。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置但拒绝应用托管设置；写入默认限制在 workspace，并可使用本轮明确目标的一次性授权。 |
@@ -39,9 +39,9 @@ last_verified: 2026-11-08
 
 ## 运行日志
 
-Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `AgentController` 生成一个内部 `requestId`，并沿 `AgentService`、`ConversationsService`、`LlmService` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
+Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `ChatController` 生成一个内部 `requestId`，并沿 `ChatService`、`ConversationsService`、`LlmService` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
 
-`AgentController` 记录 HTTP 接收、SSE 终态和客户端断开；`AgentService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
@@ -54,8 +54,8 @@ sequenceDiagram
     actor User as 用户
     participant UI as Desktop UI
     participant Main as Electron Main / Preload
-    participant HTTP as AgentController
-    participant Agent as AgentService
+    participant HTTP as ChatController
+    participant Chat as ChatService
     participant Conv as ConversationsService
     participant DB as SQLite
     participant LLM as LlmService
@@ -64,21 +64,21 @@ sequenceDiagram
     participant Tool as 工具
 
     User->>UI: 提交 prompt
-    UI->>Main: streamAgent(prompt, conversationId)
-    Main->>HTTP: POST /api/agent/stream + 本地认证
-    HTTP->>Agent: stream(prompt, conversationId, signal, requestId)
-    Agent->>Conv: beginTurn()
+    UI->>Main: streamChat(prompt, conversationId)
+    Main->>HTTP: POST /api/chat/stream + 本地认证
+    HTTP->>Chat: stream(prompt, conversationId, signal, requestId)
+    Chat->>Conv: beginTurn()
     Conv->>DB: 读取并排序该对话全部历史
     DB-->>Conv: MessageEntity rows
     Conv->>Conv: 对账遗留的 pending 行和缺失 toolResult
     Conv->>DB: 保存 user 行和 pending assistantTurn 标记
     DB-->>Conv: 提交完成
-    Conv-->>Agent: 返回已恢复的历史
-    Agent-->>HTTP: conversation 元数据事件
+    Conv-->>Chat: 返回已恢复的历史
+    Chat-->>HTTP: conversation 元数据事件
     HTTP-->>Main: SSE conversation 事件
     Main-->>UI: conversationId
 
-    Agent->>LLM: stream(prompt, history, 持久化回调)
+    Chat->>LLM: stream(prompt, history, 持久化回调)
     LLM->>LLM: 将历史转换为 Pi SessionMessageEntry
     LLM->>Pi: 创建带 history 的 SessionManager.inMemory()
     Note over LLM,Pi: inMemory 是本次请求的运行副本；SQLite 仍是持久来源
@@ -87,23 +87,23 @@ sequenceDiagram
 
     loop Assistant 消息与工具事件
         Pi->>LLM: 调用并等待持久化扩展钩子
-        LLM->>Agent: persistConversationEvent(event)
-        Agent->>Conv: 写入消息快照或工具状态
+        LLM->>Chat: persistConversationEvent(event)
+        Chat->>Conv: 写入消息快照或工具状态
         Conv->>DB: 提交 MessageEntity 行
         DB-->>Conv: 提交完成
-        Conv-->>Agent: 持久化完成
-        Agent-->>LLM: 回调完成，Pi 可以继续
+        Conv-->>Chat: 持久化完成
+        Chat-->>LLM: 回调完成，Pi 可以继续
         opt 当前事件为 tool_execution_start
             Pi->>Tool: 执行工具
             Tool-->>Pi: 返回工具结果
         end
         Pi-->>LLM: 派发 Pi session 事件
-        LLM-->>Agent: 返回事件
-        Agent-->>HTTP: 投影后的安全事件
+        LLM-->>Chat: 返回事件
+        Chat-->>HTTP: 投影后的安全事件
         HTTP-->>UI: SSE
     end
 
-    Agent->>Conv: finishTurn(status)
+    Chat->>Conv: finishTurn(status)
     Conv->>DB: 更新 assistantTurn 终态
     DB-->>Conv: 提交完成
 ```
@@ -116,7 +116,7 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 `LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
-Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `AgentService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
+Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
 `LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
@@ -127,9 +127,9 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 
-Renderer 的会话摘要通过 `GET /api/conversations` 读取。选中会话时，`GET /api/conversations/:conversationId/messages` 默认返回最近最多 30 条可见 user/assistant 纯文本和 `hasMore`；用户点击“查看更早的消息”后，Renderer 以最早已加载消息 ID 查询前一页并前置到 LocalRuntime。读取消息不会返回工具执行状态、toolResult 或 Pi 原始 payload。该 UI 分页不改变下一轮 Agent 请求从 SQLite 恢复完整模型历史的行为。
+Renderer 的会话摘要通过 `GET /api/conversations` 读取。选中会话时，`GET /api/conversations/:conversationId/messages` 默认返回最近最多 30 条可见 user/assistant 文本和 `hasMore`；user 行可包含其轮次的安全工具摘要。用户点击“查看更早的消息”后，Renderer 以最早已加载消息 ID 查询前一页并前置到 LocalRuntime，同时按持久 user message ID 恢复工具活动。接口不返回完整工具参数、partial/final result、toolResult 或 Pi 原始 payload。该 UI 分页不改变下一轮 Agent 请求从 SQLite 恢复完整模型历史的行为。
 
-`conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`，调用实际安装包的消息转换链路。
+`conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。`AgentEventBus` 独立恢复 user 行下的工具摘要；历史活动没有请求 ID，也不显示未持久化的整轮耗时。桌面回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`。
 
 Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` 消息以带格式标记的 JSON 保存在 `contentJson`。工具执行元数据、部分输出、最终结果和终态保存在独立的 `toolExecution` 行中。`assistantTurn` 和 `toolExecution` 行不会作为模型消息发送。
 
@@ -147,15 +147,15 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 
 1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
 2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
-3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `AgentStreamEvent`、桥接校验和 adapter。
+3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `ChatStreamEvent`、桥接校验和 adapter。
 4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/SOULS；创建、编辑和建目录默认必须位于 backend 配置的 Agent workspace。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 
 ## 代码入口
 
-- HTTP/SSE 边界：`apps/backend/src/agent/agent.controller.ts`
-- 轮次编排与安全事件投影：`apps/backend/src/agent/agent.service.ts`、`agent-events.ts`
+- HTTP/SSE 边界：`apps/backend/src/chat/chat.controller.ts`
+- 轮次编排与安全事件投影：`apps/backend/src/chat/chat.service.ts`、`chat-events.ts`
 - 对话消息行和中断对账：`apps/backend/src/conversations/conversations.service.ts`
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`

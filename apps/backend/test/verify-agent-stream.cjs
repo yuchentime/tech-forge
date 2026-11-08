@@ -80,7 +80,7 @@ async function main() {
 
   try {
     const backend = await waitForBackend(child);
-    const endpoint = `http://127.0.0.1:${backend.port}/api/agent/stream`;
+    const endpoint = `http://127.0.0.1:${backend.port}/api/chat/stream`;
     const missingToken = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

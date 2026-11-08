@@ -10,22 +10,22 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import type { ServerResponse } from 'node:http';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
-import { AgentPromptDto } from './dto/agent-prompt.dto';
-import { AgentService } from './agent.service';
-import { encodeAgentSseEvent } from './sse';
+import { ChatPromptDto } from './dto/chat-prompt.dto';
+import { ChatService } from './chat.service';
+import { encodeChatSseEvent } from './chat-sse';
 
-/** Converts validated Agent prompts into authenticated HTTP SSE responses. */
-@Controller('agent')
-export class AgentController {
-  private readonly logger = new Logger(AgentController.name);
+/** Converts validated Chat prompts into authenticated HTTP SSE responses. */
+@Controller('chat')
+export class ChatController {
+  private readonly logger = new Logger(ChatController.name);
 
-  /** Injects the persistent Agent conversation use case for HTTP streaming. */
-  constructor(private readonly agent: AgentService) {}
+  /** Injects the persistent Chat conversation use case for HTTP streaming. */
+  constructor(private readonly chat: ChatService) {}
 
   /** Streams conversation/Pi events and aborts the underlying Pi session on disconnect. */
   @Post('stream')
   async stream(
-    @Body() input: AgentPromptDto,
+    @Body() input: ChatPromptDto,
     @Res() reply: FastifyReply,
   ): Promise<void> {
     const requestId = randomUUID();
@@ -35,7 +35,7 @@ export class AgentController {
     const response = reply.raw;
     const abortController = new AbortController();
     let disconnectLogged = false;
-    writeStructuredEvent(this.logger, 'log', 'agent.http.stream.accepted', {
+    writeStructuredEvent(this.logger, 'log', 'chat.http.stream.accepted', {
       requestId,
       conversationId: input.conversationId,
       promptLength: Array.from(input.prompt).length,
@@ -48,7 +48,7 @@ export class AgentController {
           writeStructuredEvent(
             this.logger,
             'warn',
-            'agent.http.client_disconnected',
+            'chat.http.client_disconnected',
             {
               requestId,
               conversationId: input.conversationId,
@@ -71,7 +71,7 @@ export class AgentController {
     response.flushHeaders();
 
     // stream() 返回异步生成器；拿到 iterator 本身还没有取出文本，第一次 next() 才会启动它。
-    const stream = this.agent.stream(
+    const stream = this.chat.stream(
       input.prompt,
       input.conversationId,
       abortController.signal,
@@ -94,7 +94,7 @@ export class AgentController {
         // 每次 next() 取得一个事件后用 Pi 原生 type 编码为 SSE，再请求下一事件。
         const written = await writeSseFrame(
           response,
-          encodeAgentSseEvent(item.value),
+          encodeChatSseEvent(item.value),
           abortController.signal,
         );
         if (!written) {
@@ -107,7 +107,7 @@ export class AgentController {
       if (!abortController.signal.aborted) {
         const written = await writeSseFrame(
           response,
-          encodeAgentSseEvent({
+          encodeChatSseEvent({
             type: 'done',
             finishReason: 'stop',
           }),
@@ -126,7 +126,7 @@ export class AgentController {
         writeStructuredEvent(
           this.logger,
           'error',
-          'agent.http.stream.failed',
+          'chat.http.stream.failed',
           {
             requestId,
             conversationId: input.conversationId,
@@ -136,7 +136,7 @@ export class AgentController {
         );
         const written = await writeSseFrame(
           response,
-          encodeAgentSseEvent({
+          encodeChatSseEvent({
             type: 'error',
             message: getSafeErrorMessage(error),
           }),
@@ -152,7 +152,7 @@ export class AgentController {
           writeStructuredEvent(
             this.logger,
             'error',
-            'agent.http.iterator_cleanup.failed',
+            'chat.http.iterator_cleanup.failed',
             {
               requestId,
               conversationId: input.conversationId,
@@ -165,7 +165,7 @@ export class AgentController {
       writeStructuredEvent(
         this.logger,
         outcome === 'failed' ? 'error' : outcome === 'cancelled' ? 'warn' : 'log',
-        'agent.http.stream.terminated',
+        'chat.http.stream.terminated',
         {
           requestId,
           conversationId: input.conversationId,

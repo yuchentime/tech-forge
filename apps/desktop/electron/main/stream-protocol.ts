@@ -1,13 +1,13 @@
 import {
-  isAgentStreamEvent,
-  type AgentStreamEvent,
-} from '../../src/types/agent-stream-event';
+  isChatStreamEvent,
+  type ChatStreamEvent,
+} from '../../src/types/chat-stream-event';
 import type { SseMessage } from './sse-parser';
 
 /** Validates and normalizes one backend SSE frame before crossing into Renderer. */
-export function decodeAgentSseMessage(
+export function decodeChatSseMessage(
   message: SseMessage,
-): AgentStreamEvent | undefined {
+): ChatStreamEvent | undefined {
   let data: unknown;
   try {
     data = JSON.parse(message.data);
@@ -17,5 +17,5 @@ export function decodeAgentSseMessage(
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
   if (Object.hasOwn(data, 'type')) return undefined;
   const event = { ...data, type: message.event };
-  return isAgentStreamEvent(event) ? event : undefined;
+  return isChatStreamEvent(event) ? event : undefined;
 }

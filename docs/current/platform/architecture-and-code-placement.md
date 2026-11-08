@@ -51,12 +51,12 @@ flowchart LR
   Service --> ORM[TypeORM Repository / Entity]
   ORM --> DB[(SQLite)]
   Service --> LLM[LlmService / Adapter]
-  UI -->|streamAgent| StreamBridge[Preload typed stream bridge]
+  UI -->|streamChat| StreamBridge[Preload typed stream bridge]
   StreamBridge --> MainStream[Electron main fixed Agent proxy]
-  MainStream -->|SSE + local token| AgentHTTP[POST /api/agent/stream]
-  AgentHTTP --> AgentController[AgentController]
-  AgentController --> AgentService[AgentService]
-  AgentService --> LLM
+  MainStream -->|SSE + local token| AgentHTTP[POST /api/chat/stream]
+  AgentHTTP --> ChatController[ChatController]
+  ChatController --> ChatService[ChatService]
+  ChatService --> LLM
   MainStream -->|MessageChannel Pi events| UI
 ```
 
@@ -72,9 +72,9 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 | `apps/desktop/src/App.tsx` | 装配 Agent `LocalRuntime`、`AssistantRuntimeProvider` 与占满窗口的 `AgentChatPage` | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
 | `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换、新建和设置入口；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；设置视图只替换右侧主区域，根 Conversation Runtime 保持挂载 |
 | `apps/desktop/src/features/settings/` | 本机模型 Provider、工作空间路径和 `SOULS.md` 风格编辑页 | 只使用 `window.teachforge.request()` 访问本地设置 API；GET 将已保存密钥回填到普通文本控件；只在本机设置页明文显示 |
-| `apps/desktop/src/types/desktop-bridge.ts` 与 `agent-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
+| `apps/desktop/src/types/desktop-bridge.ts` 与 `chat-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
 | `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
-| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamAgent`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
+| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamChat`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
 
@@ -85,7 +85,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | 模块 | 应拥有的业务责任 | 扫描到的实现状态 |
 |---|---|---|
 | `platform` / `health` | 进程级能力及健康状态 | `PlatformModule` 装配 `HealthModule`；当前提供 health endpoint |
-| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供 `GET /api/conversations` 摘要列表和 `GET /api/conversations/:id/messages` 每页最多 30 条的可见文本历史；Entity 与 `ConversationsService` 管理 SQLite 持久化、查询投影、pending 对账及 Pi 历史恢复 |
+| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供摘要列表和每页最多 30 条的可见文本历史；user 行可嵌套安全工具摘要。Entity 与 `ConversationsService` 管理 SQLite 持久化、历史投影、pending 对账及 Pi 历史恢复 |
 | `rehearsals` | Rehearsal/RehearsalTurn、提问、回答和轮次评估 | Entity 已注册；Service 为空壳。评估直接属于 RehearsalTurn |
 | `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | Entity 已注册；Service 为空壳，文件导入和检索流程未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
@@ -94,7 +94,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | Service 为空壳 |
 | `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护 |
-| `agent` | Agent 单轮运行入口；必要时编排模型和工具协作 | `AgentController` 提供受本地认证保护的 `POST /api/agent/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`AgentService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
+| `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
 `assessments`、`memory`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。

@@ -1,7 +1,7 @@
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 /** 定义送到 UI 的会话元数据与安全 Pi 原生事件投影。 */
-export type AgentStreamEvent =
+export type ChatStreamEvent =
   | { type: 'conversation'; conversationId: string }
   | { type: 'agent_start' }
   | { type: 'turn_start' }
@@ -26,9 +26,9 @@ export type AgentStreamEvent =
   | { type: 'agent_end' };
 
 /** 将 Pi session 事件投影为 UI 需要的字段，并在这里剔除内部结果数据。 */
-export function projectAgentSessionEvent(
+export function projectChatSessionEvent(
   event: AgentSessionEvent,
-): AgentStreamEvent | undefined {
+): ChatStreamEvent | undefined {
   switch (event.type) {
     case 'agent_start':
     case 'turn_start':
