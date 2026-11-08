@@ -171,7 +171,17 @@ npm run verify:document-ingest --workspace @teachforge/backend -- <file> [file..
 | 禁止出现 | 词法已有命中仍调用模型；扩展项覆盖或替换原查询；扩展失败导致整个检索抛错 |
 | 判定方式 | L2 `retrieval.test.cjs` 的三条扩展用例（错字由扩展救回、命中充足时不调用、扩展抛错仍返回结果） |
 
-### AC-15 未实现项（不在本轮验收）
+### AC-15 单字查询不被 bigram 索引吞掉
+
+| 要素 | 内容 |
+|---|---|
+| 代码位置 | `retrieval/text-normalizer.ts`（`singleHanCharacter`）、`RetrievalService.searchSubstring()` |
+| 前置条件 | 语料中存在目标汉字，但该字只出现在更长的 Han 段内 |
+| 预期行为 | 单汉字查询改走子串扫描并命中；两字及以上查询仍走 bigram 索引；`documentIds` 范围同样生效 |
+| 禁止出现 | 单字查询返回 0 命中（索引只有 bigram 时的必然结果）；对单字强行构造 MATCH 表达式 |
+| 判定方式 | L2 "single Han character queries use the substring fallback"；真实语料 `工` 由 9 个命中变为可检索 |
+
+### AC-16 未实现项（不在本轮验收）
 
 - 交叉编码器重排（rerank）：未实现。
 - 对话级检索编排（把命中拼进 prompt）、`messages.contextRefsJson` 写入：未实现。

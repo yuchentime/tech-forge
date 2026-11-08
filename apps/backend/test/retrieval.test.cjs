@@ -242,6 +242,31 @@ test('a query with no indexable term returns no lexical contribution', async () 
   }
 });
 
+test('single Han character queries use the substring fallback', async () => {
+  const ctx = await createIntegrationApp();
+  const source = writeFixture(
+    'single-char.md',
+    '# 酶催化\n\n酶催化反应需要底物与活性位点结合。\n\n# 工具调用\n\n工具调用由模型决定参数。',
+  );
+
+  try {
+    await ctx.documents.ingestFile({ filePath: source });
+
+    // `酶` only appears inside a longer Han run, so it is indexed as `酶催` — a MATCH on the single
+    // character returns nothing, and the substring fallback is what makes the query work.
+    const hits = await ctx.retrieval.search({ query: '酶', limit: 3 });
+    assert.ok(hits.length > 0, 'single character must be findable');
+    assert.match(hits[0].content, /酶催化/);
+    assert.ok(hits[0].score.lexicalRank !== undefined);
+
+    // Two-character queries keep using the bigram index rather than the scan.
+    const twoChar = await ctx.retrieval.search({ query: '工具', limit: 3 });
+    assert.match(twoChar[0].content, /工具调用/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 /** Boots the same graph but with a scripted query expander standing in for the chat model. */
 async function createAppWithExpander(expander) {
   const dataDirectory = mkdtempSync(join(scratchRoot, 'data-'));

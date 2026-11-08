@@ -2,7 +2,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EmbeddingService } from '../embedding/embedding.service';
 import { buildExpansionMatchQuery, QUERY_EXPANDER, type QueryExpander } from './query-expander';
-import { buildMatchQuery } from './text-normalizer';
+import { buildMatchQuery, singleHanCharacter } from './text-normalizer';
 
 /** Reciprocal rank fusion constant; identical to the value fixed in the design. */
 export const RRF_K = 60;
@@ -130,9 +130,36 @@ export class RetrievalService {
 
   /** Runs the FTS5 channel for the query terms; returns no hits when nothing is indexable. */
   private async searchLexical(query: string, documentIds?: string[]): Promise<ChannelHit[]> {
+    const singleCharacter = singleHanCharacter(query);
+    if (singleCharacter) return this.searchSubstring(singleCharacter, documentIds);
     const match = buildMatchQuery(query);
     if (!match) return [];
     return this.searchLexicalByMatch(match, documentIds);
+  }
+
+  /**
+   * Scans chunk content for one Han character.
+   *
+   * The bigram index cannot answer single-character queries, and a LIKE scan over a personal corpus
+   * (thousands of chunks) costs a few milliseconds, so this stays a first-class channel instead of a
+   * special case in the caller.
+   */
+  private async searchSubstring(
+    character: string,
+    documentIds?: string[],
+  ): Promise<ChannelHit[]> {
+    const scope = documentIds && documentIds.length > 0 ? documentIds : undefined;
+    const rows = await this.dataSource.query<Array<{ chunkId: string }>>(
+      `SELECT c.id AS chunkId
+         FROM document_chunks c
+         JOIN document_versions v ON v.id = c."documentVersionId"
+        WHERE c.content LIKE '%' || ? || '%'
+          ${scope ? `AND v."documentId" IN (${scope.map(() => '?').join(', ')})` : ''}
+        ORDER BY c."documentVersionId", c."sequenceNo"
+        LIMIT ?`,
+      scope ? [character, ...scope, CHANNEL_DEPTH] : [character, CHANNEL_DEPTH],
+    );
+    return rows.map((row, rank) => ({ chunkId: row.chunkId, score: CHANNEL_DEPTH - rank }));
   }
 
   /** Runs one FTS5 MATCH expression and returns chunks ordered by bm25. */

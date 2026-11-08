@@ -83,6 +83,20 @@ export function toSearchTerms(input: string): string {
 }
 
 /**
+ * Returns the character when the whole query is one Han character.
+ *
+ * Such a query cannot use the bigram index: a character inside a longer Han run is indexed only as
+ * part of bigrams, so `工` would miss every chunk that contains `工具`. Callers use this to fall
+ * back to a substring scan instead of a MATCH expression.
+ */
+export function singleHanCharacter(input: string): string | null {
+  const terms = splitTerms(clean(input));
+  if (terms.length !== 1) return null;
+  const value = terms[0].value;
+  return value.length === 1 && HAN.test(value) ? value : null;
+}
+
+/**
  * Builds an FTS5 MATCH expression for a user query.
  *
  * Per Han run: a single bigram stays a term, two bigrams become a phrase (order matters and recall is
