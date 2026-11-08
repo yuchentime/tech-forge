@@ -202,6 +202,15 @@ interface RetrievalHit {
 - 降级：embedding 不可用或向量缺失时向量路返回空，词法路照常返回，`score.vectorRank` 缺省即可看出单路结果。
 - 实测：961 分片下查询 6–19 ms；命中带 `pageStart` 与字符偏移，可直接作为引用。
 
+查询扩展通道（`retrieval/query-expander.ts`）：
+
+- **只在词法零命中时触发**（`EXPAND_BELOW_LEXICAL_HITS = 1`）。有字面命中时不付模型往返的代价；被扩展救回的查询不会挤掉原有排名。
+- 模型返回 `{ correctedQuery?, keywords[] }`：纠正错别字/OCR 噪声 + 同义词/术语，`keywords` 上限 8 个、每个 ≤20 字，去重且剔除原句已有词。
+- 扩展结果**只做增补**：原查询仍作为独立通道参与 RRF；扩展项以 `EXPANSION_RANK_OFFSET = 5` 的名次惩罚加入，保证字面命中始终优先。
+- 预算 800 ms（`EXPANSION_TIMEOUT_MS`），超时/无 Key/非 2xx/JSON 非法一律返回 `null`，检索回落到原有两路，不报错。
+- **离线边界**：扩展会把「查询文本」发往用户配置的模型服务，但从不发送资料正文。未配置 Key 或断网时自动退化为纯本地检索。
+- 单次调用可传 `expand: false` 跳过扩展，用于评估与确定性对比。
+
 ## Data And API Impact
 
 - 新增表：`chunk_search_terms`（普通表）、`chunk_fts`（FTS5 虚表 + 两个触发器）、`chunk_embeddings`。均为可重建派生数据，可随时整表删除重灌。
@@ -241,7 +250,8 @@ interface RetrievalHit {
 - **中文召回质量**：`bge-small-zh-v1.5` 在跨语言场景 margin 偏薄。需先建中文 gold set，不达标时切换 `multilingual-e5-small`（整库重嵌）。
 - **分词口径漂移**：归一化器是入库与查询的共享契约，任何一侧改动都会静默降低召回。必须以同一函数的单测锁定。
 - **模型切换成本**：换模型需全量重嵌（10k chunk ≈ 41 s）。因采用行级模型戳记，切换期间旧向量对语义通道不可见，需一次 `rebuildVectorIndex()`，没有部分生效的中间状态，也没有需要回滚的激活步骤。
-- **rerank 的语言陷阱**：若后续引入交叉编码器，不能沿用常见默认 `Xenova/ms-marco-MiniLM-L-6-v2`（纯英文，中文语料上会降质）；必须选多语种 cross-encoder，并用 gold set 验证增益后再上线。
+- **rerank 的语言陷阱**：若后续引入交叉编码器，不能沿用常见默认 `Xenova/ms-marco-MiniLM-L6-v2`（纯英文，中文语料上会降质）；必须选多语种 cross-encoder，并用 gold set 验证增益后再上线。
+- **查询扩展的代价**：仅在词法零命中时触发，但仍会把查询文本发往用户配置的模型服务（不含资料正文），且增加一次最多 800 ms 的往返。断网或无 Key 时退化；扩展质量依赖模型，术语幻觉由数量/长度上限与名次惩罚约束，但不能完全消除。
 - **索引体积**：bigram 展开使 FTS 文本约占原文 1.5–2 倍；个人规模可接受，但需在大语料下复核。
 
 ## Alternatives Considered

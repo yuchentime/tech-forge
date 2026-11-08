@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EmbeddingService } from '../embedding/embedding.service';
+import { buildExpansionMatchQuery, QUERY_EXPANDER, type QueryExpander } from './query-expander';
 import { buildMatchQuery } from './text-normalizer';
 
 /** Reciprocal rank fusion constant; identical to the value fixed in the design. */
@@ -15,6 +16,11 @@ export const DEFAULT_LIMIT = 12;
  */
 export const MIN_VECTOR_SCORE = 0.55;
 
+/** Expansion runs only on a total lexical miss: partial recall must not pay a model round-trip. */
+export const EXPAND_BELOW_LEXICAL_HITS = 1;
+/** Rank penalty applied to expanded-terms hits so literal query matches still lead. */
+export const EXPANSION_RANK_OFFSET = 5;
+
 /** One retrieval request. `documentIds` restricts the search to an explicit document set. */
 export interface RetrievalRequest {
   query: string;
@@ -22,6 +28,8 @@ export interface RetrievalRequest {
   documentIds?: string[];
   /** Overrides the dense-channel similarity floor for tuning and evaluation. */
   minVectorScore?: number;
+  /** Set false to skip LLM query expansion for this call even when it is enabled. */
+  expand?: boolean;
 }
 
 /** Score provenance for one hit, keeping channel scores visible for debugging and evaluation. */
@@ -29,8 +37,10 @@ export interface RetrievalScore {
   rrf: number;
   lexicalRank?: number;
   vectorRank?: number;
+  expandedRank?: number;
   lexicalScore?: number;
   vectorScore?: number;
+  expandedScore?: number;
 }
 
 /** One retrieved chunk with everything a citation needs. */
@@ -78,9 +88,10 @@ export class RetrievalService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly embeddings: EmbeddingService,
+    @Optional() @Inject(QUERY_EXPANDER) private readonly expander?: QueryExpander,
   ) {}
 
-  /** Runs lexical and dense recall, fuses them, and hydrates the top hits. */
+  /** Runs lexical and dense recall, optionally adds LLM-expanded terms, and fuses the ranking. */
   async search(request: RetrievalRequest): Promise<RetrievalHit[]> {
     const limit = request.limit ?? DEFAULT_LIMIT;
     const query = request.query?.trim() ?? '';
@@ -90,15 +101,45 @@ export class RetrievalService {
       this.searchLexical(query, request.documentIds),
       this.searchDense(query, request.documentIds, request.minVectorScore ?? MIN_VECTOR_SCORE),
     ]);
-    const fused = this.fuse(lexical, dense).slice(0, limit);
+
+    // Expansion costs a model round-trip, so it only runs when literal terms under-deliver. It is
+    // strictly additive: the original terms keep their own ranked list and therefore their rank.
+    let expanded: ChannelHit[] = [];
+    if (this.expander && request.expand !== false && lexical.length < EXPAND_BELOW_LEXICAL_HITS) {
+      expanded = await this.searchExpanded(query, request.documentIds);
+    }
+
+    const fused = this.fuse(lexical, dense, expanded).slice(0, limit);
     if (fused.length === 0) return [];
     return this.hydrate(fused);
   }
 
-  /** Runs the FTS5 channel; returns no hits when the query has no indexable term. */
+  /** Runs the expansion channel; any failure means "no expansion", never a failed search. */
+  private async searchExpanded(query: string, documentIds?: string[]): Promise<ChannelHit[]> {
+    if (!this.expander) return [];
+    try {
+      const expansion = await this.expander.expand(query);
+      if (!expansion) return [];
+      const match = buildExpansionMatchQuery(expansion);
+      if (!match) return [];
+      return await this.searchLexicalByMatch(match, documentIds);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Runs the FTS5 channel for the query terms; returns no hits when nothing is indexable. */
   private async searchLexical(query: string, documentIds?: string[]): Promise<ChannelHit[]> {
     const match = buildMatchQuery(query);
     if (!match) return [];
+    return this.searchLexicalByMatch(match, documentIds);
+  }
+
+  /** Runs one FTS5 MATCH expression and returns chunks ordered by bm25. */
+  private async searchLexicalByMatch(
+    match: string,
+    documentIds?: string[],
+  ): Promise<ChannelHit[]> {
     const scope = documentIds && documentIds.length > 0 ? documentIds : undefined;
     const rows = await this.dataSource.query<Array<{ chunkId: string; score: number }>>(
       `SELECT t."chunkId" AS chunkId, bm25(chunk_fts, 5.0, 1.0) AS score
@@ -153,23 +194,45 @@ export class RetrievalService {
     return hits.slice(0, CHANNEL_DEPTH);
   }
 
-  /** Fuses two ranked lists with reciprocal rank fusion and keeps per-channel scores for debug. */
-  private fuse(lexical: ChannelHit[], dense: ChannelHit[]): Array<RetrievalHit> {
+  /** Fuses ranked lists with RRF, penalising expanded terms so literal matches still lead. */
+  private fuse(
+    lexical: ChannelHit[],
+    dense: ChannelHit[],
+    expanded: ChannelHit[],
+  ): Array<RetrievalHit> {
     const merged = new Map<string, RetrievalHit>();
-    const add = (hits: ChannelHit[], channel: 'lexical' | 'vector'): void => {
+    const add = (
+      hits: ChannelHit[],
+      channel: 'lexical' | 'vector' | 'expanded',
+    ): void => {
+      const offset = channel === 'expanded' ? EXPANSION_RANK_OFFSET : 0;
       hits.forEach((hit, rank) => {
-        const boost = 1 / (RRF_K + rank + 1);
+        const boost = 1 / (RRF_K + rank + offset + 1);
         const existing = merged.get(hit.chunkId);
         if (existing) {
           existing.score.rrf += boost;
           if (channel === 'lexical') {
             existing.score.lexicalRank = rank;
             existing.score.lexicalScore = hit.score;
-          } else {
+          } else if (channel === 'vector') {
             existing.score.vectorRank = rank;
             existing.score.vectorScore = hit.score;
+          } else {
+            existing.score.expandedRank = rank;
+            existing.score.expandedScore = hit.score;
           }
           return;
+        }
+        const score: RetrievalScore = { rrf: boost };
+        if (channel === 'lexical') {
+          score.lexicalRank = rank;
+          score.lexicalScore = hit.score;
+        } else if (channel === 'vector') {
+          score.vectorRank = rank;
+          score.vectorScore = hit.score;
+        } else {
+          score.expandedRank = rank;
+          score.expandedScore = hit.score;
         }
         merged.set(hit.chunkId, {
           chunkId: hit.chunkId,
@@ -177,15 +240,13 @@ export class RetrievalService {
           documentVersionId: '',
           content: '',
           locatorJson: '',
-          score:
-            channel === 'lexical'
-              ? { rrf: boost, lexicalRank: rank, lexicalScore: hit.score }
-              : { rrf: boost, vectorRank: rank, vectorScore: hit.score },
+          score,
         });
       });
     };
     add(lexical, 'lexical');
     add(dense, 'vector');
+    add(expanded, 'expanded');
     return [...merged.values()].sort((a, b) => b.score.rrf - a.score.rrf);
   }
 

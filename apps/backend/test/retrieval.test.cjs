@@ -19,6 +19,8 @@ const { DocumentsModule } = load('documents/documents.module.js');
 const { DocumentsService } = load('documents/documents.service.js');
 const { RetrievalModule } = load('retrieval/retrieval.module.js');
 const { RetrievalService } = load('retrieval/retrieval.service.js');
+const { QUERY_EXPANDER } = load('retrieval/query-expander.js');
+const { EmbeddingModule } = load('embedding/embedding.module.js');
 const { EmbeddingService } = load('embedding/embedding.service.js');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-retrieval-'));
@@ -235,6 +237,116 @@ test('a query with no indexable term returns no lexical contribution', async () 
     await ctx.documents.ingestFile({ filePath: source });
     const hits = await ctx.retrieval.search({ query: '???', limit: 3 });
     assert.ok(hits.every((hit) => hit.score.lexicalRank === undefined));
+  } finally {
+    await ctx.close();
+  }
+});
+
+/** Boots the same graph but with a scripted query expander standing in for the chat model. */
+async function createAppWithExpander(expander) {
+  const dataDirectory = mkdtempSync(join(scratchRoot, 'data-'));
+  process.env.TEACHFORGE_DATA_DIR = dataDirectory;
+
+  class ExpansionModule {}
+  Module({
+    imports: [
+      TypeOrmModule.forRootAsync({ useFactory: buildDatabaseOptions }),
+      DocumentsModule,
+      EmbeddingModule,
+    ],
+    providers: [RetrievalService, { provide: QUERY_EXPANDER, useValue: expander }],
+  })(ExpansionModule);
+
+  const app = await NestFactory.createApplicationContext(ExpansionModule, { logger: false });
+  createdApps.push(app);
+  return {
+    dataSource: app.get(DataSource),
+    documents: app.get(DocumentsService),
+    retrieval: app.get(RetrievalService),
+    async close() {
+      await app.close();
+      const index = createdApps.indexOf(app);
+      if (index >= 0) createdApps.splice(index, 1);
+      rmSync(dataDirectory, { recursive: true, force: true });
+    },
+  };
+}
+
+test('expanded terms recover a typo the literal query cannot find', async () => {
+  const calls = [];
+  const ctx = await createAppWithExpander({
+    async expand(query) {
+      calls.push(query);
+      return { correctedQuery: '光合作用', keywords: ['叶绿体'] };
+    },
+  });
+  const source = writeFixture(
+    'typo.md',
+    '# 光合作用\n\n光合作用是绿色植物在叶绿体中把光能转化为化学能的过程。',
+  );
+
+  try {
+    await ctx.documents.ingestFile({ filePath: source });
+
+    // The literal query contains a typo and therefore no indexable bigram sequence.
+    const before = await ctx.retrieval.search({ query: '光合做用', limit: 3, expand: false });
+    assert.ok(
+      before.every((hit) => hit.score.lexicalRank === undefined),
+      'a typo query must not produce literal lexical hits',
+    );
+
+    // With expansion enabled the same query reaches the document through the corrected terms.
+    const after = await ctx.retrieval.search({ query: '光合做用', limit: 3 });
+    assert.ok(after.length > 0, 'expansion must recover the typo query');
+    assert.ok(
+      after.some((hit) => /光合作用/.test(hit.content)),
+      'corrected terms must reach the right chunk',
+    );
+    assert.ok(
+      after.some((hit) => hit.score.expandedRank !== undefined),
+      'hits must be attributed to the expansion channel',
+    );
+    assert.deepEqual(calls, ['光合做用'], 'expansion runs exactly once for the weak query');
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('expansion is skipped when literal terms already deliver hits', async () => {
+  let calls = 0;
+  const ctx = await createAppWithExpander({
+    async expand() {
+      calls += 1;
+      return { keywords: ['叶绿体'] };
+    },
+  });
+  const source = writeFixture(
+    'no-expansion.md',
+    '# 光合作用\n\n光合作用是植物把光能转为化学能的过程。\n\n## 光反应\n\n光反应发生在类囊体薄膜上。\n\n## 暗反应\n\n暗反应在基质中固定二氧化碳。',
+  );
+
+  try {
+    await ctx.documents.ingestFile({ filePath: source });
+    const hits = await ctx.retrieval.search({ query: '光合作用', limit: 3 });
+    assert.ok(hits.length > 0);
+    assert.equal(calls, 0, 'expansion must not run when lexical recall is already sufficient');
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a failing expander never breaks retrieval', async () => {
+  const ctx = await createAppWithExpander({
+    async expand() {
+      throw new Error('provider down');
+    },
+  });
+  const source = writeFixture('degraded-expansion.md', '# 光合作用\n\n光合作用是植物把光能转为化学能的过程。');
+
+  try {
+    await ctx.documents.ingestFile({ filePath: source });
+    const hits = await ctx.retrieval.search({ query: '植物如何利用光能', limit: 3 });
+    assert.ok(hits.length > 0, 'dense channel must still answer when expansion throws');
   } finally {
     await ctx.close();
   }

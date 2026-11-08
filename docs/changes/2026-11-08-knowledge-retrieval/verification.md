@@ -159,14 +159,24 @@ npm run verify:document-ingest --workspace @teachforge/backend -- <file> [file..
 | 前置条件 | 语料已入库并写好词法与向量索引 |
 | 预期行为 | 与查询无字面重叠的同义问法能被向量通道命中；两字/多字中文与英文词可被词法通道命中；两路都命中时分片优先；`documentIds` 限定范围；删除向量后检索退回词法通道且不报错；无可索引词的查询不产生词法命中；命中带 `content` 与 `locatorJson` |
 | 禁止出现 | 单通道失败导致整体检索失败；范围外文档出现在结果里；无关短查询因 bigram 的 OR 产生大量假阳性（用短语门槛控制） |
-| 判定方式 | L2 `retrieval.test.cjs` 的 7 条用例（真实模型 + 真实 SQLite + 磁盘文件） |
+| 判定方式 | L2 `retrieval.test.cjs` 的 10 条用例（真实模型 + 真实 SQLite + 磁盘文件） |
 
-### AC-14 未实现项（不在本轮验收）
+### AC-14 查询扩展只增补、不越权、可失败
 
-- 交叉编码器重排（rerank）与查询改写：未实现。
+| 要素 | 内容 |
+|---|---|
+| 代码位置 | `retrieval/query-expander.ts`、`RetrievalService.searchExpanded()`、`fuse()` |
+| 前置条件 | 存在配置好的模型 Provider；语料中不含查询的字面词 |
+| 预期行为 | 词法零命中时才调用模型；纠正词/关键词以独立通道加入并按名次惩罚融合；字面命中优先于扩展命中；单次请求可传 `expand: false`；扩展超时、异常或无 Key 时检索仍返回原有两路结果 |
+| 禁止出现 | 词法已有命中仍调用模型；扩展项覆盖或替换原查询；扩展失败导致整个检索抛错 |
+| 判定方式 | L2 `retrieval.test.cjs` 的三条扩展用例（错字由扩展救回、命中充足时不调用、扩展抛错仍返回结果） |
+
+### AC-15 未实现项（不在本轮验收）
+
+- 交叉编码器重排（rerank）：未实现。
 - 对话级检索编排（把命中拼进 prompt）、`messages.contextRefsJson` 写入：未实现。
 - 上传 API、Renderer 入口、会话资料关联（`conversation_documents`）：未实现。
-- 中文 gold set 的消融评估（RRF 相比单路的增益）：未量化。
+- 中文 gold set 的消融评估（RRF 与查询扩展相比单路的增益）：未量化。
 
 ## 本轮实测（2026-11-08，win32 x64 / Node 25）
 

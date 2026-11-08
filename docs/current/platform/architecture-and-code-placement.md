@@ -91,7 +91,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | `DocumentsService.ingestFile()` 实现"本地文件路径 → 解析 → 分块（500 tokens、10% 重叠）→ 事务写 `documents` / `document_versions` / `document_chunks` / `chunk_search_terms` → 向量写 `chunk_embeddings`"，状态 `parsing → chunking → indexed → ready`（embedding 失败停在 `indexed`；解析或分块失败为 `failed` + `processingError`），按 `contentHash` 幂等，可指定 `documentId` 追加版本；`listDocuments` / `getDocumentDetail` / `listVersionChunks` 提供读取。上传入口与会话关联未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
 | `settings` | 本机模型 Provider、Agent 默认输出路径与风格偏好文件 | `SettingsController` 暴露 `GET/PUT /api/settings`；`SettingsService` 独占 `.tech-forge/config.toml` 和 `SOULS.md`，默认输出目录为 `.tech-forge/workspace/`，并提供 `getWorkspacePath()` 与托管文件路径；API Key 仅由本机设置 API 返回设置页，不进入 Agent SSE、日志或 SQLite |
-| `retrieval` | 按 Conversation 资料范围组合检索上下文 | `RetrievalService.search()` 实现词法 + 向量双通道与 RRF 融合（k=60，候选 50/路，默认返回 12），支持 `documentIds` 范围过滤与向量下限 0.55；向量不可用时退回词法单路。`text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造 |
+| `retrieval` | 按 Conversation 资料范围组合检索上下文 | `RetrievalService.search()` 实现词法 + 向量双通道与 RRF 融合（k=60，候选 50/路，默认返回 12），支持 `documentIds` 范围过滤与向量下限 0.55；向量不可用时退回词法单路。`LlmQueryExpander` 在词法零命中时用已配置模型做错字纠正与同义词扩展，只增补、800 ms 预算、失败回落。`text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造 |
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | `EmbeddingService` 加载随仓库分发的 `bge-small-zh-v1.5` q8 模型（`assets/models`，离线，148 ms 加载），批量 32 编码并返回已归一化的 512 维向量；失败时调用方可降级 |
 | `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护 |
