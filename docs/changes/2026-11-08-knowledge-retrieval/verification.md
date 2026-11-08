@@ -141,22 +141,52 @@ npm run verify:document-ingest --workspace @teachforge/backend -- <file> [file..
 | 禁止出现 | 中文查询归一化后为空串却执行 MATCH；删除来源行后 FTS 仍返回该分片（触发器未生效）；负数 bm25 直接当正分使用 |
 | 判定方式 | L2 "lexical index makes Chinese and English words findable in the real database"（含负例与触发器删除断言） |
 
-### AC-12 未实现项（不在本轮验收）
+### AC-12 每个分片写入一条已归一化向量
 
-- `chunk_embeddings` 与本地向量化：未实现。
-- 检索接口、RRF 融合、引用组装、`messages.contextRefsJson` 写入：未实现。
+| 要素 | 内容 |
+|---|---|
+| 代码位置 | `embedding/embedding.service.ts`、`DocumentsService.persistVectors()`、迁移 `1793960000000-chunk-embeddings.ts` |
+| 前置条件 | 入库完成且模型可用 |
+| 预期行为 | `chunk_embeddings` 行数等于分片数；每行写入 `embeddingModel`、`embeddingDim = 512`、`vector` 长度 2048 字节且 L2 范数为 1；版本状态为 `ready` |
+| 禁止出现 | 向量与分片数量不一致；写入未归一化向量；向量行缺少模型标识（换模型后会被混算） |
+| 判定方式 | L2 "ingest stores one dense vector per chunk…"（raw SQL 读 BLOB 并校验范数） |
+
+### AC-13 双通道检索与融合
+
+| 要素 | 内容 |
+|---|---|
+| 代码位置 | `retrieval/retrieval.service.ts`、`retrieval/text-normalizer.ts` |
+| 前置条件 | 语料已入库并写好词法与向量索引 |
+| 预期行为 | 与查询无字面重叠的同义问法能被向量通道命中；两字/多字中文与英文词可被词法通道命中；两路都命中时分片优先；`documentIds` 限定范围；删除向量后检索退回词法通道且不报错；无可索引词的查询不产生词法命中；命中带 `content` 与 `locatorJson` |
+| 禁止出现 | 单通道失败导致整体检索失败；范围外文档出现在结果里；无关短查询因 bigram 的 OR 产生大量假阳性（用短语门槛控制） |
+| 判定方式 | L2 `retrieval.test.cjs` 的 7 条用例（真实模型 + 真实 SQLite + 磁盘文件） |
+
+### AC-14 未实现项（不在本轮验收）
+
+- 交叉编码器重排（rerank）与查询改写：未实现。
+- 对话级检索编排（把命中拼进 prompt）、`messages.contextRefsJson` 写入：未实现。
 - 上传 API、Renderer 入口、会话资料关联（`conversation_documents`）：未实现。
+- 中文 gold set 的消融评估（RRF 相比单路的增益）：未量化。
 
 ## 本轮实测（2026-11-08，win32 x64 / Node 25）
 
 | 样本 | 结果 |
 |---|---|
-| `test:document-ingest`（真实 Nest 上下文 + 真实 DB 文件 + migration） | **11/11 通过**，933 ms |
-| `AI-Agents-in-Depth-zh-CN.pdf`（11 MB / 313 页） | 5,085 ms，**961 分片 / 1016 词法行**，`indexed`，`TOC_LIKE × 7` |
-| `AI员工平台_作业背景文档_脱敏版_v1.docx`（50 KB） | 289 ms，**55 分片**，`indexed`，`UNSTRUCTURED_TABLE × 1` |
-| 分片 token 分布 | PDF p50 = 461、max = 500、min = 34、超限 0；重叠上限命中 50 tokens，零违规 |
-| 词法命中 | `智能体` / `编排模式` / `Harness` 均命中；`量子纠缠`（库中不存在）命中 0 |
-| 重复入库 | 第二次 4 ms 返回 `duplicate`，文档/版本/分片计数均不变 |
+| `test:document-ingest` | **11/11 通过**，933 ms |
+| `test:retrieval`（真实模型 + 真实 DB + 磁盘文件） | **7/7 通过**，2,350 ms |
+| `AI-Agents-in-Depth-zh-CN.pdf`（11 MB / 313 页） | 入库 **41.9 s**（961 分片 + 961 向量），状态 `ready` |
+| 检索延迟（961 分片） | 6–19 ms / 查询 |
+| 语义召回 | "为什么模型表现不好要改 Harness" → 命中第 192 页原文段落（无字面重叠） |
+| 词法召回 | "上下文窗口管理" 同时命中词法与向量通道，前 3 条均相关 |
+| 负例 | "光合作用"（语料中不存在）→ 0 命中；`???` 无语法命中 |
+| 单路降级 | 删除 `chunk_embeddings` 后仍返回词法命中 |
+
+| 分片与索引指标 | 结果 |
+|---|---|
+| 分片 token | PDF p50 = 461、max = 500、min = 34、超限 0 |
+| 重叠 | 上限 50 tokens，零违规 |
+| 词法行 | `chunk_search_terms` = `chunk_fts` = 1016（含 DOCX） |
+| 向量 | 961 行，512 维，范数 1.00 |
 
 ## 已知限制
 

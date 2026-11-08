@@ -12,12 +12,13 @@ updates_current:
 
 ## 实现状态（2026-11-08）
 
-已实现：`documents/chunking/document-chunker.ts` 与 `DocumentsService.ingestFile()`——本地文件路径 → 解析 → 分块（token 预算）→ 事务写 `documents` / `document_versions` / `document_chunks`（含 `locatorJson`）与 `chunk_search_terms`（FTS5 由触发器同步），状态推进到 `indexed`；`documentId` 可追加新版本；`listDocuments()` / `getDocumentDetail()` / `listVersionChunks()` 提供读取；`retrieval/text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造。迁移：`1793950000000-chunk-search-index.ts`。
+已实现：`documents/chunking/document-chunker.ts` 与 `DocumentsService.ingestFile()`——本地文件路径 → 解析 → 分块（500 tokens / 10% 重叠）→ 事务写 `documents` / `document_versions` / `document_chunks` / `chunk_search_terms` → 本地 embedding 写 `chunk_embeddings`，状态 `parsing → chunking → indexed → ready`；`documentId` 可追加新版本；`listDocuments()` / `getDocumentDetail()` / `listVersionChunks()` 提供读取。检索：`retrieval/text-normalizer.ts`（中文 bigram 归一化与 MATCH 构造）+ `RetrievalService.search()`（词法 + 向量双通道，RRF k=60 融合，`documentIds` 范围过滤，向量相似度下限 0.55）。迁移：`1793950000000-chunk-search-index.ts`、`1793960000000-chunk-embeddings.ts`。
 
 未实现，因此下方设计中的对应部分仍是目标而非事实：
 
-- `chunk_embeddings`、本地向量化、RRF 检索、引用组装（`messages.contextRefsJson`）。
-- 上传 API、Renderer 入口、`conversation_documents` 关联未实现；调用入口是 `verify:document-ingest` 脚本。
+- 交叉编码器重排（rerank）、对话级检索编排（把命中拼进 prompt）、`messages.contextRefsJson` 写入。
+- 上传 API、Renderer 入口、`conversation_documents` 关联；调用入口是 `verify:document-ingest` / `verify:retrieval` 脚本。
+- 中文 gold set 的消融评估（RRF 相比单路增益尚未量化）。
 
 验收见[落库闭环验收](verification.md)。
 
@@ -143,10 +144,11 @@ END;
 - 模型：`Xenova/bge-small-zh-v1.5`，`dtype: 'q8'`，`pooling: 'cls'`，`normalize: true`。**固定单一模型**，不做模型选择 UI、不做可下载模型通道。
   - 已评估并排除：`multilingual-e5-small`（384 维，跨语言备选）、`bge-m3`（543.3 MB / 13.9 ms per chunk / 961 MB RSS，随包不可接受）。
   - 换模型必须整库重嵌，见 Risks；因此不提供切换入口，避免用户进入半索引状态。
-- 单实例 + 批量：一次提交最多 200 段；逐条调用约 11 ms/条，批量摊薄到 4 ms/条。
-- 离线：打包环境设 `env.allowRemoteModels = false`、`env.localModelPath = <resources>/models`。
-- 模型随包分发（24 MB），首次运行不从网络拉取。
-- 编码在入库返回后后台推进，不阻塞解析与 FTS 可用性。
+- 离线：`env.allowRemoteModels = false`、`env.localModelPath = <backend>/assets/models`；模型文件（`onnx/model_quantized.onnx` 23 MB + `config.json` + `tokenizer*.json`）随仓库分发，运行时不联网。
+- 单实例 + 批量：`EMBED_BATCH_SIZE = 32`，进程内复用同一个 pipeline（实测加载 149 ms）。
+- 实测吞吐（500-token 分片，本机 CPU）：**约 43 ms/分片**，313 页教材 961 分片 ≈ 42 s。短文本探针的 4 ms/分片只适用于 ~25 token 的输入，attention 随长度增长，不要用短文本吞吐估算索引时间。
+- 编码在词法索引提交后进行：失败不影响已落库的分片与 FTS，状态停在 `indexed` 并记录 `EMBEDDING_FAILED`。
+- 写入前已 L2 归一化，检索时余弦等价于点积。
 
 ## Storage
 
@@ -181,30 +183,38 @@ RRF: score(d) = Σ 1/(k + rank_i(d)), k = 60
 
 ```ts
 interface RetrievalHit {
-  text: string;
+  chunkId: string;
   documentId: string;
   documentVersionId: string;
-  locator: { headingPath: string[]; pageStart?: number; pageEnd?: number; charStart: number; charEnd: number };
-  score: { rrf: number; ftsRank?: number; vectorRank?: number };
-  degraded: boolean;
+  content: string;
+  locatorJson: string;
+  score: { rrf: number; lexicalRank?: number; vectorRank?: number; lexicalScore?: number; vectorScore?: number };
 }
 ```
 
 调用方（Agent、演练、引用展示）只依赖该形状。将来若更换检索后端，只改一个实现，不动调用点。
+
+实现细节（`retrieval/retrieval.service.ts`）：
+
+- 两路各取 50 个候选（`CHANNEL_DEPTH`），RRF `k = 60`，默认返回 12 条。
+- 词法路的 MATCH 表达式由 `buildMatchQuery` 生成：≤3 个 bigram（≤4 字）用短语，更长的中文串用 bigram 的 OR 再由 BM25 排序；英文词各自成组并用 AND 连接。理由：长中文查询几乎不会作为连续短语出现，而短查询的 OR 会引入大量假阳性。
+- 向量路用与写库同一个模型与维度过滤（行级模型戳记），相似度下限 `MIN_VECTOR_SCORE = 0.55`（实测无关中文句 0.47–0.48、相关句 >0.6）；可在请求中覆盖用于评估。
+- 降级：embedding 不可用或向量缺失时向量路返回空，词法路照常返回，`score.vectorRank` 缺省即可看出单路结果。
+- 实测：961 分片下查询 6–19 ms；命中带 `pageStart` 与字符偏移，可直接作为引用。
 
 ## Data And API Impact
 
 - 新增表：`chunk_search_terms`（普通表）、`chunk_fts`（FTS5 虚表 + 两个触发器）、`chunk_embeddings`。均为可重建派生数据，可随时整表删除重灌。
 - 不新增 HTTP endpoint、SSE 事件或 IPC 方法；v1 只提供 Nest Provider。
 - `messages.contextRefsJson` 记录实际使用的 `documentVersionId` 与 locator，沿用既有字段，不新增表。
-- `document_versions.processingStatus` 扩展取值：`parsing | chunking | chunked | failed` 为当前实现；`indexing | indexed` 与向量相关的 `ready` 属于后续索引业务线。`chunked` 明确只表示"原文已分片落库"。
+- `document_versions.processingStatus` 取值：`parsing | chunking | indexed | ready | failed`。`indexed` = 分片与词法索引已提交；`ready` = 向量也已提交；仅 embedding 失败时停在 `indexed` 并记录 `EMBEDDING_FAILED`。
 
 ## Backend Behavior
 
 入库（`documents` 域）：
 
 1. 调用解析适配层得到按页文本 `pages[]`；解析失败写入 `processingError`，不创建 chunk。
-2. 按标题分块，在一个事务内写 `document_chunks`（含 `locatorJson`）与 `chunk_search_terms` 行（触发器同步 `chunk_fts`），状态置 `indexed`。事务内不做模型调用（索引业务线；当前实现只到 `chunked`，不写 terms）。
+2. 按标题分块，在一个事务内写 `document_chunks`（含 `locatorJson`）与 `chunk_search_terms` 行（触发器同步 `chunk_fts`），状态置 `indexed`。事务内不做模型调用。
 3. 事务提交后把该版本的 chunk 批量提交给 `EmbeddingService`；成功后写 `chunk_embeddings` 并置 `ready`，失败保留 `indexed` 并记录可重试状态。
 
 检索（`retrieval` 域）：

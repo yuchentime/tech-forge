@@ -96,7 +96,7 @@ test('ingest persists document, version and chunks and copies the source file', 
 
   try {
     const result = await ctx.service.ingestFile({ filePath: source, isShared: true });
-    assert.equal(result.status, 'indexed');
+    assert.equal(result.status, 'ready');
     assert.equal(result.duplicate, false);
     assert.equal(result.versionNo, 1);
     assert.ok(result.chunkCount > 0);
@@ -108,7 +108,7 @@ test('ingest persists document, version and chunks and copies the source file', 
 
     const versions = await rows(ctx.dataSource, 'SELECT * FROM document_versions');
     assert.equal(versions.length, 1);
-    assert.equal(versions[0].processingStatus, 'indexed');
+    assert.equal(versions[0].processingStatus, 'ready');
     assert.equal(versions[0].processingError, null);
     assert.equal(versions[0].contentHash, createHash('sha256').update(readFileSync(source)).digest('hex'));
 
@@ -183,8 +183,8 @@ test('ingest appends a new version to an existing document and keeps older chunk
     assert.deepEqual(
       versions.map((version) => [version.versionNo, version.processingStatus]),
       [
-        [1, 'indexed'],
-        [2, 'indexed'],
+        [1, 'ready'],
+        [2, 'ready'],
       ],
     );
 
@@ -242,7 +242,7 @@ test('ingest handles a real DOCX file and keeps heading locators', async () => {
 
   try {
     const result = await ctx.service.ingestFile({ filePath: source });
-    assert.equal(result.status, 'indexed');
+    assert.equal(result.status, 'ready');
     assert.ok(result.warnings.some((warning) => warning.code === 'UNSTRUCTURED_TABLE'));
 
     const chunkRows = await rows(
@@ -271,7 +271,7 @@ test('read models report document, version and chunk state', async () => {
     assert.equal(list[0].title, '自定义标题');
     assert.equal(list[0].versionCount, 1);
     assert.equal(list[0].latest.versionNo, 1);
-    assert.equal(list[0].latest.status, 'indexed');
+    assert.equal(list[0].latest.status, 'ready');
     assert.equal(list[0].latest.chunkCount, ingested.chunkCount);
 
     const detail = await ctx.service.getDocumentDetail(list[0].id);

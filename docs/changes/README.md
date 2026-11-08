@@ -20,7 +20,7 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
-| Local Knowledge Retrieval | 本地知识库：分块与落库闭环已实现；FTS5 中文 bigram、本地 embedding、RRF 检索为设计目标 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
+| Local Knowledge Retrieval | 本地知识库：解析、分块、词法索引、向量化与双通道检索已实现；上传入口与会话编排未实现 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
 | Document Parser Adapter | 不依赖会话或知识库业务的本地文档/图片解析适配层；v1 文本层提取（PDF/DOCX/MD/TXT），MinerU 保留为升级路径 | [设计](2026-11-08-document-parser-adapter/design.md) · [验收](2026-11-08-document-parser-adapter/verification.md) · [工作记录](2026-11-08-document-parser-adapter/worklog.md) |
 | Conversation Tool Activity History | 历史 API 将已持久化工具摘要附于 user turn，并在桌面切换/翻页时恢复活动 UI | [简报](2026-11-08-conversation-tool-activity-history/brief.md) · [设计](2026-11-08-conversation-tool-activity-history/design.md) · [验收](2026-11-08-conversation-tool-activity-history/verification.md) · [工作记录](2026-11-08-conversation-tool-activity-history/worklog.md) |
 | Chat API Rename | Chat 流式 API、NestJS 模块命名与 Electron bridge 契约 | [简报](2026-11-08-chat-api-rename/brief.md) · [工作记录](2026-11-08-chat-api-rename/worklog.md) |

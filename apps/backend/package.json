@@ -15,11 +15,14 @@
     "verify:document-parser": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-parser.cjs",
     "verify:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-ingest.cjs",
     "test:agent-stream": "npm run build && node --test test/agent-stream.test.cjs test/workspace-file-tools.test.cjs",
-    "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs"
+    "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs",
+    "test:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/retrieval.test.cjs",
+    "verify:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-retrieval.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",
     "@huggingface/tokenizers": "^0.2.0",
+    "@huggingface/transformers": "^4.3.2",
     "@nestjs/common": "^12.3.3",
     "@nestjs/core": "^12.3.3",
     "@nestjs/platform-fastify": "^12.3.3",

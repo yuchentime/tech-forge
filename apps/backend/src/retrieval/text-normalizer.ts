@@ -85,29 +85,30 @@ export function toSearchTerms(input: string): string {
 /**
  * Builds an FTS5 MATCH expression for a user query.
  *
- * Consecutive bigrams from one Han run are wrapped in a phrase so their order matters; separate runs
- * and ASCII words are AND-ed. Returns `null` when the query has no indexable term, which callers
- * must treat as "no results" rather than an empty MATCH string.
+ * Per Han run: a single bigram stays a term, two bigrams become a phrase (order matters and recall is
+ * still fine), and longer runs become an OR of bigrams because a three-word Chinese query rarely
+ * appears as one contiguous phrase — BM25 then sorts by how many bigrams matched. Separate runs and
+ * ASCII words are AND-ed. Returns `null` when the query has no indexable term.
  */
 export function buildMatchQuery(input: string): string | null {
   const terms = splitTerms(clean(input));
   if (terms.length === 0) return null;
 
-  const groups: string[] = [];
-  let currentRun = terms[0].runId;
-  let phrase: string[] = [];
+  const termsByRun = new Map<number, string[]>();
   for (const term of terms) {
-    if (term.runId !== currentRun) {
-      groups.push(quotePhrase(phrase));
-      phrase = [];
-      currentRun = term.runId;
-    }
-    phrase.push(term.value);
+    const bucket = termsByRun.get(term.runId) ?? [];
+    bucket.push(term.value);
+    termsByRun.set(term.runId, bucket);
   }
-  groups.push(quotePhrase(phrase));
 
-  const usable = groups.filter((group) => group.length > 0);
-  return usable.length > 0 ? usable.join(' AND ') : null;
+  const groups: string[] = [];
+  for (const values of termsByRun.values()) {
+    // Up to three bigrams (≤4 characters) stays a phrase: it is short enough that a false-positive
+    // OR match would be likely, and long enough that a contiguous hit is plausible.
+    if (values.length <= 3) groups.push(quotePhrase(values));
+    else groups.push(`(${values.map((value) => quotePhrase([value])).join(' OR ')})`);
+  }
+  return groups.length > 0 ? groups.join(' AND ') : null;
 }
 
 /** Quotes a term group as an FTS5 phrase, escaping embedded double quotes. */

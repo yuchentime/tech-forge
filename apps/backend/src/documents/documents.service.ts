@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { DataSource, In, Repository, type EntityManager } from 'typeorm';
 import { DocumentParserService } from '../platform/document-parser/document-parser.service';
+import { EmbeddingService } from '../embedding/embedding.service';
 import {
   isDocumentParserError,
   type ParseDocumentResult,
@@ -22,11 +23,11 @@ export const DOCUMENTS_STORAGE_ROOT = 'DOCUMENTS_STORAGE_ROOT';
 /**
  * Lifecycle values written to `document_versions.processingStatus`.
  *
- * `indexed` means the source text is split into persisted chunks and their lexical index rows are
- * written in the same transaction, so the content is findable by full-text search. Vector indexing
- * will add a further state once the embedding business line lands.
+ * `indexed` means chunks and their lexical index rows are committed, so the content is findable by
+ * full-text search. `ready` means dense vectors are committed too. A version that fails only during
+ * embedding stays at `indexed`: the content remains usable and can be re-embedded later.
  */
-export type DocumentProcessingStatus = 'parsing' | 'chunking' | 'indexed' | 'failed';
+export type DocumentProcessingStatus = 'parsing' | 'chunking' | 'indexed' | 'ready' | 'failed';
 
 /** Caller input for one ingest run: a complete local file path, plus an optional target document. */
 export interface IngestDocumentInput {
@@ -100,6 +101,7 @@ export class DocumentsService {
     private readonly chunks: Repository<DocumentChunkEntity>,
     private readonly dataSource: DataSource,
     private readonly parser: DocumentParserService,
+    private readonly embeddings: EmbeddingService,
     @Optional() @Inject(DOCUMENTS_STORAGE_ROOT) storageRoot?: string,
   ) {
     this.storageRoot = storageRoot ?? resolveDefaultStorageRoot();
@@ -166,6 +168,7 @@ export class DocumentsService {
     await this.updateStatus(version.id, 'chunking');
 
     let chunkCount: number;
+    let persisted: Array<{ chunkId: string; content: string }>;
     try {
       const chunks = chunkDocument({
         pages: parsed.pages,
@@ -174,10 +177,33 @@ export class DocumentsService {
         countTokens: getChunkTokenCounter().count,
       });
       chunkCount = chunks.length;
-      await this.persistChunks(version.id, chunks);
+      persisted = await this.persistChunks(version.id, chunks);
     } catch (error) {
       await this.markFailed(version.id, describeError(error));
       throw error;
+    }
+
+    const warnings = parsed.warnings.map((warning) => ({
+      code: String(warning.code),
+      message: warning.message,
+    }));
+
+    // Dense vectors are a separate phase on purpose: a failure here must not discard the lexical
+    // index that was already committed, so the version stays `indexed` and reports a warning.
+    let status: DocumentProcessingStatus = 'indexed';
+    try {
+      const vectors = await this.embeddings.embed(persisted.map((chunk) => chunk.content));
+      await this.persistVectors(
+        document.id,
+        version.id,
+        persisted.map((chunk, index) => ({ chunkId: chunk.chunkId, vector: vectors[index] })),
+      );
+      await this.updateStatus(version.id, 'ready');
+      status = 'ready';
+    } catch (error) {
+      const message = describeError(error);
+      warnings.push({ code: 'EMBEDDING_FAILED', message });
+      await this.versionRepositoryErrorNote(version.id, message);
     }
 
     return {
@@ -185,9 +211,9 @@ export class DocumentsService {
       documentVersionId: version.id,
       versionNo,
       chunkCount,
-      status: 'indexed',
+      status,
       duplicate: false,
-      warnings: parsed.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
+      warnings,
     };
   }
 
@@ -330,13 +356,22 @@ export class DocumentsService {
     return relative(this.storageRoot, targetPath).split(sep).join('/');
   }
 
-  /** Writes chunks plus their lexical index rows and flips the version to `indexed` atomically. */
-  private async persistChunks(documentVersionId: string, chunks: DocumentChunk[]): Promise<void> {
+  /**
+   * Writes chunks plus their lexical index rows and flips the version to `indexed` atomically.
+   *
+   * Returns the created chunk identities so the caller can embed exactly the committed content.
+   */
+  private async persistChunks(
+    documentVersionId: string,
+    chunks: DocumentChunk[],
+  ): Promise<Array<{ chunkId: string; content: string }>> {
+    const persisted: Array<{ chunkId: string; content: string }> = [];
     await this.dataSource.transaction(async (manager) => {
       const terms: Array<{ chunkId: string; heading: string; body: string }> = [];
       for (let offset = 0; offset < chunks.length; offset += CHUNK_INSERT_BATCH) {
         const batch = chunks.slice(offset, offset + CHUNK_INSERT_BATCH).map((chunk) => {
           const id = randomUUID();
+          persisted.push({ chunkId: id, content: chunk.content });
           terms.push({
             chunkId: id,
             heading: toSearchTerms(chunk.locator.headingPath.join(' ')),
@@ -357,6 +392,35 @@ export class DocumentsService {
         processingStatus: 'indexed',
         processingError: null,
       });
+    });
+    return persisted;
+  }
+
+  /** Stores dense vectors for the active model in one transaction. */
+  private async persistVectors(
+    documentId: string,
+    documentVersionId: string,
+    rows: Array<{ chunkId: string; vector: Float32Array }>,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      for (let offset = 0; offset < rows.length; offset += CHUNK_INSERT_BATCH) {
+        const batch = rows.slice(offset, offset + CHUNK_INSERT_BATCH);
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+        const parameters = batch.flatMap((row) => [
+          row.chunkId,
+          documentId,
+          documentVersionId,
+          this.embeddings.modelId,
+          this.embeddings.dimension,
+          Buffer.from(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength),
+        ]);
+        await manager.query(
+          `INSERT INTO "chunk_embeddings"
+             ("chunkId", "documentId", "documentVersionId", "embeddingModel", "embeddingDim", "vector")
+           VALUES ${placeholders}`,
+          parameters,
+        );
+      }
     });
   }
 
@@ -379,6 +443,17 @@ export class DocumentsService {
         parameters,
       );
     }
+  }
+
+  /** Records an embedding failure without downgrading the committed lexical index. */
+  private async versionRepositoryErrorNote(
+    documentVersionId: string,
+    message: string,
+  ): Promise<void> {
+    await this.versions.update(documentVersionId, {
+      processingStatus: 'indexed',
+      processingError: `EMBEDDING_FAILED: ${message}`.slice(0, 1000),
+    });
   }
 
   /** Counts chunks per version in one grouped query. */
