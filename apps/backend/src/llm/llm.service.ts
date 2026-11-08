@@ -73,14 +73,9 @@ const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 const importPiSdk = new Function("specifier", "return import(specifier)") as (
   specifier: string,
 ) => Promise<PiSdk>;
-const importBillionContext = new Function(
-  "specifier",
-  "return import(specifier)",
-) as (specifier: string) => Promise<BillionContextPi>;
-const importPiSubagents = new Function(
-  "specifier",
-  "return import(specifier)",
-) as (specifier: string) => Promise<PiSubagents>;
+
+/** Identifies which stored context the Pi session was rebuilt from. */
+type SessionRestoreSource = "session_snapshot" | "rebuilt_history";
 
 /** Supplies a valid zero-usage record for restored assistant text messages. */
 function createEmptyUsage() {
@@ -129,8 +124,6 @@ function createConversationPersistenceExtension(
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private piSdkPromise?: Promise<PiSdk>;
-  private billionContextFactoryPromise?: Promise<PiExtensionFactory>;
-  private piSubagentsFactoryPromise?: Promise<PiExtensionFactory>;
 
   /** Injects local settings, provider adapters, and the per-conversation Pi snapshot store. */
   constructor(
@@ -688,15 +681,15 @@ export class LlmService {
       );
     }
 
-    const restoredEntries = pickSessionEntries(rebuiltEntries, snapshotEntries);
+    const restored = pickSessionEntries(rebuiltEntries, snapshotEntries);
     writeStructuredEvent(this.logger, "log", "llm.session.restore.completed", {
       ...logContext,
+      source: restored.source,
       rebuiltEntryCount: rebuiltEntries.length,
       snapshotEntryCount: snapshotEntries?.length ?? 0,
-      restoredEntryCount: restoredEntries.length,
-      usedSessionSnapshot: restoredEntries === snapshotEntries,
+      restoredEntryCount: restored.entries.length,
     });
-    return restoredEntries;
+    return restored.entries;
   }
 
   /** Converts persisted plain-text turns into the Pi SDK's authoritative entry tree. */
@@ -854,13 +847,16 @@ function findLastRestorableMessageSignature(
 function pickSessionEntries(
   rebuilt: PiSessionMessageEntry[],
   snapshot: SessionEntry[] | null,
-): SessionEntry[] {
-  if (!snapshot || rebuilt.length === 0) return rebuilt;
+): { entries: SessionEntry[]; source: SessionRestoreSource } {
+  if (!snapshot || rebuilt.length === 0) {
+    return { entries: rebuilt, source: "rebuilt_history" };
+  }
   const latestRebuilt = rebuilt[rebuilt.length - 1];
   const snapshotTail = findLastRestorableMessageSignature(snapshot);
-  return snapshotTail === getPiMessageSignature(latestRebuilt.message)
-    ? snapshot
-    : rebuilt;
+  if (snapshotTail === getPiMessageSignature(latestRebuilt.message)) {
+    return { entries: snapshot, source: "session_snapshot" };
+  }
+  return { entries: rebuilt, source: "rebuilt_history" };
 }
 
 /** Builds the shared internal request correlation fields for LLM logs. */
