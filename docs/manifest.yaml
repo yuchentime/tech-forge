@@ -1,4 +1,24 @@
 routes:
+  document-parser-adapter:
+    description: "Design or implement the internal PDF, PPTX, and image parsing adapter with a packaged MinerU sidecar and optional DeepSeek Vision"
+    token_budget: 16000
+    code_globs:
+      - "apps/backend/src/platform/**"
+      - "apps/backend/src/settings/**"
+      - "apps/desktop/electron/**"
+      - "apps/desktop/package.json"
+      - "package.json"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/system-settings/index.md
+      - docs/changes/2026-11-08-document-parser-adapter/design.md
+    optional:
+      - docs/current/platform/agent-runtime.md
+      - docs/changes/2026-11-07-local-agent-settings/design.md
+      - docs/changes/2026-11-07-local-workspace-setting/design.md
+    history_on_demand: []
   frontend-backend-code-placement:
     description: "Current Electron, React, NestJS runtime and code-placement guide"
     token_budget: 10000
