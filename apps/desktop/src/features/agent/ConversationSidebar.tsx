@@ -30,7 +30,15 @@ export function ConversationSidebar({
       className="flex h-48 min-h-0 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3">
-        <h2 className="min-w-0 flex-1 text-sm font-semibold text-stone-800">对话</h2>
+        <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-stone-800">
+          <img
+            alt=""
+            aria-hidden="true"
+            className="size-7 shrink-0 object-contain"
+            src="./logo.ico"
+          />
+          <span className="truncate">TeachForge</span>
+        </h2>
         <button
           aria-label="新建对话"
           className="flex size-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-200 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40"

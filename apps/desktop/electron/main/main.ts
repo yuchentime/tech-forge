@@ -517,6 +517,7 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: '#f0f2ed',
     title: 'TeachForge',
+    icon: path.join(app.getAppPath(), 'public', 'logo.ico'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
