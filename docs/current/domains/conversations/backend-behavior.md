@@ -29,7 +29,9 @@ last_verified: 2026-11-08
 
 每轮开始时，`ConversationsService` 按 `sequenceNo` 检查上一轮遗留状态。未完成 assistant 快照转为失败或取消状态，并从不完整快照删除尚未完成的 toolCall block，保留已持久化文本。运行中的工具行标记为 interrupted。若已结束的 assistant 消息包含没有对应 `toolResult` 的调用，服务优先用 `tool_execution_end` 行里的最终结果重建 toolResult；若没有最终结果则补一条合成错误结果，避免恢复时 Pi 重放该工具。
 
-`LlmService` 将当前对话的 user 行和持久化 Pi assistant/toolResult 行按 `sequenceNo` 映射成 `SessionMessageEntry`，并传给 `SessionManager.inMemory(cwd, { id }, entries)`。旧版本纯文本 assistant 行仍以当前 Pi model 元信息和零 usage 计数重建。assistant/toolResult 原生 payload 与用户输入一起传给大模型；assistantTurn 标记和 toolExecution 状态行不进入模型上下文。Pi SDK 仍由 `SessionManager` 负责构造下一次请求历史，SQLite 是外部持久来源，不创建 Pi session 文件。
+Pi 的 `getEntries()` 是模型侧会话状态（含 compaction、model/thinking 变更和 Pi 专属上下文消息），与 UI 展示的完整 SQLite 历史不是同一集合。`LlmService` 先读取 `pi_session_snapshots`：命中且其最后一条持久化消息与 SQLite 最新历史一致时，直接把快照传给 `SessionManager.inMemory(cwd, { id }, entries)`，由 Pi 按 compaction 规则构造模型上下文；没有快照，或快照落后（上一轮崩溃、快照未写成）时，才按 `sequenceNo` 用 SQLite 行重建。旧版本纯文本 assistant 行仍以当前 Pi model 元信息和零 usage 计数重建。assistant/toolResult 原生 payload 与用户输入一起传给大模型；assistantTurn 标记和 toolExecution 状态行不进入模型上下文。Pi SDK 仍由 `SessionManager` 负责构造下一次请求历史，SQLite 是 UI 历史与回退来源，快照是模型上下文的持久副本。
+
+每轮 `stream()` 结束且没有持久化失败时，`LlmService` 将该 session 的 `getEntries()` 结果 upsert 到 `pi_session_snapshots`；保存失败只记录 `llm.session_snapshot.save.failed`，不改变已完成的流结果。
 
 ## API 与错误
 

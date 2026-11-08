@@ -3,13 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationEntity } from './conversation.entity';
 import { MessageEntity } from './message.entity';
 import { ConversationsService } from './conversations.service';
+import { PiSessionSnapshotsService } from './pi-session-snapshots.service';
 import { ConversationsController } from './conversations.controller';
 
 /** Registers conversation persistence repositories for the conversation feature. */
 @Module({
   imports: [TypeOrmModule.forFeature([ConversationEntity, MessageEntity])],
   controllers: [ConversationsController],
-  providers: [ConversationsService],
-  exports: [ConversationsService],
+  providers: [ConversationsService, PiSessionSnapshotsService],
+  exports: [ConversationsService, PiSessionSnapshotsService],
 })
 export class ConversationsModule {}

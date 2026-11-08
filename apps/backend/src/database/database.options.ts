@@ -5,6 +5,7 @@ import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ArtifactEntity } from '../artifacts/artifact.entity';
 import { ConversationEntity } from '../conversations/conversation.entity';
 import { MessageEntity } from '../conversations/message.entity';
+import { PiSessionSnapshotEntity } from '../conversations/pi-session-snapshot.entity';
 import { ConversationDocumentEntity } from '../documents/conversation-document.entity';
 import { DocumentChunkEntity } from '../documents/document-chunk.entity';
 import { DocumentEntity } from '../documents/document.entity';
@@ -25,6 +26,7 @@ export function buildDatabaseOptions(): TypeOrmModuleOptions {
     entities: [
       ConversationEntity,
       MessageEntity,
+      PiSessionSnapshotEntity,
       RehearsalEntity,
       RehearsalTurnEntity,
       DocumentEntity,

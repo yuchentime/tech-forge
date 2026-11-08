@@ -35,9 +35,9 @@ last_verified: 2026-11-08
 - `GET /api/conversations/:conversationId/messages` 默认返回最近 30 条可见终态 user/assistant 文本及 `hasMore`；使用同会话消息 ID 游标读取更早一页。单页按 `sequenceNo ASC` 返回；user 行可嵌套其轮次中的安全 `toolActivities` 摘要，工具执行行不会作为顶层消息返回。
 - 每轮开始时，后端在短 SQLite 事务中保存 `user/completed` 行和 `assistantTurn/pending` 标记；模型调用不在数据库事务内。
 - Pi assistant 与 `toolResult` 消息按原生消息结构逐事件持久化；工具执行开始、进度、最终结果和终态另存 `toolExecution` 行。Pi 扩展钩子等待 SQLite 写入后才让事件继续派发或工具开始执行。
-- 每次新请求先对账遗留的 pending 行，再按序把用户消息、assistant 消息和工具结果恢复到 Pi `SessionManager`。历史不做摘要或截断。
+- 模型上下文优先从 `pi_session_snapshots` 恢复（含 Pi compaction 等条目）；仅当快照落后于 SQLite 最新历史或不存在时，才按 `sequenceNo` 用 UI 历史重建。UI 历史仍完整保存在 SQLite，与模型上下文不是同一集合。
 - Message `sequenceNo` 在 Conversation 内递增；ChatService 在单一 backend 进程内按 conversation 串行化同一对话请求。
-- 应用重启后，后端可从 SQLite 重建 Pi 上下文；Renderer 在 Agent 页面启动后会加载上次选中对话的可见历史。
+- 应用重启后，后端优先从快照恢复模型上下文；快照缺失或落后时再从 SQLite 重建。Renderer 在 Agent 页面启动后会加载上次选中对话的可见历史。
 
 ## 当前边界
 

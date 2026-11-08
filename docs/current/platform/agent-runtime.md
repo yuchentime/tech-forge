@@ -79,9 +79,9 @@ sequenceDiagram
     Main-->>UI: conversationId
 
     Chat->>LLM: stream(prompt, history, 持久化回调)
-    LLM->>LLM: 将历史转换为 Pi SessionMessageEntry
+    LLM->>LLM: 读取 Pi 快照；缺失或落后时转换 SQLite 历史
     LLM->>Pi: 创建带 history 的 SessionManager.inMemory()
-    Note over LLM,Pi: inMemory 是本次请求的运行副本；SQLite 仍是持久来源
+    Note over LLM,Pi: 优先使用快照中的模型上下文（含 compaction）；inMemory 仍是本次请求的运行副本
     Pi->>Model: 发送已恢复历史和本轮 prompt
     Model-->>Pi: 流式生成 assistant 消息
 
@@ -114,11 +114,11 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 `beginTurn()` 按 `sequenceNo` 读取该对话的全部消息行，对账上次中断的轮次，然后在模型调用前保存新的 `user/completed` 行和 `assistantTurn/pending` 标记。
 
-`LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
+`LlmService` 优先读取 `pi_session_snapshots` 作为模型上下文（含 compaction 等 Pi 条目），仅当快照最后一条持久化消息与 SQLite 最新历史不一致（崩溃或快照未保存）时回退 SQLite 重建；未命中时也走重建。当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-`LlmService` 将返回的历史映射为 Pi entries，传给 `SessionManager.inMemory(cwd, { id }, entries)`；当前 prompt 则单独通过 `session.prompt(prompt)` 发送。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
+每次 `stream()` 结束且持久化没有失败时，`LlmService` 将该 session 的 `getEntries()` upsert 回 `pi_session_snapshots`。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
 ## 文件读写边界
 
@@ -160,7 +160,8 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
-- SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`
+- SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`、`pi-session-snapshot.entity.ts`
+- Pi session 快照读写与恢复选择：`apps/backend/src/conversations/pi-session-snapshots.service.ts`
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`
 - 会话侧栏与 Renderer 查询状态：`apps/desktop/src/features/agent/AgentChatPage.tsx`、`ConversationSidebar.tsx`、`conversation-store.ts`
 - 本机设置 UI 和 backend 文件配置：`apps/desktop/src/features/settings/SettingsPage.tsx`、`apps/backend/src/settings/`

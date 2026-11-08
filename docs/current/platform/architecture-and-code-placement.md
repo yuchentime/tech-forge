@@ -115,9 +115,9 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 
 ## 6. 当前装配与重要差异
 
-- [数据库选项](../../../apps/backend/src/database/database.options.ts)注册当前 9 个目标实体；SQLite 启用 WAL、外键和 busy timeout，自动运行 migration，关闭 schema synchronize。
+- [数据库选项](../../../apps/backend/src/database/database.options.ts)注册当前 10 个目标实体；SQLite 启用 WAL、外键和 busy timeout，自动运行 migration，关闭 schema synchronize。
 - Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
-- 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。此迁移不代表对应业务流程已实现。
+- 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。[Pi session 快照迁移](../../../apps/backend/src/database/migrations/1793940000000-pi-session-snapshots.ts)另行创建 `pi_session_snapshots` 表；`LlmService` 每轮结束后 upsert Pi `getEntries()`，下一轮优先使用快照（含 compaction），仅当快照落后于 SQLite 最新消息时回退重建。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。
 - Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。独立于 SQLite 数据目录，本机模型设置在用户主目录 `.tech-forge/config.toml`，风格偏好在同目录 `SOULS.md`；每个新 Pi session 读取模型、风格和 workspace 配置。`config.toml` 的 `[workspace].path` 默认是 `.tech-forge/workspace/`，旧默认值映射到该目录；Pi cwd 和文件工具都使用此路径。config.toml 与 SOULS.md 仍固定归 SettingsService 所有。API Key 按用户要求明文写入 TOML，并经本机设置 API 返回 Renderer 设置页显示；候选草案建议使用操作系统安全存储，差异记录在[系统设置当前事实](../domains/system-settings/index.md)。
 - `Course` API 与桌面端课程原型不再注册或调用；不要把它复制成新的 Course/Class/Lesson 依赖路径。
