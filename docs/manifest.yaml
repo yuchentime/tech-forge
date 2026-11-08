@@ -20,25 +20,30 @@ routes:
       - docs/changes/2026-11-07-local-workspace-setting/design.md
     history_on_demand: []
   knowledge-retrieval:
-    description: "Design or implement local knowledge retrieval: chunking, SQLite FTS5 with Chinese bigram normalization, local Transformers.js embeddings, and RRF fusion"
-    token_budget: 18000
+    description: "Change or extend document ingest, lexical/dense retrieval, query expansion, and the search_documents agent tool"
+    token_budget: 20000
     code_globs:
       - "apps/backend/src/retrieval/**"
       - "apps/backend/src/embedding/**"
       - "apps/backend/src/knowledge/**"
       - "apps/backend/src/documents/**"
+      - "apps/backend/src/llm/tools/document-search-tool.ts"
       - "apps/backend/src/database/migrations/**"
+      - "apps/backend/assets/models/**"
     required:
       - docs/current/index.md
-      - docs/current/platform/index.md
+      - docs/current/domains/documents/index.md
+      - docs/current/domains/retrieval/index.md
       - docs/current/platform/architecture-and-code-placement.md
+      - docs/decisions/2026-11-08-local-knowledge-retrieval.md
+    optional:
       - docs/source/data-model-design.md
       - docs/source/data-model-fields.md
       - docs/changes/2026-11-08-knowledge-retrieval/design.md
-    optional:
       - docs/changes/2026-11-08-document-parser-adapter/design.md
-      - docs/changes/2026-11-08-knowledge-retrieval/brief.md
-    history_on_demand: []
+    history_on_demand:
+      - docs/changes/2026-11-08-knowledge-retrieval/worklog.md
+      - docs/changes/2026-11-08-knowledge-retrieval/verification.md
   frontend-backend-code-placement:
     description: "Current Electron, React, NestJS runtime and code-placement guide"
     token_budget: 10000
