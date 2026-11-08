@@ -23,6 +23,8 @@ import {
   createWorkspaceFileTools,
   prepareWorkspaceDirectory,
 } from "./tools/workspace-file-tools";
+import { createDocumentSearchTool } from "./tools/document-search-tool";
+import type { RetrievalService } from "../retrieval/retrieval.service";
 import { parsePersistedPiMessage } from "../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../conversations/pi-session-snapshots.service";
 import {
@@ -131,6 +133,7 @@ export class LlmService {
     private readonly customAdapter: CustomLLMAdapter,
     private readonly settings: SettingsService,
     private readonly piSessionSnapshots: PiSessionSnapshotsService,
+    private readonly retrieval: RetrievalService,
   ) {}
 
   /**
@@ -537,6 +540,8 @@ export class LlmService {
           currentUserRequest,
         },
       );
+      // Retrieval is exposed as a normal Pi tool; deciding when to call it stays with the model.
+      const customTools = [...workspaceFileTools, createDocumentSearchTool(this.retrieval)];
       const extensionFactories: PiExtensionFactory[] = [];
       if (options.persistConversationEvent) {
         extensionFactories.push(
@@ -623,7 +628,7 @@ export class LlmService {
         settingsManager,
         tools: ["read", "edit", "write", "grep", "bash"],
         // excludeTools: ["bash"],
-        customTools: workspaceFileTools,
+        customTools,
       });
 
       writeStructuredEvent(this.logger, "log", "llm.session.create.completed", {
@@ -633,7 +638,7 @@ export class LlmService {
         historyMessageCount: options.conversation?.history.length ?? 0,
         restoredEntryCount: restoredEntries?.length ?? 0,
         extensionCount: extensionFactories.length,
-        workspaceToolCount: workspaceFileTools.length,
+        customToolCount: customTools.length,
         elapsedMs: Date.now() - startedAt,
       });
       return session;

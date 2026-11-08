@@ -181,7 +181,17 @@ npm run verify:document-ingest --workspace @teachforge/backend -- <file> [file..
 | 禁止出现 | 单字查询返回 0 命中（索引只有 bigram 时的必然结果）；对单字强行构造 MATCH 表达式 |
 | 判定方式 | L2 "single Han character queries use the substring fallback"；真实语料 `工` 由 9 个命中变为可检索 |
 
-### AC-16 未实现项（不在本轮验收）
+### AC-16 检索工具注册到 Pi SDK 且返回结构化数组
+
+| 要素 | 内容 |
+|---|---|
+| 代码位置 | `llm/tools/document-search-tool.ts`、`LlmService.createSession()` 的 `customTools` |
+| 前置条件 | 资料已入库；会话创建时注入 `RetrievalService` |
+| 预期行为 | 工具名 `search_documents`，参数为 `query`（必填）与 `limit`（1–10，默认 5）；返回数组，每项含分片文本、文档元数据（名称/路径/标题/ID）与 locator；无命中返回空数组；检索异常返回 `isError` 而不是抛出 |
+| 禁止出现 | 返回字符串或对象而不是数组；文档元数据缺失路径；把异常直接抛给模型导致会话中断 |
+| 判定方式 | L2 `test:document-tool`（真实 SQLite + 真实模型 + 磁盘文件）；后端启动冒烟确认 `LlmModule` 依赖注入通过 |
+
+### AC-17 未实现项（不在本轮验收）
 
 - 交叉编码器重排（rerank）：未实现。
 - 对话级检索编排（把命中拼进 prompt）、`messages.contextRefsJson` 写入：未实现。

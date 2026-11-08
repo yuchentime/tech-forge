@@ -43,6 +43,16 @@ export interface RetrievalScore {
   expandedScore?: number;
 }
 
+/** Source document metadata attached to every hit so callers can cite or open the file. */
+export interface RetrievedDocument {
+  id: string;
+  title: string;
+  /** Original file name of the indexed version. */
+  fileName: string;
+  /** Workspace-relative path of the copied source file. */
+  path: string;
+}
+
 /** One retrieved chunk with everything a citation needs. */
 export interface RetrievalHit {
   chunkId: string;
@@ -50,6 +60,7 @@ export interface RetrievalHit {
   documentVersionId: string;
   content: string;
   locatorJson: string;
+  document: RetrievedDocument;
   score: RetrievalScore;
 }
 
@@ -68,6 +79,9 @@ interface ChunkRow {
   documentVersionId: string;
   content: string;
   locatorJson: string;
+  title: string;
+  fileName: string;
+  path: string;
 }
 
 /** One channel's ranked hits in descending relevance. */
@@ -267,6 +281,7 @@ export class RetrievalService {
           documentVersionId: '',
           content: '',
           locatorJson: '',
+          document: { id: '', title: '', fileName: '', path: '' },
           score,
         });
       });
@@ -282,9 +297,11 @@ export class RetrievalService {
     const ids = hits.map((hit) => hit.chunkId);
     const rows = await this.dataSource.query<ChunkRow[]>(
       `SELECT c.id AS id, c.content AS content, c."locatorJson" AS locatorJson,
-              c."documentVersionId" AS documentVersionId, v."documentId" AS documentId
+              c."documentVersionId" AS documentVersionId, v."documentId" AS documentId,
+              d.title AS title, v."originalName" AS fileName, v."workspaceRelativePath" AS path
          FROM document_chunks c
          JOIN document_versions v ON v.id = c."documentVersionId"
+         JOIN documents d ON d.id = v."documentId"
         WHERE c.id IN (${ids.map(() => '?').join(', ')})`,
       ids,
     );
@@ -299,6 +316,12 @@ export class RetrievalService {
           documentVersionId: row.documentVersionId,
           content: row.content,
           locatorJson: row.locatorJson,
+          document: {
+            id: row.documentId,
+            title: row.title,
+            fileName: row.fileName,
+            path: row.path,
+          },
         };
       })
       .filter((hit): hit is RetrievalHit => hit !== null);

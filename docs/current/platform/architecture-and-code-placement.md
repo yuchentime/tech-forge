@@ -94,7 +94,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `retrieval` | 按 Conversation 资料范围组合检索上下文 | `RetrievalService.search()` 实现词法 + 向量双通道与 RRF 融合（k=60，候选 50/路，默认返回 12），支持 `documentIds` 范围过滤与向量下限 0.55；向量不可用时退回词法单路。`LlmQueryExpander` 在词法零命中时用已配置模型做错字纠正与同义词扩展，只增补、800 ms 预算、失败回落。`text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造 |
 | `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
 | `embedding` | 文本向量化能力 | `EmbeddingService` 加载随仓库分发的 `bge-small-zh-v1.5` q8 模型（`assets/models`，离线，148 ms 加载），批量 32 编码并返回已归一化的 512 维向量；失败时调用方可降级 |
-| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护 |
+| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护；额外注册 `search_documents` 工具（返回资料分片与文档元数据数组，由模型自行决定是否调用） |
 | `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
