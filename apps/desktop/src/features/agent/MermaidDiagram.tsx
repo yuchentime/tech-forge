@@ -16,7 +16,14 @@ export function MermaidDiagram({ code }: { code: string }) {
       try {
         // Mermaid is a large dependency and only mind-map previews need it.
         const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          // Keep the diagram at its natural size: squeezing a wide mind map into the panel makes
+          // every label unreadable, so the panel scrolls instead.
+          mindmap: { useMaxWidth: false },
+          flowchart: { useMaxWidth: false },
+        });
         const result = await mermaid.render(`artifact-mermaid-${currentId}`, code);
         if (cancelled) return;
         setSvg(result.svg);
@@ -49,7 +56,7 @@ export function MermaidDiagram({ code }: { code: string }) {
   // Mermaid output is generated from the file's own text under strict security level.
   return (
     <div
-      className="overflow-x-auto rounded-lg border border-stone-200 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full"
+      className="overflow-auto rounded-lg border border-stone-200 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-none"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
