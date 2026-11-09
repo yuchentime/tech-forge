@@ -117,23 +117,26 @@ test('command parsing keeps non-command prompts untouched', () => {
     prompt: '光合作用在哪里发生',
   });
 
-  // The composer menu inserts the longer command with a trailing space; the old alias stays valid.
+  // The composer menu inserts this exact string (with a trailing space); aliases stay valid.
   assert.deepEqual(parseKnowledgeCommand('/查询知识库 帮我找下关于抄袭的定义'), {
     force: true,
     prompt: '帮我找下关于抄袭的定义',
   });
-  assert.deepEqual(parseKnowledgeCommand('/查询知识库 '), { force: false, prompt: '/查询知识库 ' });
-  assert.deepEqual(parseKnowledgeCommand('/查询知识库  抄袭的定义'), {
+  assert.deepEqual(parseKnowledgeCommand('/查询资料库 '), { force: false, prompt: '/查询资料库 ' });
+  assert.deepEqual(parseKnowledgeCommand('/查询资料库  如何界定抄袭'), {
     force: true,
-    prompt: '抄袭的定义',
+    prompt: '如何界定抄袭',
   });
-  assert.deepEqual(parseKnowledgeCommand('/查询知识库'), {
+  assert.deepEqual(parseKnowledgeCommand('/查询资料库'), { force: false, prompt: '/查询资料库' });
+  assert.deepEqual(parseKnowledgeCommand('/查询资料库化 是什么'), {
     force: false,
-    prompt: '/查询知识库',
+    prompt: '/查询资料库化 是什么',
   });
-  assert.deepEqual(parseKnowledgeCommand('/查询知识库化 是什么'), {
-    force: false,
-    prompt: '/查询知识库化 是什么',
+
+  // Earlier spellings keep working so old conversations and habits are not broken.
+  assert.deepEqual(parseKnowledgeCommand('/查询知识库 什么是光合作用'), {
+    force: true,
+    prompt: '什么是光合作用',
   });
 });
 

@@ -1,13 +1,19 @@
-/** Slash command that forces knowledge-base retrieval for exactly one turn. */
-export const KNOWLEDGE_COMMAND = '/查询知识库';
+/**
+ * Slash command that forces knowledge-base retrieval for exactly one turn.
+ *
+ * This string must match what the composer inserts (`SlashCommandMenu.insert`): a mismatch is silent
+ * — the command simply never fires and the raw text reaches the model — so the two are kept in the
+ * same wording and covered by a parser test.
+ */
+export const KNOWLEDGE_COMMAND = '/查询资料库';
 
 /**
- * Shorter alias kept for prompts written before the composer menu existed.
- * Longer commands are matched first, so this can never shadow the canonical one.
+ * Earlier spellings, still accepted so existing conversations and habits keep working.
+ * Longer commands are matched first, so neither can shadow the canonical one.
  */
-export const KNOWLEDGE_COMMAND_ALIAS = '/知识库';
+export const KNOWLEDGE_COMMAND_ALIASES = ['/查询知识库', '/知识库'] as const;
 
-const KNOWLEDGE_COMMANDS = [KNOWLEDGE_COMMAND, KNOWLEDGE_COMMAND_ALIAS] as const;
+const KNOWLEDGE_COMMANDS = [KNOWLEDGE_COMMAND, ...KNOWLEDGE_COMMAND_ALIASES] as const;
 
 /** One prompt split into the knowledge switch and the question the model must answer. */
 export interface ParsedKnowledgeCommand {

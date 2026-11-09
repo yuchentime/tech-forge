@@ -18,7 +18,14 @@ export interface SlashCommandItem {
   insert: string;
 }
 
-/** The knowledge command; the backend accepts it with or without the shorter alias. */
+/**
+ * The knowledge command.
+ *
+ * This string is the protocol: the backend parses exactly it (plus the older aliases) from the prompt
+ * prefix. Renaming it here without updating `knowledge-command.ts` disables retrieval silently — the
+ * command simply never fires and the raw text reaches the model — so the two are kept in the same
+ * wording and both are covered by tests.
+ */
 export const KNOWLEDGE_SLASH_COMMAND: SlashCommandItem = {
   id: 'knowledge',
   label: '查询资料库',
