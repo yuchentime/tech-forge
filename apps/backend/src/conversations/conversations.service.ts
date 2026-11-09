@@ -7,6 +7,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
 import { DataSource, type EntityManager } from 'typeorm';
+import { rmSync } from 'node:fs';
+import { SettingsService } from '../settings/settings.service';
 import {
   createAssistantTurnMarker,
   createRecoveredToolResult,
@@ -22,6 +24,7 @@ import {
 import { ConversationEntity } from './conversation.entity';
 import { MessageEntity } from './message.entity';
 import type {
+  ConversationAttachmentDto,
   ConversationMessagePageDto,
   ConversationMessageDto,
   ConversationSummaryDto,
@@ -49,6 +52,11 @@ export interface ConversationTurn {
    * model actually received.
    */
   loadedChunkIds: string[];
+  /**
+   * Attachments recorded on earlier turns.
+   * Their text is not replayed, but later turns need a path they can page through.
+   */
+  attachedDocuments: ConversationAttachmentRef[];
 }
 
 /** Provides one previous user, assistant, or Pi tool-result row for restoration. */
@@ -58,6 +66,16 @@ export interface ConversationHistoryMessage {
   contentJson: string;
   status: string;
   createdAt: Date;
+}
+
+/** One attachment recorded on an earlier turn of this conversation. */
+export interface ConversationAttachmentRef {
+  attachmentId: string;
+  name: string;
+  /** Characters of extracted text, when the recorded turn knew it. */
+  characters?: number;
+  /** Characters injected into some earlier prompt, so the model knows what it has already seen. */
+  injectedCharacters?: number;
 }
 
 /** Explicit knowledge scope for one conversation; empty means the default range applies. */
@@ -73,8 +91,11 @@ export type ConversationAssistantStatus = 'completed' | 'failed' | 'cancelled';
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
 
-  /** Injects TypeORM for short writes that never span model or tool execution. */
-  constructor(private readonly dataSource: DataSource) {}
+  /** Injects TypeORM for short writes and the config paths used for session files. */
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly settings: SettingsService,
+  ) {}
 
   /** Loads lightweight sidebar summaries and derives titles from first prompts. */
   async listConversations(
@@ -262,7 +283,10 @@ export class ConversationsService {
             status: message.status as ConversationMessageDto['status'],
             createdAt: message.createdAt.toISOString(),
             ...(message.role === 'user'
-              ? { toolActivities: toolActivitiesByUserId.get(message.id) ?? [] }
+              ? {
+                  toolActivities: toolActivitiesByUserId.get(message.id) ?? [],
+                  attachments: readAttachmentRefs(message.contextRefsJson),
+                }
               : {}),
           }),
         ),
@@ -558,6 +582,7 @@ export class ConversationsService {
           assistantTurnId: assistantTurn.id,
           userMessageId: userMessage.id,
           loadedChunkIds: collectLoadedChunkIds(priorMessages),
+          attachedDocuments: collectAttachedDocuments(priorMessages),
         };
       });
       writeStructuredEvent(this.logger, 'log', 'conversations.turn.begin.completed', {
@@ -647,6 +672,92 @@ export class ConversationsService {
       documentCount: unique.length,
     });
     return { documentIds: unique };
+  }
+
+  /**
+   * Physically deletes one conversation, every row derived from it, and its local session files.
+   *
+   * Every foreign key is `ON DELETE NO ACTION`, so children are removed first inside one transaction.
+   * Files are removed after the commit: a file-system failure must not resurrect the rows, and it is
+   * reported as `partial` instead of being hidden.
+   */
+  async deleteConversation(
+    conversationId: string,
+    logContext?: RequestLogContext,
+  ): Promise<{ conversationId: string; sessionCleanup: 'complete' | 'partial' }> {
+    const startedAt = Date.now();
+    const context = { ...(logContext ?? {}), conversationId };
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const existing = await manager.findOne(ConversationEntity, {
+          where: { id: conversationId },
+        });
+        if (!existing) {
+          throw new NotFoundException('没有找到这个会话，它可能已经被删除。');
+        }
+        // Children first: rehearsals and artifacts reference the conversation directly, the turn
+        // rows reference the rehearsal, and snapshots carry a raw conversation id.
+        await manager.query(
+          'DELETE FROM "rehearsal_turns" WHERE "rehearsalId" IN (SELECT id FROM "rehearsals" WHERE "conversationId" = ?)',
+          [conversationId],
+        );
+        await manager.query('DELETE FROM "rehearsals" WHERE "conversationId" = ?', [
+          conversationId,
+        ]);
+        await manager.query('DELETE FROM "artifacts" WHERE "conversationId" = ?', [
+          conversationId,
+        ]);
+        await manager.query('DELETE FROM "conversation_documents" WHERE "conversationId" = ?', [
+          conversationId,
+        ]);
+        await manager.query('DELETE FROM "messages" WHERE "conversationId" = ?', [
+          conversationId,
+        ]);
+        await manager.query('DELETE FROM "pi_session_snapshots" WHERE conversation_id = ?', [
+          conversationId,
+        ]);
+        await manager.delete(ConversationEntity, { id: conversationId });
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      writeStructuredEvent(this.logger, 'error', 'conversations.delete.failed', {
+        ...context,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
+    }
+
+    const sessionCleanup = this.removeSessionDirectory(conversationId, context);
+    writeStructuredEvent(this.logger, 'log', 'conversations.delete.completed', {
+      ...context,
+      sessionCleanup,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { conversationId, sessionCleanup };
+  }
+
+  /** Removes one conversation's local session files; a failure is logged, never thrown. */
+  private removeSessionDirectory(
+    conversationId: string,
+    context: Record<string, unknown>,
+  ): 'complete' | 'partial' {
+    try {
+      rmSync(this.settings.getSessionDirectory(conversationId), {
+        recursive: true,
+        force: true,
+      });
+      return 'complete';
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        'warn',
+        'conversations.delete.session_cleanup_failed',
+        { ...context, ...getSafeErrorLogFields(error) },
+      );
+      return 'partial';
+    }
   }
 
   /** Inserts an in-progress Pi message before any projected event is sent. */
@@ -1184,6 +1295,90 @@ function collectLoadedChunkIds(messages: MessageEntity[]): string[] {
     }
   }
   return [...refs];
+}
+
+/**
+ * Collects the attachments recorded anywhere in this conversation, keeping the widest known sizes.
+ *
+ * Later turns use these entries to point the model at the stored text file; nothing is re-injected.
+ */
+function collectAttachedDocuments(
+  messages: MessageEntity[],
+): ConversationAttachmentRef[] {
+  const byId = new Map<string, ConversationAttachmentRef>();
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    for (const attachment of readAttachmentDetails(message.contextRefsJson)) {
+      const existing = byId.get(attachment.attachmentId);
+      byId.set(attachment.attachmentId, {
+        attachmentId: attachment.attachmentId,
+        name: attachment.name,
+        characters: attachment.characters ?? existing?.characters,
+        injectedCharacters: Math.max(
+          attachment.injectedCharacters ?? 0,
+          existing?.injectedCharacters ?? 0,
+        ),
+      });
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Reads the attachments recorded for one user row.
+ *
+ * Only the id and display name are trusted: they are what the chat bubble shows. The extracted text
+ * is stored on disk, never in `contextRefsJson`.
+ */
+function readAttachmentRefs(
+  contextRefsJson: string | null,
+): ConversationAttachmentDto[] {
+  return readAttachmentDetails(contextRefsJson).map(({ attachmentId, name }) => ({
+    attachmentId,
+    name,
+  }));
+}
+
+/** Parses one row's attachment refs, keeping the optional sizes when present. */
+function readAttachmentDetails(
+  contextRefsJson: string | null,
+): ConversationAttachmentRef[] {
+  if (!contextRefsJson) return [];
+  try {
+    const parsed: unknown = JSON.parse(contextRefsJson);
+    if (!parsed || typeof parsed !== 'object') return [];
+    const attachments = (parsed as { attachments?: unknown }).attachments;
+    if (!Array.isArray(attachments)) return [];
+    return attachments.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const record = entry as {
+        attachmentId?: unknown;
+        name?: unknown;
+        characters?: unknown;
+        injectedCharacters?: unknown;
+      };
+      if (
+        typeof record.attachmentId !== 'string' ||
+        typeof record.name !== 'string'
+      ) {
+        return [];
+      }
+      return [
+        {
+          attachmentId: record.attachmentId,
+          name: record.name,
+          ...(typeof record.characters === 'number'
+            ? { characters: record.characters }
+            : {}),
+          ...(typeof record.injectedCharacters === 'number'
+            ? { injectedCharacters: record.injectedCharacters }
+            : {}),
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** Derives a compact list title from a legacy user text-block row. */

@@ -200,13 +200,14 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke('backend:request', input) as Promise<BackendResponse<T>>,
   pickImportFiles: () =>
     ipcRenderer.invoke('documents:pick-files') as Promise<string[]>,
-  streamChat: (prompt, onEvent, conversationId) => {
+  streamChat: (prompt, onEvent, conversationId, attachments) => {
     const requestId = `chat-${Date.now()}-${++nextStreamId}`;
     chatStreams.set(requestId, { onEvent });
     ipcRenderer.send('chat:stream:start', {
       requestId,
       prompt,
       ...(conversationId ? { conversationId } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     });
     return requestId;
   },

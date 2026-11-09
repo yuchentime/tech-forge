@@ -58,6 +58,10 @@ export interface LocalSettingsView {
 
 const CONFIG_FILE_NAME = 'config.toml';
 const SOULS_FILE_NAME = 'SOULS.md';
+
+/** Conversation ids are UUIDv4; the session directory path is built from one. */
+const CONVERSATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LLM_SETTING_KEYS = new Set([
   'llm.provider',
   'llm.deepseek.model_id',
@@ -88,6 +92,8 @@ export class SettingsService implements OnModuleInit {
    * cannot read it either.
    */
   private readonly knowledgeDirectory = join(this.configDirectory, 'knowledge');
+  /** Per-conversation local files (attachments and future run data), beside config and knowledge. */
+  private readonly sessionsDirectory = join(this.configDirectory, 'sessions');
   private initializationPromise?: Promise<void>;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -134,6 +140,24 @@ export class SettingsService implements OnModuleInit {
   /** Returns the app-owned knowledge library root, deliberately outside the Agent workspace. */
   getKnowledgeDirectory(): string {
     return this.knowledgeDirectory;
+  }
+
+  /** Returns the root for per-conversation session files (attachments and future run data). */
+  getSessionsDirectory(): string {
+    return this.sessionsDirectory;
+  }
+
+  /**
+   * Returns one conversation's session directory.
+   *
+   * The id is validated before it becomes a path segment: callers pass request data, and a session
+   * directory must never be able to point outside `<configDir>/sessions`.
+   */
+  getSessionDirectory(conversationId: string): string {
+    if (!CONVERSATION_ID_PATTERN.test(conversationId)) {
+      throw new Error('conversation id must be a UUID before building a session path.');
+    }
+    return join(this.sessionsDirectory, conversationId);
   }
 
   /** Returns the saved Agent output root without exposing it through LLM settings. */

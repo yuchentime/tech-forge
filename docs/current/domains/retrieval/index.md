@@ -94,7 +94,7 @@ last_verified: 2026-11-09
 
 ### 3.4 注入位置
 
-知识块追加在自定义 system prompt 的**末尾**（固定提示词之后），保持前面的稳定前缀可被 provider 缓存；每轮不同的知识内容只影响尾部。
+知识块不进入 system prompt：`ChatService` 把它和附件正文一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由后者拼在本轮 user message 前面（`## 用户输入` 标记之后是用户原话）。system prompt 因此逐字稳定，provider 的前缀缓存不会被每轮数据打断。
 
 ## 4. 日志
 

@@ -76,6 +76,7 @@ export class ChatController {
       input.conversationId,
       abortController.signal,
       requestId,
+      input.attachments,
     );
     const iterator = stream[Symbol.asyncIterator]();
 

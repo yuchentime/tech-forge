@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -152,6 +155,41 @@ export class ConversationsController {
           ...getSafeErrorLogFields(error),
         },
       );
+      throw error;
+    }
+  }
+
+  /** Physically deletes one conversation, its rows and its local session files. */
+  @Delete(':conversationId')
+  @HttpCode(HttpStatus.OK)
+  async deleteConversation(
+    @Param('conversationId', new ParseUUIDPipe({ version: '4' })) conversationId: string,
+  ): Promise<{ conversationId: string; sessionCleanup: 'complete' | 'partial' }> {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    writeStructuredEvent(this.logger, 'log', 'conversations.http.delete.accepted', {
+      requestId,
+      conversationId,
+    });
+    try {
+      const result = await this.conversations.deleteConversation(conversationId, {
+        requestId,
+        conversationId,
+      });
+      writeStructuredEvent(this.logger, 'log', 'conversations.http.delete.completed', {
+        requestId,
+        conversationId,
+        sessionCleanup: result.sessionCleanup,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'conversations.http.delete.failed', {
+        requestId,
+        conversationId,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
       throw error;
     }
   }

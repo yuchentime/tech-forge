@@ -23,6 +23,7 @@ export type DesktopBridge = {
     prompt: string,
     onEvent: (event: ChatStreamEvent) => void,
     conversationId?: string,
+    attachments?: Array<{ attachmentId: string; path: string }>,
   ): string;
   /** Cancels an active stream started by this Renderer. */
   cancelChatStream(requestId: string): void;

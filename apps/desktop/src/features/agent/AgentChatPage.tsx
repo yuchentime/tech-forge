@@ -27,6 +27,16 @@ import {
 } from 'react';
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { describeFailure } from '../../api/backend-error';
+import {
+  AttachmentPickerButton,
+  ComposerAttachmentChips,
+  UserAttachmentChips,
+} from './ComposerAttachments';
+import {
+  composerAttachmentStore,
+  sentAttachmentStore,
+} from './attachment-store';
 import { ConversationSidebar, type SidebarView } from './ConversationSidebar';
 import { SlashCommandMenu, useSlashCommandMenu } from './SlashCommandMenu';
 import { composerCommandStore } from './composer-command-store';
@@ -37,6 +47,7 @@ import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   conversationStore,
+  type ConversationAttachment,
   type ConversationHistoryPage,
   type ConversationHistoryMessage,
   type ConversationToolActivity,
@@ -141,6 +152,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
       pendingScrollAnchor.current = null;
       restoreHistoryToolActivities(response.data.messages);
+      restoreHistoryAttachments(response.data.messages);
       runtime.thread.reset(response.data.messages.map(toThreadMessage));
       setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
@@ -212,6 +224,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       }
 
       restoreHistoryToolActivities(response.data.messages);
+      restoreHistoryAttachments(response.data.messages);
       const latestMessages = runtime.thread.getState().messages;
       const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
       const earlierThreadMessages = response.data.messages
@@ -306,8 +319,43 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     setHistoryErrorConversationId(null);
     conversationStore.setActiveConversationId(null);
     composerCommandStore.reset();
+    composerAttachmentStore.reset();
+    sentAttachmentStore.reset();
     runtime.thread.reset([]);
   }, [isRunning, runtime]);
+
+  /**
+   * Deletes one conversation and clears the thread when it was the one on screen.
+   *
+   * The backend removes rows and the conversation's local session files, so nothing is left behind;
+   * the renderer only resets the view and the composer state.
+   */
+  const deleteConversation = useCallback(
+    async (conversationId: string) => {
+      const wasActive =
+        conversationStore.getSnapshot().activeConversationId === conversationId;
+      setHistoryError(null);
+      setHistoryErrorConversationId(null);
+      try {
+        await conversationStore.deleteConversation(conversationId);
+      } catch (error) {
+        setHistoryError(describeFailure(error, '删除会话失败，请重试。'));
+        return;
+      }
+      if (!wasActive) return;
+
+      requestVersion.current += 1;
+      setLoadingConversationId(null);
+      setIsLoadingEarlierMessages(false);
+      setHasEarlierMessages(false);
+      setEarlierMessagesError(null);
+      composerCommandStore.reset();
+      composerAttachmentStore.reset();
+      sentAttachmentStore.reset();
+      runtime.thread.reset([]);
+    },
+    [runtime],
+  );
 
   const isHistoryLoading = loadingConversationId !== null;
   const isInitialListLoading =
@@ -328,6 +376,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           setActiveView('chat');
           void loadConversation(conversationId);
         }}
+        onDelete={(conversationId) => void deleteConversation(conversationId)}
         onSelectView={(view) =>
           setActiveView((current) => (current === view ? 'chat' : view))
         }
@@ -409,7 +458,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     if (message.role === 'user') {
                       return (
                         <div className="space-y-4" key={message.id}>
-                          <UserMessage />
+                          <UserMessage messageId={message.id} />
                           <AgentActivity activity={activity[message.id]} />
                         </div>
                       );
@@ -423,6 +472,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
                 <ComposerPrimitive.Root className="relative rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
                   <SlashCommandMenu menu={slashMenu} />
+                  <ComposerAttachmentChips />
                   {composerCommand && (
                     <div className="mb-2 flex items-center">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-0.5 pl-2 pr-1 text-xs font-medium text-emerald-900">
@@ -450,7 +500,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     submitMode="ctrlEnter"
                   />
                   <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
-                    <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <AttachmentPickerButton disabled={isLoadingEarlierMessages} />
+                      <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                    </div>
                     <div className="flex items-center gap-2">
                       <AuiIf condition={(state) => state.thread.isRunning}>
                         <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
@@ -520,7 +573,25 @@ function isConversationHistoryMessage(
     typeof message.createdAt === 'string' &&
     (message.toolActivities === undefined ||
       (Array.isArray(message.toolActivities) &&
-        message.toolActivities.every(isConversationToolActivity)))
+        message.toolActivities.every(isConversationToolActivity))) &&
+    (message.attachments === undefined ||
+      (Array.isArray(message.attachments) &&
+        message.attachments.every(isConversationAttachment)))
+  );
+}
+
+/** Narrows one attached-file entry before it reaches the renderer. */
+function isConversationAttachment(
+  value: unknown,
+): value is ConversationAttachment {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const attachment = value as Partial<ConversationAttachment>;
+  return (
+    typeof attachment.attachmentId === 'string' &&
+    typeof attachment.name === 'string'
   );
 }
 
@@ -552,6 +623,14 @@ function restoreHistoryToolActivities(messages: ConversationHistoryMessage[]): v
     if (message.role !== 'user' || !message.toolActivities?.length) continue;
     // 历史 API 使用数据库 message ID，而实时活动可能使用另一 renderer ID，因此要按历史 ID 重建。
     agentEventBus.restoreHistoryActivity(message.id, message.toolActivities);
+  }
+}
+
+/** Rebuilds attachment chips for persisted user messages before the thread renders. */
+function restoreHistoryAttachments(messages: ConversationHistoryMessage[]): void {
+  for (const message of messages) {
+    if (message.role !== 'user' || !message.attachments?.length) continue;
+    sentAttachmentStore.restoreHistory(message.id, message.attachments);
   }
 }
 
@@ -707,11 +786,12 @@ function getToolStatusLabel(
   return '已取消';
 }
 
-/** Displays the user's message with right-aligned emphasis. */
-function UserMessage() {
+/** Displays the user's message with right-aligned emphasis and its attachment chips. */
+function UserMessage({ messageId }: { messageId: string }) {
   return (
     <MessagePrimitive.Root className="flex justify-end">
       <div className="max-w-[82%] rounded-2xl rounded-br-md bg-stone-100 px-4 py-3 text-sm leading-6 text-stone-900">
+        <UserAttachmentChips messageId={messageId} />
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>

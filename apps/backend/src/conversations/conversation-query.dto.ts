@@ -8,6 +8,12 @@ export interface ConversationSummaryDto {
   updatedAt: string;
 }
 
+/** Describes one attachment referenced by a user message. */
+export interface ConversationAttachmentDto {
+  attachmentId: string;
+  name: string;
+}
+
 /** Describes one visible text message with optional safe user-turn tool summaries. */
 export interface ConversationMessageDto {
   id: string;
@@ -16,6 +22,8 @@ export interface ConversationMessageDto {
   status: 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   toolActivities?: ConversationToolActivityDto[];
+  /** Attachments sent with this user message; empty for assistant rows. */
+  attachments?: ConversationAttachmentDto[];
 }
 
 /** Describes a safe tool lifecycle summary attached to its initiating user message. */

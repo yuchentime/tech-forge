@@ -2,9 +2,11 @@ import {
   ArrowClockwise,
   Books,
   ChatCircle,
+  DotsThree,
   GearSix,
   NotePencil,
 } from '@phosphor-icons/react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ConversationStoreSnapshot,
   ConversationSummary,
@@ -21,6 +23,7 @@ export function ConversationSidebar({
   onNewConversation,
   onRefresh,
   onSelect,
+  onDelete,
   activeView,
   onSelectView,
 }: {
@@ -30,6 +33,7 @@ export function ConversationSidebar({
   onNewConversation: () => void;
   onRefresh: () => void;
   onSelect: (conversationId: string) => void;
+  onDelete: (conversationId: string) => void;
   activeView: SidebarView;
   onSelectView: (view: SidebarView) => void;
 }) {
@@ -114,6 +118,7 @@ export function ConversationSidebar({
                 isLoading={loadingConversationId === conversation.id}
                 key={conversation.id}
                 onSelect={onSelect}
+                onDelete={onDelete}
               />
             ))}
           </ul>
@@ -141,26 +146,41 @@ export function ConversationSidebar({
   );
 }
 
-/** Renders one selectable summary and makes the current choice accessible. */
+/** Renders one selectable summary with a hover action menu. */
 function ConversationRow({
   activeConversationId,
   conversation,
   disabled,
   isLoading,
   onSelect,
+  onDelete,
 }: {
   activeConversationId: string | null;
   conversation: ConversationSummary;
   disabled: boolean;
   isLoading: boolean;
   onSelect: (conversationId: string) => void;
+  onDelete: (conversationId: string) => void;
 }) {
   const isActive = activeConversationId === conversation.id;
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // A row menu closes as soon as the user interacts anywhere outside it.
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const closeOnOutside = (event: MouseEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) setIsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    return () => document.removeEventListener('mousedown', closeOnOutside);
+  }, [isMenuOpen]);
+
   return (
-    <li>
+    <li className="group relative">
       <button
         aria-current={isActive ? 'true' : undefined}
-        className={`w-full rounded-xl px-3 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? 'bg-emerald-900/10 text-stone-900' : 'text-stone-700 hover:bg-stone-200/70'}`}
+        className={`w-full rounded-xl px-3 py-2.5 pr-8 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? 'bg-emerald-900/10 text-stone-900' : 'text-stone-700 hover:bg-stone-200/70'}`}
         disabled={disabled}
         onClick={() => onSelect(conversation.id)}
         type="button"
@@ -185,6 +205,38 @@ function ConversationRow({
           </span>
         </span>
       </button>
+
+      <button
+        aria-expanded={isMenuOpen}
+        aria-haspopup="menu"
+        aria-label={`会话操作：${conversation.title || '新对话'}`}
+        className={`absolute right-1.5 top-2 flex size-6 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-900 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0 ${isMenuOpen ? 'bg-stone-200 text-stone-900 opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        disabled={disabled}
+        onClick={() => setIsMenuOpen((open) => !open)}
+        type="button"
+      >
+        <DotsThree aria-hidden="true" className="size-4" weight="bold" />
+      </button>
+
+      {isMenuOpen && (
+        <div
+          className="absolute right-1.5 top-9 z-20 w-32 rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
+          ref={menuRef}
+          role="menu"
+        >
+          <button
+            className="w-full px-3 py-1.5 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+            onClick={() => {
+              setIsMenuOpen(false);
+              onDelete(conversation.id);
+            }}
+            role="menuitem"
+            type="button"
+          >
+            删除会话
+          </button>
+        </div>
+      )}
     </li>
   );
 }

@@ -177,6 +177,14 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 | `status` | `String` | 是 | `MessageEntity.status` | 本条消息的完成状态 | `completed`、`failed`、`cancelled` | 不为空；pending 行不返回 |
 | `createdAt` | `String` | 是 | `MessageEntity.createdAt` | 消息创建时间 | ISO 8601 | 不为空 |
 | `toolActivities` | `ConversationToolActivity[]` | user 行是；assistant 行否 | user turn 中的 `toolExecution` 行 | 安全工具执行摘要 | 字段见下表 | 没有工具时 user 行返回 `[]` |
+| `attachments` | `ConversationAttachment[]` | user 行是；assistant 行否 | user 行 `contextRefsJson.attachments` | 该消息附加的文件引用 | 字段见下表 | 没有附件时 user 行返回 `[]` |
+
+##### `attachments[]` (`ConversationAttachment`)
+
+| 字段 | 类型 | 必填 | 含义 |
+|---|---|---|---|
+| `attachmentId` | `String` | 是 | `~/.tech-forge/sessions/<conversationId>/attachments/<attachmentId>/` 的目录名 |
+| `name` | `String` | 是 | 原文件名，用于气泡标签 |
 
 ##### `toolActivities[]` (`ConversationToolActivity`)
 
@@ -204,5 +212,61 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 
 - 返回 `user` 与 `assistant` 的 `completed`、`failed`、`cancelled` 终态文本，按 `sequenceNo ASC` 排列。
 - `toolExecution` 不作为顶层消息返回；仅在 user 行下投影 `toolActivities`。不返回原始工具参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking、原始 `contentJson` 或非文本 Pi blocks。
+- `attachments` 只投影 `{attachmentId, name}`。附件正文保存在 `~/.tech-forge/sessions/<conversationId>/attachments/<attachmentId>/text.md`，从不写入消息行，因此不出现在历史接口；`characters` / `injectedCharacters` 只供服务端 prompt 使用。
 - 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。加载最近页或更早页时，Renderer 按持久 user message ID 恢复活动摘要；整轮耗时未持久化，历史 UI 不显示该计时。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。
+
+### Delete one conversation
+
+- **方法**：`DELETE`
+- **路径**：`/api/conversations/:conversationId`
+- **功能职责**：物理删除一个会话及其全部派生数据（消息、Pi 快照、演练/物料/资料关联），并同步删除该会话的本地 session 目录。
+- **鉴权/归属**：经 Electron 本地认证桥接调用；只删除给定 ID 的本地 Conversation。没有回收站，不可恢复。
+
+#### Request Summary
+
+| 位置 | 名称 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| Path | `conversationId` | `String` | 是 | 要删除的 Conversation UUIDv4。 |
+| Header | `x-teachforge-token` | `String` | 是 | Electron Main 注入的本地随机 token；Renderer 不直接接触 token。 |
+
+#### Request Schema
+
+##### Path Params
+
+| 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|---|
+| `conversationId` | `String` | 是 | URL path | 要删除的 Conversation ID | UUIDv4 | 缺失或格式错误返回 400 |
+
+##### Request Body
+
+无。
+
+#### Response Schema
+
+HTTP 200 返回被删除的会话 ID 与本地文件清理结果。
+
+```json
+{ "conversationId": "a6ef77cc-2431-4f97-98ee-f12b2bc81c78", "sessionCleanup": "complete" }
+```
+
+| 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|---|
+| `conversationId` | `String` | 是 | 请求路径 | 已删除的会话 ID | UUIDv4 | 不为空 |
+| `sessionCleanup` | `String` | 是 | 文件清理结果 | `~/.tech-forge/sessions/<conversationId>/` 是否已删除 | `complete` / `partial` | 不为空；`partial` 表示行已删除但目录未能移除 |
+
+#### Error Cases
+
+| 场景 | code | 说明 |
+|---|---|---|
+| `conversationId` 不是 UUIDv4 | `400` | `ParseUUIDPipe` 在 Service 操作前拒绝该路径参数。 |
+| ID 格式正确但 Conversation 不存在 | `404` | 不会创建会话，也不触碰文件系统。 |
+| 数据库删除失败 | `500` | 事务回滚，会话与行保持原样。 |
+| 本地 token 缺失或错误 | `401` | 后端拒绝未认证的本地请求。 |
+| 请求带有 Origin header | `403` | 后端拒绝来自浏览器跨域路径的请求。 |
+
+#### Notes
+
+- 删除在一个事务内完成，子表优先：`rehearsal_turns` → `rehearsals` → `artifacts` → `conversation_documents` → `messages` → `pi_session_snapshots` → `conversations`（全部外键为 `NO ACTION`，顺序不可调换）。
+- 本地 session 目录在事务提交后删除：文件清理失败不会回滚数据库结论，只返回 `sessionCleanup: "partial"` 并记录结构化日志。
+- 桌面端在会话行悬停时显示「…」，点击后出现「删除会话」，点击即删除，没有二次确认；被删除的正是当前会话时，Renderer 同时清空线程与输入区状态。

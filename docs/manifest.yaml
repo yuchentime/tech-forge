@@ -1,4 +1,45 @@
 routes:
+  chat-message-attachments:
+    description: "Attach a PDF/DOCX/Markdown/TXT to one chat message: copy into the conversation session directory at send time, extract text.md, prepend a capped prefix to that turn's user message, point later turns at the stored text for read/grep, and show only a tag on the user message"
+    token_budget: 12000
+    code_globs:
+      - "apps/backend/src/attachments/**"
+      - "apps/backend/src/chat/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/test/chat-attachments.test.cjs"
+      - "apps/backend/test/session-entries.test.cjs"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-09-chat-attachments/design.md
+    optional:
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-09-chat-attachments/verification.md
+    history_on_demand: []
+  conversation-deletion:
+    description: "Physically delete a conversation: rows (messages, snapshots, derived tables) in one transaction plus the local session directory, triggered from the sidebar hover menu"
+    token_budget: 12000
+    code_globs:
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/settings/settings.service.ts"
+      - "apps/backend/test/conversation-delete.test.cjs"
+      - "apps/desktop/src/features/agent/ConversationSidebar.tsx"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+      - "apps/desktop/src/features/agent/conversation-store.ts"
+    required:
+      - docs/current/index.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/conversations/api-contract.md
+      - docs/current/platform/architecture-and-code-placement.md
+    optional:
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/current/platform/agent-runtime.md
+    history_on_demand: []
   knowledge-library-management:
     description: "Implement or change the knowledge base view: file import into the configured workspace, document list, and deletion"
     token_budget: 22000

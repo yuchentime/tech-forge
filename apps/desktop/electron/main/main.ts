@@ -40,6 +40,7 @@ type ChatStreamStart = {
   requestId: string;
   prompt: string;
   conversationId?: string;
+  attachments?: Array<{ attachmentId: string; path: string }>;
 };
 type ActiveChatStream = {
   requestId: string;
@@ -244,10 +245,10 @@ function registerBackendIpc(): void {
   // chosen file into the configured workspace itself.
   ipcMain.handle('documents:pick-files', async () => {
     const options: OpenDialogOptions = {
-      title: '选择要导入资料库的资料',
+      title: '选择要添加的文件',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: '资料库资料', extensions: ['pdf', 'docx', 'md', 'markdown', 'txt'] },
+        { name: '支持的文件', extensions: ['pdf', 'docx', 'md', 'markdown', 'txt'] },
       ],
     };
     const result = mainWindow
@@ -298,9 +299,17 @@ function parseChatStreamStart(value: unknown): ChatStreamStart | undefined {
   const input = value as Partial<ChatStreamStart>;
   const keys = Object.keys(value);
   if (
-    keys.some((key) => !['requestId', 'prompt', 'conversationId'].includes(key)) ||
+    keys.some(
+      (key) =>
+        ![
+          'requestId',
+          'prompt',
+          'conversationId',
+          'attachments',
+        ].includes(key),
+    ) ||
     keys.length < 2 ||
-    keys.length > 3 ||
+    keys.length > 4 ||
     typeof input.requestId !== 'string' ||
     !chatRequestIdPattern.test(input.requestId) ||
     typeof input.prompt !== 'string' ||
@@ -308,6 +317,14 @@ function parseChatStreamStart(value: unknown): ChatStreamStart | undefined {
       (typeof input.conversationId !== 'string' ||
         !conversationIdPattern.test(input.conversationId)))
   ) {
+    return undefined;
+  }
+
+  const attachments =
+    input.attachments === undefined
+      ? undefined
+      : parseChatAttachments(input.attachments);
+  if (input.attachments !== undefined && !attachments) {
     return undefined;
   }
 
@@ -319,7 +336,43 @@ function parseChatStreamStart(value: unknown): ChatStreamStart | undefined {
     requestId: input.requestId,
     prompt,
     ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
   };
+}
+
+/**
+ * Accepts at most ten `{ attachmentId, path }` pairs with no duplicate ids.
+ *
+ * The channel is the Renderer's only way to name attachments, so it is validated here as strictly as
+ * the backend DTO: a malformed entry rejects the whole request instead of silently dropping a file.
+ */
+function parseChatAttachments(
+  value: unknown,
+): Array<{ attachmentId: string; path: string }> | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 10) {
+    return undefined;
+  }
+  const seen = new Set<string>();
+  const attachments: Array<{ attachmentId: string; path: string }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
+    const keys = Object.keys(entry);
+    if (keys.length !== 2) return undefined;
+    const { attachmentId, path } = entry as { attachmentId?: unknown; path?: unknown };
+    if (
+      typeof attachmentId !== 'string' ||
+      !conversationIdPattern.test(attachmentId) ||
+      typeof path !== 'string' ||
+      path.length === 0 ||
+      path.length > 4096 ||
+      seen.has(attachmentId)
+    ) {
+      return undefined;
+    }
+    seen.add(attachmentId);
+    attachments.push({ attachmentId, path });
+  }
+  return attachments;
 }
 
 /** Starts a single chat stream only for the main application frame. */
@@ -379,7 +432,12 @@ function startChatStream(event: IpcMainEvent, value: unknown): void {
     cancelBackendChatStream(active.requestId, active.sender);
     return;
   }
-  void forwardChatStream(active, input.prompt, input.conversationId);
+  void forwardChatStream(
+    active,
+    input.prompt,
+    input.conversationId,
+    input.attachments,
+  );
 }
 
 /** Posts one normalized event and closes its resources at terminal events. */
@@ -409,6 +467,7 @@ async function forwardChatStream(
   active: ActiveChatStream,
   prompt: string,
   conversationId?: string,
+  attachments?: Array<{ attachmentId: string; path: string }>,
 ): Promise<void> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let finished = false;
@@ -432,6 +491,7 @@ async function forwardChatStream(
         body: JSON.stringify({
           prompt,
           ...(conversationId ? { conversationId } : {}),
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
         }),
         signal: active.controller.signal,
       },

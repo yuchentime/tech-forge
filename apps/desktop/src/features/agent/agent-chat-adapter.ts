@@ -4,6 +4,10 @@ import type {
 } from '@assistant-ui/react';
 import type { ChatStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
+import {
+  composerAttachmentStore,
+  sentAttachmentStore,
+} from './attachment-store';
 import { composerCommandStore } from './composer-command-store';
 import { conversationStore } from './conversation-store';
 
@@ -65,13 +69,28 @@ export const agentChatAdapter: ChatModelAdapter = {
     // user message, which is what the backend parses and what dedupe reads back later.
     const command = composerCommandStore.getSnapshot();
     const prompt = command ? `${command} ${userMessage.prompt}` : userMessage.prompt;
+    // Attachments are copied and parsed when the turn runs, because the conversation id does not
+    // exist before this request. The tag list is recorded against the message so the sent bubble
+    // shows what was attached, and then cleared.
+    const attachments = composerAttachmentStore.list();
     requestId = window.teachforge.streamChat(
       prompt,
       receiveEvent,
       conversationStore.getSnapshot().activeConversationId ?? undefined,
+      attachments.length > 0
+        ? attachments.map(({ attachmentId, path }) => ({ attachmentId, path }))
+        : undefined,
     );
+    const messageKey = userMessage.id || requestId;
+    if (attachments.length > 0) {
+      sentAttachmentStore.record(
+        messageKey,
+        attachments.map(({ attachmentId, name }) => ({ attachmentId, name })),
+      );
+    }
+    composerAttachmentStore.reset();
     composerCommandStore.reset();
-    agentEventBus.begin(userMessage.id || requestId, requestId);
+    agentEventBus.begin(messageKey, requestId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();
 

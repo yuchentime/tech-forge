@@ -32,7 +32,8 @@ last_verified: 2026-11-08
 - Agent 页面启动时读取会话摘要并显示在左侧栏；若 localStorage 中的活动 ID 仍存在，则读取该会话最近 30 条可见消息。选中其他会话也只加载最近 30 条；存在更早消息时，用户可按需继续加载并前置到当前 LocalRuntime 线程。
 - 历史 DTO 的状态由 Renderer 按角色映射：只有 assistant 向 LocalRuntime 传递状态；user 保留文本、ID 和时间。该契约已通过真实 Electron 恢复/切换及实际 assistant-ui 转换回归验证。
 - `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要；标题使用实体标题、首条用户消息文本或“新对话”的显示回退，不写回实体。
-- `GET /api/conversations/:conversationId/messages` 默认返回最近 30 条可见终态 user/assistant 文本及 `hasMore`；使用同会话消息 ID 游标读取更早一页。单页按 `sequenceNo ASC` 返回；user 行可嵌套其轮次中的安全 `toolActivities` 摘要，工具执行行不会作为顶层消息返回。
+- `GET /api/conversations/:conversationId/messages` 默认返回最近 30 条可见终态 user/assistant 文本及 `hasMore`；使用同会话消息 ID 游标读取更早一页。单页按 `sequenceNo ASC` 返回；user 行可嵌套其轮次中的安全 `toolActivities` 摘要与附件引用 `{attachmentId, name}`，工具执行行不会作为顶层消息返回。
+- `DELETE /api/conversations/:conversationId` 物理删除会话：一个事务内按外键顺序清除演练/物料/资料关联、消息、Pi 快照与会话行，提交后再删除 `~/.tech-forge/sessions/<conversationId>/`；目录清理失败只返回 `sessionCleanup: "partial"`。
 - 每轮开始时，后端在短 SQLite 事务中保存 `user/completed` 行和 `assistantTurn/pending` 标记；模型调用不在数据库事务内。
 - Pi assistant 与 `toolResult` 消息按原生消息结构逐事件持久化；工具执行开始、进度、最终结果和终态另存 `toolExecution` 行。Pi 扩展钩子等待 SQLite 写入后才让事件继续派发或工具开始执行。
 - 模型上下文优先从 `pi_session_snapshots` 恢复（含 Pi compaction 等条目）；仅当快照落后于 SQLite 最新历史或不存在时，才按 `sequenceNo` 用 UI 历史重建。UI 历史仍完整保存在 SQLite，与模型上下文不是同一集合。

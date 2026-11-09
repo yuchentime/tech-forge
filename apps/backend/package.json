@@ -19,7 +19,10 @@
     "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs",
     "test:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/retrieval.test.cjs",
     "verify:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-retrieval.cjs",
-    "test:knowledge-context": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-context.test.cjs"
+    "test:knowledge-context": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-context.test.cjs",
+    "test:chat-attachments": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/chat-attachments.test.cjs",
+    "test:conversation-delete": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-delete.test.cjs",
+    "test:session-entries": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/session-entries.test.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",

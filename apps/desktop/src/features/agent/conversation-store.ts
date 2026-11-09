@@ -1,3 +1,4 @@
+import { readBackendErrorMessage } from '../../api/backend-error';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 /** Describes one lightweight Conversation row displayed in the sidebar. */
@@ -8,6 +9,12 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
+/** Describes a file attached to one persisted user message. */
+export interface ConversationAttachment {
+  attachmentId: string;
+  name: string;
+}
+
 /** Describes one visible message returned for a selected Conversation. */
 export interface ConversationHistoryMessage {
   id: string;
@@ -16,6 +23,8 @@ export interface ConversationHistoryMessage {
   status: 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   toolActivities?: ConversationToolActivity[];
+  /** Files attached to this message; only user rows carry them. */
+  attachments?: ConversationAttachment[];
 }
 
 /** Describes a safe tool lifecycle summary attached to a persisted user message. */
@@ -134,6 +143,31 @@ export class ConversationStore {
             : `会话列表加载失败（HTTP ${httpStatus}），请重试。`,
       });
     }
+  }
+
+  /**
+   * Deletes one conversation on the backend, then refreshes the sidebar.
+   *
+   * The backend removes the rows and the conversation's local session files; the renderer only
+   * clears the selection so the next prompt starts a new conversation.
+   */
+  async deleteConversation(conversationId: string): Promise<void> {
+    if (!hasDesktopBridge()) {
+      throw new Error('浏览器预览无法删除本地会话，请通过 TeachForge 桌面应用打开。');
+    }
+
+    const response = await window.teachforge.request<unknown>({
+      method: 'DELETE',
+      path: `/api/conversations/${encodeURIComponent(conversationId)}`,
+    });
+    if (response.status !== 200) {
+      throw new Error(readBackendErrorMessage(response.data, '删除会话失败，请重试。'));
+    }
+
+    if (this.snapshot.activeConversationId === conversationId) {
+      this.setActiveConversationId(null);
+    }
+    await this.refresh();
   }
 
   /** Replaces one snapshot and notifies all active Agent page subscribers. */
