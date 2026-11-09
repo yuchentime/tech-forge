@@ -32,6 +32,7 @@ const CONTENT_FORMATS: Readonly<Record<string, { format: string; mimeType: strin
   '.md': { format: 'markdown', mimeType: 'text/markdown' },
   '.markdown': { format: 'markdown', mimeType: 'text/markdown' },
   '.mmd': { format: 'mermaid', mimeType: 'text/plain' },
+  '.svg': { format: 'svg', mimeType: 'image/svg+xml' },
   '.json': { format: 'json', mimeType: 'application/json' },
   '.jsonl': { format: 'jsonl', mimeType: 'application/x-ndjson' },
   '.ndjson': { format: 'jsonl', mimeType: 'application/x-ndjson' },

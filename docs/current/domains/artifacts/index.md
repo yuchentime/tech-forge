@@ -23,8 +23,9 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 - **登记时机**：`write` / `edit` 工具的成功写入回调（`createWorkspaceFileTools` 的 `onFileWritten`）把已解析的绝对路径交给 `ArtifactsService.registerArtifact()`；同一路径重复写入按唯一键更新同一行，保持 `id` 稳定，因此已打开的标签页不会失效。
 - **路径存储**：会话内文件存 `pathKind='session'` + 相对工作区的 POSIX 路径；两个路径列都以空串占位而不是 NULL（SQLite 唯一索引把 NULL 视为互不相等，会让重复写入插入多行）。用户明确指定绝对路径时存 `pathKind='external'` + 绝对路径，便于后续预览与会话删除时区分。
 - **缺失检测**：列表与预览接口现算 `missing`；文件被移走或改名后行仍保留，点击时提示"文件不存在"。
-- **预览格式**：按扩展名判定 `markdown`（含 ` ```mermaid ` 块时渲染图表）、`mermaid`、`json`（≤256 KiB 且可解析则美化）、`jsonl`、`text`；正文读取上限 512 KiB，超出返回 `truncated`。
-- **思维导图**：系统提示要求导图必须落成文件——`名称.md` 内含单个 Mermaid `mindmap` 块，或 `.mmd` 文件；图表按自然尺寸渲染，面板内双向滚动，不强行缩放到面板宽度（缩到 400px 时标签不可读）。聊天正文仍按普通 Markdown 渲染，`mermaid` 代码块在侧边栏才展开为图形。
+- **预览格式**：按扩展名判定 `markdown`（含 ` ```mermaid ` 块时渲染图表）、`mermaid`、`svg`、`json`（≤256 KiB 且可解析则美化）、`jsonl`、`text`；正文读取上限 512 KiB，超出返回 `truncated`。
+- **SVG**：以 `<img>` + `data:image/svg+xml;base64` 显示，不内联成活标记——图片上下文是静态模式，脚本不执行、外部引用不加载、也无法触达 `window.teachforge`。尺寸取 `width`/`height` 像素属性，缺失时用 `viewBox` 且小于 480 px 的坐标系按比例放大到 480，两者都没有则用 640×400 兜底；解析失败或解码失败回退为源码文本。`contentFormat` 为 `svg`，`mimeType` 为 `image/svg+xml`。
+- **知识结构图**：系统提示要求结构图必须落成文件，**默认写 `.svg`**——左侧根卡片 + 右侧分支卡片列（分支的要点作为卡片内的 `<text>` 行）、连接线用 `<line>`/`<path>` 垫在卡片下方；画布 560-640 px 宽、按分支数向下增长，带匹配的 `viewBox`，总盒子/线约 20-25 个，标签 ≤12 汉字。SVG 要求自包含：`font-family="system-ui, sans-serif"`、无 `<script>`、无 `<foreignObject>`、无外部字体/图片/样式表。仅当用户明确要 Mermaid 或要可编辑图时才写 `.mmd`（单个 `flowchart LR`；`mindmap` 只在用户要放射状时使用，因为它按力导向铺开，节点一多就成了不可读的网）；用户要 `.md` 时写含单个 ```mermaid 块的 Markdown。图表与图片都按自然尺寸渲染，面板内双向滚动，不强行缩放到面板宽度（缩到 400px 时标签不可读）。聊天正文仍按普通 Markdown 渲染，`mermaid` 代码块在侧边栏才展开为图形。
 - **元数据**：`fileName` 仅用于展示，列表不显示路径；`byteSize` 与 `fileHash`（≤2 MiB 时计算）供展示与漂移判断。
 
 ## 接口
@@ -44,6 +45,10 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 - 响应消息底部以卡片列出本轮产出：标题行加粗显示"已更改 N 个文件"并提供"查看全部"（打开侧边栏的列表标签，收敛动作结果而不是"打开侧边栏"这类布局术语），下方为逐条文件行（悬停高亮、行内可点击打开预览、右侧文件夹图标定位）；历史取 `generatedFiles`，实时取 SSE `artifact` 事件。
 - 侧边栏标签条右端有一个关闭按钮（`ArtifactTabs` 的 `onClosePanel` → `artifactTabsStore.hide()`），收起面板但保留已打开的标签，下次展开仍在；它独立于标签自带的关闭 `×`，且不在横向滚动容器内，标签多到需要滚动时也不会被滚走。关闭最后一个文件标签、或点击顶栏入口同样收起侧边栏。
 - 侧边栏左缘有拖拽手柄可横向调整宽度（320–900 px，键盘方向键同样可用），宽度记在 `localStorage`。
+- **全屏预览**：文件预览头部右端有一个全屏按钮（`ArrowsOut`），点击把当前文件渲染到覆盖整个窗口的悬浮层（`createPortal` 到 `body`，`z-40`，低于 toast 的 `z-50`），`role="dialog"` + `aria-modal`，标题栏复用文件名与"外部文件"标记，关闭按钮在右端；`Esc` 同样关闭。打开时锁 `body` 滚动并把焦点移到关闭按钮，关闭后焦点回到触发按钮；文件标签消失（列表刷新后该文件不再存在）时悬浮层自动收起。图仍然按自然尺寸显示、在悬浮层内双向滚动——窗口宽度通常足以容纳整图，因此不引入缩放/平移。
+- **图渲染 id 全局唯一**：悬浮层与面板会同时渲染同一个文件，即两个 `MermaidDiagram` 实例并存；mermaid 的 `render(id, code)` 会删除同 id 的既有节点，所以 id 必须取自模块级自增序列（`artifact-mermaid-${++nextRenderSequence}`），不能用组件内计数器——否则打开全屏就会把面板里已画好的图从 DOM 删掉，关掉后只剩空边框。
+- **手动重新读取**：预览头部右端、全屏按钮左侧有刷新按钮（`ArrowsClockwise`），点击后重新请求 `GET /api/artifacts/:id/content`。存在的原因是模型会原地改写同一路径的文件——`registerArtifact()` 复用同一行、id 不变，列表刷新只同步 `missing` 等元数据，预览拿不到任何 prop 变化，因此不会自动更新。刷新令牌由 `ArtifactSidebar` 持有并同时传给面板与全屏悬浮层两个 `ArtifactPreview`；两处都会重新取数（同一次点击触发两次 content 请求），保证全屏时看到的内容与面板一致。
+- 文件名右侧的 `会话文件` / `外部文件` 文本只在 `external` 时保留（"外部文件"是需要提醒的例外，会话内文件属于默认情况，不再占用头部空间）。
 - 侧边栏收起、切换会话或重新加载历史时清空标签，避免跨会话残留；`generatedFiles` 与实时事件两条来源互斥。
 
 ## 未实现

@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+
+/**
+ * Monotonic id source shared by every mounted diagram.
+ *
+ * Mermaid removes any element whose id matches the one it is asked to render, so two live diagrams
+ * that both start counting from 1 would delete each other's SVG — exactly what happened when the
+ * same file was shown inline and in the fullscreen overlay at once. One counter for the whole
+ * module makes every render id unique, no matter how many diagrams are mounted.
+ */
+let nextRenderSequence = 0;
 
 /** Renders one Mermaid source block, or hands the source back when it cannot be parsed. */
 export function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const renderId = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const currentId = ++renderId.current;
     setSvg(null);
     setFailed(false);
 
@@ -24,7 +32,7 @@ export function MermaidDiagram({ code }: { code: string }) {
           mindmap: { useMaxWidth: false },
           flowchart: { useMaxWidth: false },
         });
-        const result = await mermaid.render(`artifact-mermaid-${currentId}`, code);
+        const result = await mermaid.render(`artifact-mermaid-${++nextRenderSequence}`, code);
         if (cancelled) return;
         setSvg(result.svg);
       } catch {

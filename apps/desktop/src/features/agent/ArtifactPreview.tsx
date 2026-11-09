@@ -3,6 +3,7 @@ import { hasDesktopBridge } from '../../types/desktop-bridge';
 import type { GeneratedFileRef } from './artifact-store';
 import { MarkdownContent } from './MarkdownContent';
 import { MermaidDiagram, splitMermaidBlocks } from './MermaidDiagram';
+import { SvgArtifact } from './SvgArtifact';
 import { showToast } from './toast';
 
 /** Mirrors the backend preview payload for one artifact. */
@@ -20,8 +21,19 @@ interface ArtifactContentResponse {
 /** Pretty-printing cap; larger JSON stays raw so the renderer never freezes. */
 const MAX_PRETTY_JSON_CHARS = 256 * 1024;
 
-/** Shows one artifact read-only, choosing the preview by content format. */
-export function ArtifactPreview({ file }: { file: GeneratedFileRef }) {
+/**
+ * Shows one artifact read-only, choosing the preview by content format.
+ *
+ * `reloadToken` exists because the model rewrites files in place: the artifact keeps its id, so a
+ * changed file produces no prop change. Bumping the token re-reads the same file on demand.
+ */
+export function ArtifactPreview({
+  file,
+  reloadToken = 0,
+}: {
+  file: GeneratedFileRef;
+  reloadToken?: number;
+}) {
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'ready'; payload: ArtifactContentResponse }
@@ -58,7 +70,7 @@ export function ArtifactPreview({ file }: { file: GeneratedFileRef }) {
     return () => {
       cancelled = true;
     };
-  }, [file.id]);
+  }, [file.id, reloadToken]);
 
   useEffect(() => {
     if (state.status !== 'error') return;
@@ -90,6 +102,10 @@ export function ArtifactPreview({ file }: { file: GeneratedFileRef }) {
 function ArtifactBody({ payload }: { payload: ArtifactContentResponse }) {
   if (payload.contentFormat === 'mermaid') {
     return <MermaidDiagram code={payload.content} />;
+  }
+
+  if (payload.contentFormat === 'svg') {
+    return <SvgArtifact content={payload.content} fileName={payload.fileName} />;
   }
 
   if (payload.contentFormat === 'markdown') {

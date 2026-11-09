@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { ArrowsClockwise, ArrowsOut, X } from '@phosphor-icons/react';
 import { conversationStore } from './conversation-store';
 import {
   ALL_FILES_TAB_ID,
@@ -76,6 +78,15 @@ export function ArtifactSidebar() {
   const [width, setWidth] = useState(readStoredSidebarWidth);
   const widthRef = useRef(width);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** True while the active file is shown in the full-window overlay instead of the panel. */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  /**
+   * Bumped by the header's refresh button. The model rewrites a file in place, so the artifact id
+   * never changes and prop-driven re-render cannot notice an edit; this token is the manual trigger.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const fullscreenTriggerRef = useRef<HTMLButtonElement>(null);
+  const fullscreenCloseRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     widthRef.current = width;
@@ -132,14 +143,43 @@ export function ArtifactSidebar() {
     [applyWidth],
   );
 
-  if (!tabsState.visible) return null;
-
   const activeTab =
     tabsState.activeId === ALL_FILES_TAB_ID
       ? null
       : tabsState.tabs.find((tab) => tab.id === tabsState.activeId) ??
         tabsState.tabs[0] ??
         null;
+
+  // Tab objects get new identities on store updates; keying the effects on primitives keeps them
+  // from re-running (and re-stealing focus) on an unchanged file.
+  const activeTabId = activeTab?.id ?? null;
+
+  /**
+   * Keeps the overlay keyboard-accessible: Escape closes it, the background stops scrolling, and
+   * focus moves into the overlay and back to the trigger, so closing it returns the panel's focus.
+   */
+  useEffect(() => {
+    if (!isFullscreen || activeTabId === null) return;
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setIsFullscreen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    fullscreenCloseRef.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      fullscreenTriggerRef.current?.focus();
+    };
+  }, [isFullscreen, activeTabId]);
+
+  // Closing the last tab must not leave an overlay pointing at a file that no longer exists.
+  useEffect(() => {
+    if (activeTabId === null && isFullscreen) setIsFullscreen(false);
+  }, [activeTabId, isFullscreen]);
+
+  if (!tabsState.visible) return null;
 
   return (
     <aside
@@ -175,11 +215,33 @@ export function ArtifactSidebar() {
               <h2 className="min-w-0 truncate text-sm font-medium text-stone-900">
                 {activeTab.fileName}
               </h2>
-              <span className="shrink-0 text-xs text-stone-500">
-                {activeTab.external ? '外部文件' : '会话文件'}
-              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* Only the notable case keeps a label; a session file needs no announcement. */}
+                {activeTab.external && (
+                  <span className="text-xs text-stone-500">外部文件</span>
+                )}
+                <button
+                  aria-label="重新读取文件"
+                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  onClick={() => setReloadToken((token) => token + 1)}
+                  title="重新读取文件"
+                  type="button"
+                >
+                  <ArrowsClockwise aria-hidden="true" className="size-4" />
+                </button>
+                <button
+                  aria-label="全屏查看"
+                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  onClick={() => setIsFullscreen(true)}
+                  ref={fullscreenTriggerRef}
+                  title="全屏查看"
+                  type="button"
+                >
+                  <ArrowsOut aria-hidden="true" className="size-4" />
+                </button>
+              </div>
             </header>
-            <ArtifactPreview file={activeTab} />
+            <ArtifactPreview file={activeTab} reloadToken={reloadToken} />
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -218,6 +280,52 @@ export function ArtifactSidebar() {
           </div>
         )}
       </div>
+      {isFullscreen &&
+        activeTab &&
+        createPortal(
+          // Sits below the toast layer (z-50) so notices still show over the overlay, and is
+          // portalled onto the body to escape the panel's clipping and scroll containers.
+          <div
+            aria-label={`${activeTab.fileName} 全屏预览`}
+            aria-modal="true"
+            className="fixed inset-0 z-40 flex flex-col bg-white"
+            role="dialog"
+          >
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-200 px-4 py-2">
+              <h2 className="min-w-0 truncate text-sm font-medium text-stone-900">
+                {activeTab.fileName}
+              </h2>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {activeTab.external && (
+                  <span className="text-xs text-stone-500">外部文件</span>
+                )}
+                <button
+                  aria-label="重新读取文件"
+                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  onClick={() => setReloadToken((token) => token + 1)}
+                  title="重新读取文件"
+                  type="button"
+                >
+                  <ArrowsClockwise aria-hidden="true" className="size-4" />
+                </button>
+                <button
+                  aria-label="退出全屏"
+                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  onClick={() => setIsFullscreen(false)}
+                  ref={fullscreenCloseRef}
+                  title="退出全屏（Esc）"
+                  type="button"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              </div>
+            </header>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ArtifactPreview file={activeTab} reloadToken={reloadToken} />
+            </div>
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }
