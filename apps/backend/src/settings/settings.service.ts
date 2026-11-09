@@ -184,6 +184,16 @@ export class SettingsService implements OnModuleInit {
   }
 
   /**
+   * Returns one conversation's Agent working directory.
+   *
+   * Every session gets its own workspace, so files the model writes with a relative path stay with
+   * the conversation and are removed together with it.
+   */
+  getSessionWorkspaceDirectory(conversationId: string): string {
+    return join(this.getSessionDirectory(conversationId), 'workspace');
+  }
+
+  /**
    * Returns app-owned file paths only so Agent tools can deny aliases to them.
    * SettingsService remains the sole reader and writer of both files. The knowledge library is not
    * listed here: it is a guarded directory (`getKnowledgeDirectory`), readable only when the current
@@ -213,11 +223,15 @@ export class SettingsService implements OnModuleInit {
       await this.ensureInitialized();
       const current = await this.readSettings();
       const next: StoredSettings = {
-        workspacePath: normalizeWorkspacePath(
-          input.workspacePath,
-          this.defaultWorkspacePath,
-          this.configDirectory,
-        ),
+        // The Agent works inside per-conversation directories, so a settings update without the
+        // legacy field must not reset the stored value.
+        workspacePath: input.workspacePath
+          ? normalizeWorkspacePath(
+              input.workspacePath,
+              this.defaultWorkspacePath,
+              this.configDirectory,
+            )
+          : current.workspacePath,
         provider: input.llm.provider,
         deepseek: {
           modelId: input.llm.deepseek.modelId.trim() || DEEPSEEK_MODEL_ID,

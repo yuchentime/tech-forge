@@ -27,6 +27,12 @@ export type DesktopBridge = {
   ): string;
   /** Cancels an active stream started by this Renderer. */
   cancelChatStream(requestId: string): void;
+  /**
+   * Reveals one backend-resolved path in the operating system file manager.
+   *
+   * The Renderer only forwards a path the artifact API returned; it never builds one itself.
+   */
+  revealInFolder(itemPath: string): Promise<boolean>;
 };
 
 /** Detects whether this renderer was launched with the restricted Electron preload bridge. */
@@ -39,7 +45,8 @@ export function hasDesktopBridge(): boolean {
       typeof bridge.request === 'function' &&
       typeof bridge.pickImportFiles === 'function' &&
       typeof bridge.streamChat === 'function' &&
-      typeof bridge.cancelChatStream === 'function',
+      typeof bridge.cancelChatStream === 'function' &&
+      typeof bridge.revealInFolder === 'function',
   );
 }
 

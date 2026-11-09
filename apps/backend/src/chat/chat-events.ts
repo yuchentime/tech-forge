@@ -23,7 +23,21 @@ export type ChatStreamEvent =
       type: 'message_update';
       assistantMessageEvent: { type: 'text_delta'; delta: string };
     }
-  | { type: 'agent_end' };
+  | { type: 'agent_end' }
+  | {
+      type: 'artifact';
+      artifact: {
+        id: string;
+        fileName: string;
+        contentFormat: string;
+        byteSize: number | null;
+        createdAt: string;
+        updatedAt: string;
+        userMessageId: string | null;
+        missing: boolean;
+        external: boolean;
+      };
+    };
 
 /** 将 Pi session 事件投影为 UI 需要的字段，并在这里剔除内部结果数据。 */
 export function projectChatSessionEvent(

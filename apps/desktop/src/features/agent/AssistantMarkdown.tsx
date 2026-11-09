@@ -13,7 +13,7 @@ export function AssistantMarkdown() {
 }
 
 /** Blocks remote image loads and unsafe or local-file URL schemes from model output. */
-function transformMarkdownUrl(url: string, key: string): string {
+export function transformMarkdownUrl(url: string, key: string): string {
   if (key === 'src') return '';
 
   const scheme = /^([a-z][a-z\d+.-]*):/i.exec(url.trim())?.[1]?.toLowerCase();

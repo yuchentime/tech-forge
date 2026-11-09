@@ -123,6 +123,11 @@ export const agentChatAdapter: ChatModelAdapter = {
       }
     } finally {
       abortSignal.removeEventListener('abort', cancel);
+      if (!terminal && !abortSignal.aborted) {
+        // Ending without `done` means a frame was lost or rejected upstream; the UI can only show
+        // an unfinished answer, so the cause must be traceable here.
+        console.error('[teachforge][stream] ended_without_terminal', { requestId });
+      }
       if (!terminal) cancel();
       if (requestId) {
         agentEventBus.clear(requestId);

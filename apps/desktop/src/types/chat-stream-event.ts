@@ -22,6 +22,20 @@ export type ChatStreamEvent =
       assistantMessageEvent: { type: 'text_delta'; delta: string };
     }
   | { type: 'agent_end' }
+  | {
+      type: 'artifact';
+      artifact: {
+        id: string;
+        fileName: string;
+        contentFormat: string;
+        byteSize: number | null;
+        createdAt: string;
+        updatedAt: string;
+        userMessageId: string | null;
+        missing: boolean;
+        external: boolean;
+      };
+    }
   | { type: 'done'; finishReason: 'stop' }
   | { type: 'error'; message: string };
 
@@ -72,6 +86,36 @@ export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
         hasExactKeys(value.assistantMessageEvent, ['type', 'delta']) &&
         value.assistantMessageEvent.type === 'text_delta' &&
         typeof value.assistantMessageEvent.delta === 'string'
+      );
+    case 'artifact':
+      return (
+        hasExactKeys(value, ['type', 'artifact']) &&
+        isRecord(value.artifact) &&
+        hasExactKeys(
+          value.artifact,
+          [
+            'id',
+            'fileName',
+            'contentFormat',
+            'byteSize',
+            'createdAt',
+            'updatedAt',
+            'userMessageId',
+            'missing',
+            'external',
+          ],
+        ) &&
+        typeof value.artifact.id === 'string' &&
+        typeof value.artifact.fileName === 'string' &&
+        typeof value.artifact.contentFormat === 'string' &&
+        (value.artifact.byteSize === null ||
+          typeof value.artifact.byteSize === 'number') &&
+        typeof value.artifact.createdAt === 'string' &&
+        typeof value.artifact.updatedAt === 'string' &&
+        (value.artifact.userMessageId === null ||
+          typeof value.artifact.userMessageId === 'string') &&
+        typeof value.artifact.missing === 'boolean' &&
+        typeof value.artifact.external === 'boolean'
       );
     case 'done':
       return (

@@ -27,6 +27,10 @@ import {
 } from 'react';
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { ArtifactSidebar } from './ArtifactSidebar';
+import { ArtifactFileChips } from './ArtifactSidebarParts';
+import { artifactHistoryStore, artifactTabsStore } from './artifact-store';
+import { ToastHost } from './toast';
 import { describeFailure } from '../../api/backend-error';
 import {
   AttachmentPickerButton,
@@ -64,6 +68,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     agentEventBus.subscribe,
     agentEventBus.getTurnSnapshots,
     agentEventBus.getTurnSnapshots,
+  );
+  const liveActivity = useSyncExternalStore(
+    agentEventBus.subscribe,
+    agentEventBus.getSnapshot,
+    agentEventBus.getSnapshot,
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const [activeView, setActiveView] = useState<SidebarView>('chat');
@@ -153,6 +162,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       pendingScrollAnchor.current = null;
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
+      artifactHistoryStore.setFromHistory(response.data.messages);
+      artifactTabsStore.reset();
+      // The history footer now owns this conversation's files.
+      agentEventBus.clearArtifacts();
       runtime.thread.reset(response.data.messages.map(toThreadMessage));
       setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
@@ -225,6 +238,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
+      artifactHistoryStore.mergeFromHistory(response.data.messages);
       const latestMessages = runtime.thread.getState().messages;
       const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
       const earlierThreadMessages = response.data.messages
@@ -321,6 +335,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     composerCommandStore.reset();
     composerAttachmentStore.reset();
     sentAttachmentStore.reset();
+    artifactHistoryStore.clear();
+    artifactTabsStore.reset();
+    agentEventBus.clearArtifacts();
     runtime.thread.reset([]);
   }, [isRunning, runtime]);
 
@@ -388,7 +405,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       ) : activeView === 'knowledge' ? (
         <KnowledgeBasePage />
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
           {historyError && (
             <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               <span className="min-w-0 flex-1">{historyError}</span>
@@ -464,9 +482,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       );
                     }
 
-                    return <AssistantMessage key={message.id} />;
+                    return <AssistantMessage key={message.id} messageId={message.id} />;
                   }}
                 </ThreadPrimitive.Messages>
+                <LiveArtifactFooter files={liveActivity.artifacts} />
               </ThreadPrimitive.Viewport>
 
               <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
@@ -524,8 +543,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </div>
             </ThreadPrimitive.Root>
           )}
+          </div>
+          <ArtifactSidebar
+            refreshToken={liveActivity.artifacts.map((file) => file.id).join('|')}
+          />
         </div>
       )}
+      <ToastHost />
     </section>
   );
 }
@@ -798,11 +822,17 @@ function UserMessage({ messageId }: { messageId: string }) {
   );
 }
 
-/** Displays unboxed assistant Markdown and accessible safe errors. */
-function AssistantMessage() {
+/** Displays unboxed assistant Markdown, its generated files and accessible safe errors. */
+function AssistantMessage({ messageId }: { messageId: string }) {
+  const historyFiles = useSyncExternalStore(
+    artifactHistoryStore.subscribe,
+    artifactHistoryStore.getSnapshot,
+    artifactHistoryStore.getSnapshot,
+  )[messageId];
+
   return (
     <MessagePrimitive.Root className="flex justify-start">
-      <div className="min-w-0 max-w-full text-[15px] leading-7 text-stone-800">
+      <div className="min-w-0 w-full max-w-full text-[15px] leading-7 text-stone-800">
         <MessagePrimitive.Parts>
           {({ part }) =>
             part.type === 'text' ? <AssistantMarkdown /> : null
@@ -813,7 +843,28 @@ function AssistantMessage() {
             这次回答没有完成，请检查模型配置或网络后重试。
           </p>
         </MessagePrimitive.Error>
+        {historyFiles && historyFiles.length > 0 && (
+          <ArtifactFileChips files={historyFiles} />
+        )}
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+/** Shows the files the live turn produced, under the response that just finished. */
+function LiveArtifactFooter({
+  files,
+}: {
+  files: NonNullable<
+    ReturnType<typeof agentEventBus.getSnapshot>['artifacts']
+  >;
+}) {
+  if (files.length === 0) return null;
+  return (
+    <div className="flex w-full justify-start">
+      <div className="min-w-0 max-w-full">
+        <ArtifactFileChips files={files} />
+      </div>
+    </div>
   );
 }

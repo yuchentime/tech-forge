@@ -24,6 +24,19 @@ export interface ConversationMessageDto {
   toolActivities?: ConversationToolActivityDto[];
   /** Attachments sent with this user message; empty for assistant rows. */
   attachments?: ConversationAttachmentDto[];
+  /** Files this turn produced or rewrote; empty for user rows. */
+  generatedFiles?: ConversationGeneratedFileDto[];
+}
+
+/** Describes one file a turn produced, as the response footer and sidebar need it. */
+export interface ConversationGeneratedFileDto {
+  id: string;
+  fileName: string;
+  contentFormat: string;
+  /** True when the stored path no longer exists on disk. */
+  missing: boolean;
+  /** True when the user asked for a destination outside the session workspace. */
+  external: boolean;
 }
 
 /** Describes a safe tool lifecycle summary attached to its initiating user message. */

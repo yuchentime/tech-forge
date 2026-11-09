@@ -67,9 +67,16 @@ export class LlmSettingsInput {
 
 /** Validates a complete user-owned local settings update. */
 export class SaveSettingsInput {
+  /**
+   * Legacy Agent output directory.
+   *
+   * The Agent now works inside each conversation's own directory, and the value is no longer
+   * user-facing; an update that omits it keeps whatever is stored.
+   */
+  @IsOptional()
   @IsString()
   @MaxLength(4096)
-  workspacePath!: string;
+  workspacePath?: string;
 
   @IsDefined()
   @ValidateNested()

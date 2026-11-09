@@ -327,7 +327,7 @@ routes:
       - docs/changes/2026-11-07-local-agent-settings/worklog.md
     history_on_demand: []
   local-workspace-setting:
-    description: "Configure the Agent output workspace and enforce current-turn file read/write boundaries"
+    description: "Legacy global Agent workspace (hidden from settings; the Agent now works inside each conversation's own directory) and current-turn file read/write boundaries"
     token_budget: 24000
     code_globs:
       - "apps/backend/src/settings/**"
@@ -346,4 +346,36 @@ routes:
     optional:
       - docs/changes/2026-11-07-local-workspace-setting/tasks.md
       - docs/changes/2026-11-07-local-workspace-setting/worklog.md
+    history_on_demand: []
+  artifact-sidebar:
+    description: "Index files the Agent writes, expose read-only preview and location APIs, and show them in the chat response footer plus a tabbed sidebar with markdown/mermaid/json/text previews"
+    token_budget: 24000
+    code_globs:
+      - "apps/backend/src/artifacts/**"
+      - "apps/backend/src/llm/tools/workspace-file-tools.ts"
+      - "apps/backend/src/llm/llm.service.ts"
+      - "apps/backend/src/chat/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/database/migrations/1793980000000-conversation-artifacts.ts"
+      - "apps/backend/src/settings/settings.service.ts"
+      - "apps/desktop/src/features/agent/ArtifactSidebar.tsx"
+      - "apps/desktop/src/features/agent/ArtifactSidebarParts.tsx"
+      - "apps/desktop/src/features/agent/ArtifactPreview.tsx"
+      - "apps/desktop/src/features/agent/MermaidDiagram.tsx"
+      - "apps/desktop/src/features/agent/MarkdownContent.tsx"
+      - "apps/desktop/src/features/agent/artifact-store.ts"
+      - "apps/desktop/src/features/agent/toast.tsx"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+      - "apps/desktop/src/types/chat-stream-event.ts"
+      - "apps/desktop/src/types/desktop-bridge.ts"
+      - "apps/desktop/electron/**"
+      - "apps/backend/test/verify-artifacts.cjs"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/artifacts/index.md
+      - docs/changes/2026-11-09-artifact-sidebar/design.md
+    optional:
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-09-artifact-sidebar/verification.md
     history_on_demand: []

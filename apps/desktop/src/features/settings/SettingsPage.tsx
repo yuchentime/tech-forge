@@ -113,7 +113,6 @@ export function SettingsPage() {
               ...(clearCustomApiKey ? { clearApiKey: true } : {}),
             },
           },
-          workspacePath: settings.workspacePath,
           souls: settings.souls,
         },
       });
@@ -184,19 +183,12 @@ export function SettingsPage() {
     setSettings((current) => (current ? { ...current, souls: value } : current));
   }, []);
 
-  /** Updates the local workspace path without changing any active session. */
-  const updateWorkspacePath = useCallback((value: string) => {
-    setSettings((current) =>
-      current ? { ...current, workspacePath: value } : current,
-    );
-  }, []);
-
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-stone-900">设置</h1>
-          <p className="mt-1 text-sm text-stone-500">管理模型连接、工作空间与回答风格。</p>
+          <p className="mt-1 text-sm text-stone-500">管理模型连接与回答风格。</p>
         </div>
         <button
           className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50"
@@ -324,46 +316,6 @@ export function SettingsPage() {
                     />
                   </div>
                 )}
-              </section>
-
-              <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
-                <div className="mb-5">
-                  <h2 className="text-base font-semibold text-stone-900">工作空间</h2>
-                  <p className="mt-1 max-w-3xl text-sm leading-6 text-stone-500">
-                    Agent 默认在此目录创建和修改文件；默认目录与本机配置分开存放。读取仍可使用其他来源，写入目录外的文件需要在本轮请求中明确给出目标绝对路径。
-                  </p>
-                </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="min-w-0 flex-1">
-                    <TextField
-                      autoComplete="off"
-                      disabled={isSaving}
-                      id="setting-workspace-path"
-                      helpText="请输入绝对路径。新会话会使用此目录作为默认文件工作空间。"
-                      label="工作空间路径"
-                      onChange={updateWorkspacePath}
-                      placeholder={getDefaultWorkspacePath(settings.configDirectory)}
-                      required
-                      value={settings.workspacePath}
-                    />
-                  </div>
-                  <button
-                    className="min-h-10 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:cursor-wait disabled:opacity-50"
-                    disabled={
-                      isSaving ||
-                      settings.workspacePath ===
-                        getDefaultWorkspacePath(settings.configDirectory)
-                    }
-                    onClick={() =>
-                      updateWorkspacePath(
-                        getDefaultWorkspacePath(settings.configDirectory),
-                      )
-                    }
-                    type="button"
-                  >
-                    恢复默认目录
-                  </button>
-                </div>
               </section>
 
               <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
@@ -589,10 +541,4 @@ function isLocalSettingsView(value: unknown): value is LocalSettingsView {
     typeof candidate.llm.custom.apiKey === 'string' &&
     typeof candidate.llm.custom.apiKeyConfigured === 'boolean'
   );
-}
-
-/** Builds the fixed default Agent output directory using the host path style. */
-function getDefaultWorkspacePath(configDirectory: string): string {
-  const separator = configDirectory.includes('\\') ? '\\' : '/';
-  return `${configDirectory.replace(/[\\/]+$/, '')}${separator}workspace`;
 }

@@ -1,5 +1,6 @@
 import type { ChatStreamEvent } from '../../types/chat-stream-event';
 import type { ConversationToolActivity } from './conversation-store';
+import type { GeneratedFileRef } from './artifact-store';
 
 export type AgentToolActivity = {
   toolCallId: string;
@@ -14,6 +15,8 @@ export type AgentActivitySnapshot = {
   requestId: string | null;
   phase: 'idle' | 'working' | 'responding';
   tools: AgentToolActivity[];
+  /** Files this turn produced or rewrote, in backend order. */
+  artifacts: GeneratedFileRef[];
   startedAt: number;
   elapsedMs: number | null;
 };
@@ -69,6 +72,7 @@ export class AgentEventBus {
       requestId: null,
       phase: 'idle',
       tools,
+      artifacts: [],
       startedAt: 0,
       elapsedMs: null,
     });
@@ -89,6 +93,7 @@ export class AgentEventBus {
       requestId: runRequestId,
       phase: 'working',
       tools: [],
+      artifacts: [],
       startedAt,
       elapsedMs: 0,
     });
@@ -139,6 +144,21 @@ export class AgentEventBus {
         });
         return;
       }
+      case 'artifact': {
+        const artifacts = [
+          ...activity.artifacts.filter((file) => file.id !== event.artifact.id),
+          {
+            id: event.artifact.id,
+            fileName: event.artifact.fileName,
+            contentFormat: event.artifact.contentFormat,
+            missing: event.artifact.missing,
+            external: event.artifact.external,
+          },
+        ];
+        // The artifact event arrives after the run settled; it must not reopen the phase.
+        this.updateActiveSnapshot(requestId, { ...activity, artifacts });
+        return;
+      }
       case 'message_update':
         if (activity.phase === 'responding') return;
         this.updateActiveSnapshot(requestId, {
@@ -156,6 +176,15 @@ export class AgentEventBus {
           phase: 'working',
         });
     }
+  }
+
+  /** Drops the live artifact list so a reloaded conversation does not duplicate the history footer. */
+  clearArtifacts(): void {
+    const turnId = this.activeTurnId ?? this.lastTurnId;
+    if (!turnId) return;
+    const snapshot = this.snapshot[turnId];
+    if (!snapshot || snapshot.artifacts.length === 0) return;
+    this.updateTurnSnapshot({ ...snapshot, artifacts: [] });
   }
 
   /** Ends one matching request, freezes elapsed time, and retains its final tools. */
@@ -206,6 +235,7 @@ const EMPTY_ACTIVITY_SNAPSHOT: AgentActivitySnapshot = {
   requestId: null,
   phase: 'idle',
   tools: [],
+  artifacts: [],
   startedAt: 0,
   elapsedMs: 0,
 };

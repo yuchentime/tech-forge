@@ -9,6 +9,8 @@ import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
 import { DataSource, type EntityManager } from 'typeorm';
 import { rmSync } from 'node:fs';
 import { SettingsService } from '../settings/settings.service';
+import { ArtifactsService } from '../artifacts/artifacts.service';
+import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
 import {
   createAssistantTurnMarker,
   createRecoveredToolResult,
@@ -25,6 +27,7 @@ import { ConversationEntity } from './conversation.entity';
 import { MessageEntity } from './message.entity';
 import type {
   ConversationAttachmentDto,
+  ConversationGeneratedFileDto,
   ConversationMessagePageDto,
   ConversationMessageDto,
   ConversationSummaryDto,
@@ -95,6 +98,7 @@ export class ConversationsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly settings: SettingsService,
+    private readonly artifacts: ArtifactsService,
   ) {}
 
   /** Loads lightweight sidebar summaries and derives titles from first prompts. */
@@ -274,6 +278,12 @@ export class ConversationsService {
           .filter((message) => message.role === 'user'),
         logContext,
       );
+      // 本轮产出的文件挂在响应消息上；页内找不到该轮最后一条 assistant 时跳过，翻到下一页再显示。
+      const generatedFilesByAssistantId =
+        await this.getGeneratedFilesByAssistantMessageId(
+          conversationId,
+          pageRows.map(({ message }) => message),
+        );
       const result: ConversationMessagePageDto = {
         messages: pageRows.map(
           ({ message, content }): ConversationMessageDto => ({
@@ -287,7 +297,9 @@ export class ConversationsService {
                   toolActivities: toolActivitiesByUserId.get(message.id) ?? [],
                   attachments: readAttachmentRefs(message.contextRefsJson),
                 }
-              : {}),
+              : {
+                  generatedFiles: generatedFilesByAssistantId.get(message.id) ?? [],
+                }),
           }),
         ),
         hasMore,
@@ -329,6 +341,77 @@ export class ConversationsService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Maps each turn's produced files onto the last assistant row of that turn inside the page.
+   *
+   * The footer belongs under the response, so the target is the assistant row closest before the
+   * next user message. A turn split across a page boundary shows no footer until its last
+   * assistant row is on screen; that keeps the mapping free of extra state.
+   */
+  private async getGeneratedFilesByAssistantMessageId(
+    conversationId: string,
+    pageMessages: MessageEntity[],
+  ): Promise<Map<string, ConversationGeneratedFileDto[]>> {
+    const projected = new Map<string, ConversationGeneratedFileDto[]>();
+    const assistantRows = pageMessages.filter((message) => message.role === 'assistant');
+    if (assistantRows.length === 0) return projected;
+
+    const artifacts = await this.artifacts.listArtifacts(conversationId);
+    const byUserMessage = new Map<string, ArtifactSummaryDto[]>();
+    for (const artifact of artifacts) {
+      if (!artifact.userMessageId) continue;
+      const list = byUserMessage.get(artifact.userMessageId) ?? [];
+      list.push(artifact);
+      byUserMessage.set(artifact.userMessageId, list);
+    }
+    if (byUserMessage.size === 0) return projected;
+
+    const repository = this.dataSource.getRepository(MessageEntity);
+    const owners = await repository
+      .createQueryBuilder('message')
+      .select(['message.id', 'message.sequenceNo'])
+      .where('message.conversationId = :conversationId', { conversationId })
+      .andWhere('message.id IN (:...ids)', { ids: [...byUserMessage.keys()] })
+      .getMany();
+    const ownerSequence = new Map(owners.map((row) => [row.id, row.sequenceNo]));
+    if (ownerSequence.size === 0) return projected;
+
+    // Every user row in the conversation gives each turn its right boundary.
+    const userRows = await repository
+      .createQueryBuilder('message')
+      .select(['message.sequenceNo'])
+      .where('message.conversationId = :conversationId', { conversationId })
+      .andWhere('message.role = :role', { role: 'user' })
+      .orderBy('message.sequenceNo', 'ASC')
+      .getMany();
+    const userSequences = userRows.map((row) => row.sequenceNo);
+
+    for (const [userMessageId, files] of byUserMessage) {
+      const startSequence = ownerSequence.get(userMessageId);
+      if (startSequence === undefined) continue;
+      const endSequence =
+        userSequences.find((sequence) => sequence > startSequence) ?? Number.POSITIVE_INFINITY;
+      const turnAssistants = assistantRows
+        .filter(
+          (row) => row.sequenceNo > startSequence && row.sequenceNo < endSequence,
+        )
+        .sort((left, right) => left.sequenceNo - right.sequenceNo);
+      const target = turnAssistants[turnAssistants.length - 1];
+      if (!target) continue;
+      projected.set(
+        target.id,
+        files.map((file) => ({
+          id: file.id,
+          fileName: file.fileName,
+          contentFormat: file.contentFormat,
+          missing: file.missing,
+          external: file.external,
+        })),
+      );
+    }
+    return projected;
   }
 
   /** Loads safe tool summaries for each selected user message without exposing tool payloads. */

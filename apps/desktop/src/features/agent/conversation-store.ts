@@ -1,5 +1,6 @@
 import { readBackendErrorMessage } from '../../api/backend-error';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
+import type { GeneratedFileRef } from './artifact-store';
 
 /** Describes one lightweight Conversation row displayed in the sidebar. */
 export interface ConversationSummary {
@@ -25,6 +26,8 @@ export interface ConversationHistoryMessage {
   toolActivities?: ConversationToolActivity[];
   /** Files attached to this message; only user rows carry them. */
   attachments?: ConversationAttachment[];
+  /** Files this turn produced; only assistant rows carry them. */
+  generatedFiles?: GeneratedFileRef[];
 }
 
 /** Describes a safe tool lifecycle summary attached to a persisted user message. */

@@ -15,6 +15,8 @@ import {
 import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
 import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
+import { ArtifactsService } from '../artifacts/artifacts.service';
+import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
 import {
   getSafeErrorLogFields,
   writeStructuredEvent,
@@ -49,6 +51,7 @@ export class ChatService {
     private readonly conversations: ConversationsService,
     private readonly knowledge: KnowledgeService,
     private readonly attachments: AttachmentsService,
+    private readonly artifacts: ArtifactsService,
   ) {}
 
   /**
@@ -88,6 +91,8 @@ export class ChatService {
     };
     let assistantStatus: 'completed' | 'failed' | 'cancelled' = 'failed';
     const eventCounts = new Map<string, number>();
+    // Files this turn created or rewrote, in write order, emitted after the run settles.
+    const turnArtifacts: ArtifactSummaryDto[] = [];
 
     writeStructuredEvent(this.logger, 'log', 'chat.turn.accepted', {
       ...logContext,
@@ -289,6 +294,16 @@ export class ChatService {
         requestId,
         signal,
         promptContext: promptContext === '' ? undefined : promptContext,
+        // Every successful write is indexed against this turn, so the response footer and the
+        // sidebar can list it without parsing tool events.
+        onFileWritten: async ({ absolutePath }) => {
+          const artifact = await this.artifacts.registerArtifact({
+            conversationId: resolvedConversationId,
+            userMessageId: turn?.userMessageId ?? null,
+            absolutePath,
+          });
+          if (artifact) turnArtifacts.push(artifact);
+        },
         conversation: {
           id: resolvedConversationId,
           history: turn.history.map((message) => ({
@@ -321,6 +336,22 @@ export class ChatService {
         }
         const event = projectChatSessionEvent(piEvent);
         if (event) yield event;
+      }
+
+      // Emitted once the run settled: the footer belongs to the finished response, and the model
+      // may have rewritten the same file several times during the turn.
+      const emittedArtifacts = dedupeArtifacts(turnArtifacts);
+      for (const artifact of emittedArtifacts) {
+        yield { type: 'artifact', artifact };
+      }
+      if (emittedArtifacts.length > 0) {
+        writeStructuredEvent(this.logger, 'log', 'chat.artifacts.emitted', {
+          ...logContext,
+          artifactCount: emittedArtifacts.length,
+          artifactIds: emittedArtifacts.map((artifact) => artifact.id),
+          formats: emittedArtifacts.map((artifact) => artifact.contentFormat),
+          missingCount: emittedArtifacts.filter((artifact) => artifact.missing).length,
+        });
       }
 
       assistantStatus = signal.aborted ? 'cancelled' : 'completed';
@@ -909,4 +940,13 @@ function dedupeAttachments(
     unique.push(attachment);
   }
   return unique;
+}
+
+/** Collapses repeated writes to one file, keeping the final state of each artifact. */
+function dedupeArtifacts(
+  artifacts: readonly ArtifactSummaryDto[],
+): ArtifactSummaryDto[] {
+  const byId = new Map<string, ArtifactSummaryDto>();
+  for (const artifact of artifacts) byId.set(artifact.id, artifact);
+  return [...byId.values()];
 }

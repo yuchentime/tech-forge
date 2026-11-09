@@ -11,6 +11,9 @@ const { MessageEntity } = require(path.join(buildDirectory, 'conversations/messa
 const { ConversationsService } = require(path.join(buildDirectory, 'conversations/conversations.service.js'));
 const { getToolDisplayFields } = require(path.join(buildDirectory, 'conversations/conversation-transcript.js'));
 
+/** Minimal artifact owner: these cases cover history projection, not generated files. */
+const artifactsStub = { listArtifacts: async () => [] };
+
 /** Creates an isolated in-memory database with the production conversation entities. */
 async function createTestDatabase() {
   const dataSource = new DataSource({
@@ -108,7 +111,7 @@ test('history nests durable tool execution under its user without exposing resul
       1,
     );
 
-    const page = await new ConversationsService(dataSource).getConversationMessages(
+    const page = await new ConversationsService(dataSource, undefined, artifactsStub).getConversationMessages(
       conversationId,
     );
     const user = page.messages.find(({ id }) => id === userId);
@@ -145,7 +148,7 @@ test('cursor history keeps tool activity attached to the earlier user turn', asy
       sequenceNo = turn.nextSequenceNo;
     }
 
-    const service = new ConversationsService(dataSource);
+    const service = new ConversationsService(dataSource, undefined, artifactsStub);
     const latestPage = await service.getConversationMessages(conversationId);
     const earlierPage = await service.getConversationMessages(
       conversationId,
@@ -183,7 +186,7 @@ test('legacy tool executions without a display path remain visible', async () =>
       false,
     );
 
-    const page = await new ConversationsService(dataSource).getConversationMessages(
+    const page = await new ConversationsService(dataSource, undefined, artifactsStub).getConversationMessages(
       conversationId,
     );
     const user = page.messages.find(({ id }) => id === userId);
@@ -233,7 +236,7 @@ test('grep history returns the search pattern next to its display path only', as
       messageRow(conversationId, 3, 'assistant', piMessage('assistant', 'answer-grep')),
     ]);
 
-    const page = await new ConversationsService(dataSource).getConversationMessages(
+    const page = await new ConversationsService(dataSource, undefined, artifactsStub).getConversationMessages(
       conversationId,
     );
     const user = page.messages.find(({ id }) => id === userId);

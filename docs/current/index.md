@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/index.md
   - docs/current/platform/index.md
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 ---
 
 # 当前实现文档
@@ -19,6 +19,7 @@ last_verified: 2026-11-08
 - [Conversation 对话持久化与历史读取](domains/conversations/index.md)：Agent 对话写入 SQLite、会话侧栏列表和选中会话消息读取的当前行为。
 - [资料入库](domains/documents/index.md)：本机文件解析、500-token 分块、词法索引与向量写入、入库状态机、知识库导入/删除 API 与读取模型。
 - [知识库检索](domains/retrieval/index.md)：词法 + 向量双通道、RRF 融合、单字回退、可选查询扩展，以及 `/查询资料库` 命令触发的分片注入、去重与注入位置（user message，而非 system prompt）。
+- [Artifact 会话产出文件](domains/artifacts/index.md)：模型写入文件的登记、`session`/`external` 路径解析、预览接口与只读文件侧边栏。
 - [本机 Agent 设置](domains/system-settings/index.md)：模型 Provider、config.toml / SOULS.md 本地文件、默认 Agent workspace、设置 API 与新 session 配置行为。
 - [跨领域约定目录](shared/README.md)：多个领域共用的稳定契约。
 - [工程规则目录](rules/README.md)：长期、可执行的工程规则。

@@ -17,8 +17,10 @@
     "@assistant-ui/react": "^0.15.32",
     "@assistant-ui/react-markdown": "^0.14.24",
     "@phosphor-icons/react": "^2.1.10",
+    "mermaid": "^12.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {

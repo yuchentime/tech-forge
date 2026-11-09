@@ -9,6 +9,7 @@ import {
   dialog,
   ipcMain,
   MessageChannelMain,
+  shell,
   utilityProcess,
   type UtilityProcess,
   type IpcMainEvent,
@@ -255,6 +256,29 @@ function registerBackendIpc(): void {
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options);
     return result.canceled ? [] : result.filePaths;
+  });
+
+  // Reveals a path the artifact API resolved. The Renderer never invents a path, so this only
+  // navigates to files the conversation already produced.
+  ipcMain.handle('shell:reveal', (_event, value: unknown) => {
+    if (typeof value !== 'string' || value.length === 0 || value.length > 4096) {
+      return false;
+    }
+    if (!path.isAbsolute(value)) return false;
+    try {
+      if (existsSync(value)) {
+        shell.showItemInFolder(value);
+        return true;
+      }
+      const directory = path.dirname(value);
+      if (existsSync(directory)) {
+        void shell.openPath(directory);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   });
 
   ipcMain.handle('backend:request', async (_event, value: unknown) => {

@@ -43,6 +43,16 @@ export interface WorkspaceFileToolPolicy {
   guardedDirectories?: readonly string[];
   /** Only the current stream request may grant a temporary external write target. */
   currentUserRequest?: string;
+  /**
+   * Called after one file mutation succeeded, with the already-resolved absolute path.
+   *
+   * The artifact index subscribes here instead of inspecting tool events: the resolved path is only
+   * known inside these operations, and the tool event payload does not carry it.
+   */
+  onFileWritten?: (input: {
+    absolutePath: string;
+    tool: 'write' | 'edit';
+  }) => Promise<void> | void;
 }
 
 /** Describes a one-session exception derived from one explicit user path. */
@@ -171,6 +181,7 @@ export async function createWorkspaceFileTools(
         true,
       );
       await fileSystem.writeFile(safePath, content, 'utf8');
+      await policy.onFileWritten?.({ absolutePath: safePath, tool: 'edit' });
     },
   };
 
@@ -222,6 +233,7 @@ export async function createWorkspaceFileTools(
         true,
       );
       await fileSystem.writeFile(safePath, content, 'utf8');
+      await policy.onFileWritten?.({ absolutePath: safePath, tool: 'write' });
     },
   };
 
