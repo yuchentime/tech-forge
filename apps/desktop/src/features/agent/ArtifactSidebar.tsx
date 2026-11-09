@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { hasDesktopBridge } from '../../types/desktop-bridge';
 import { conversationStore } from './conversation-store';
 import {
   ALL_FILES_TAB_ID,
+  artifactListStore,
   artifactTabsStore,
-  type GeneratedFileRef,
 } from './artifact-store';
 import {
   ArtifactFileRow,
@@ -50,9 +49,10 @@ function storeSidebarWidth(value: number): void {
  * Renders the read-only artifact sidebar for the active conversation.
  *
  * The built-in tab lists every file the model produced in this conversation; file tabs show one
- * artifact's preview. Nothing here writes files or edits artifacts.
+ * artifact's preview. Nothing here writes files or edits artifacts, and the file list itself is
+ * fetched by the conversation page so the header entry and this panel share one snapshot.
  */
-export function ArtifactSidebar({ refreshToken }: { refreshToken: string }) {
+export function ArtifactSidebar() {
   const tabsState = useSyncExternalStore(
     artifactTabsStore.subscribe,
     artifactTabsStore.getSnapshot,
@@ -63,44 +63,19 @@ export function ArtifactSidebar({ refreshToken }: { refreshToken: string }) {
     conversationStore.getSnapshot,
     conversationStore.getSnapshot,
   );
+  const listState = useSyncExternalStore(
+    artifactListStore.subscribe,
+    artifactListStore.getSnapshot,
+    artifactListStore.getSnapshot,
+  );
   const conversationId = conversationState.activeConversationId;
+  /** Rows of another conversation stay hidden until its own list arrives. */
+  const files = listState.conversationId === conversationId ? listState.files : [];
+  const error = listState.conversationId === conversationId ? listState.error : null;
+  const isLoading = listState.status === 'loading';
   const [width, setWidth] = useState(readStoredSidebarWidth);
   const widthRef = useRef(width);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
-  const [files, setFiles] = useState<readonly GeneratedFileRef[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  /** Loads the conversation's generated files, used by the list and by tab metadata refresh. */
-  const loadFiles = useCallback(async () => {
-    if (!conversationId || !hasDesktopBridge()) {
-      setFiles([]);
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await window.teachforge.request<GeneratedFileRef[]>({
-        method: 'GET',
-        path: `/api/conversations/${encodeURIComponent(conversationId)}/artifacts`,
-      });
-      if (response.status !== 200) {
-        setError('文件列表加载失败。');
-        return;
-      }
-      setFiles(response.data);
-      // Tabs keep working across refreshes, so their missing flags stay current.
-      artifactTabsStore.syncAll(response.data);
-    } catch {
-      setError('文件列表加载失败。');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [conversationId]);
-
-  useEffect(() => {
-    void loadFiles();
-  }, [loadFiles, refreshToken]);
 
   useEffect(() => {
     widthRef.current = width;
@@ -190,6 +165,7 @@ export function ArtifactSidebar({ refreshToken }: { refreshToken: string }) {
           activeId={tabsState.activeId}
           onActivate={(id) => artifactTabsStore.activate(id)}
           onClose={(id) => artifactTabsStore.close(id)}
+          onClosePanel={() => artifactTabsStore.hide()}
           tabs={tabsState.tabs}
         />
 
@@ -211,7 +187,7 @@ export function ArtifactSidebar({ refreshToken }: { refreshToken: string }) {
               <h2 className="text-sm font-medium text-stone-900">本会话生成的文件</h2>
               <button
                 className="shrink-0 text-xs text-stone-500 underline underline-offset-2 hover:text-stone-800"
-                onClick={() => void loadFiles()}
+                onClick={() => void artifactListStore.load(conversationId)}
                 type="button"
               >
                 刷新

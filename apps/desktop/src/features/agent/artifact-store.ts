@@ -1,3 +1,5 @@
+import { hasDesktopBridge } from '../../types/desktop-bridge';
+
 /** Identifies one generated file in the footer and the sidebar. */
 export interface GeneratedFileRef {
   id: string;
@@ -107,6 +109,21 @@ class ArtifactTabsStore {
     this.update({ ...this.snapshot, activeId: ALL_FILES_TAB_ID, visible: true });
   }
 
+  /** Opens the list tab, or collapses the panel when it is already showing. */
+  toggleAll(): void {
+    if (this.snapshot.visible) {
+      this.hide();
+      return;
+    }
+    this.update({ ...this.snapshot, activeId: ALL_FILES_TAB_ID, visible: true });
+  }
+
+  /** Collapses the panel without closing tabs, so reopening keeps the previous selection. */
+  hide(): void {
+    if (!this.snapshot.visible) return;
+    this.update({ ...this.snapshot, visible: false });
+  }
+
   /** Focuses one open tab. */
   activate(id: string): void {
     if (id !== ALL_FILES_TAB_ID && !this.snapshot.tabs.some((tab) => tab.id === id)) return;
@@ -141,3 +158,75 @@ class ArtifactTabsStore {
 }
 
 export const artifactTabsStore = new ArtifactTabsStore();
+
+/** Describes the generated-file list of the active conversation. */
+export interface ArtifactListSnapshot {
+  /** Conversation the rows belong to, so a switched conversation never shows stale files. */
+  conversationId: string | null;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  files: readonly GeneratedFileRef[];
+  error: string | null;
+}
+
+/**
+ * Owns the generated-file list of the active conversation.
+ *
+ * The conversation header (entry with a file count) and the sidebar (file rows) read the same
+ * snapshot, so a conversation is fetched once no matter how many surfaces consume it.
+ */
+class ArtifactListStore {
+  private readonly listeners = new Set<() => void>();
+  private requestVersion = 0;
+  private snapshot: ArtifactListSnapshot = {
+    conversationId: null,
+    status: 'idle',
+    files: [],
+    error: null,
+  };
+
+  /** Subscribes the header and the sidebar to list changes. */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  /** Returns the current list snapshot. */
+  getSnapshot = (): ArtifactListSnapshot => this.snapshot;
+
+  /** Loads one conversation's files; a late response never overwrites a newer selection. */
+  async load(conversationId: string | null): Promise<void> {
+    const version = ++this.requestVersion;
+    if (!conversationId || !hasDesktopBridge()) {
+      this.update({ conversationId, status: 'idle', files: [], error: null });
+      return;
+    }
+    const keptFiles =
+      this.snapshot.conversationId === conversationId ? this.snapshot.files : [];
+    this.update({ conversationId, status: 'loading', files: keptFiles, error: null });
+    try {
+      const response = await window.teachforge.request<GeneratedFileRef[]>({
+        method: 'GET',
+        path: `/api/conversations/${encodeURIComponent(conversationId)}/artifacts`,
+      });
+      if (version !== this.requestVersion) return;
+      if (response.status !== 200) {
+        this.update({ conversationId, status: 'error', files: [], error: '文件列表加载失败。' });
+        return;
+      }
+      this.update({ conversationId, status: 'ready', files: response.data, error: null });
+      // Open tabs keep their identity across refreshes, so their missing flags stay current.
+      artifactTabsStore.syncAll(response.data);
+    } catch {
+      if (version !== this.requestVersion) return;
+      this.update({ conversationId, status: 'error', files: [], error: '文件列表加载失败。' });
+    }
+  }
+
+  /** Publishes one snapshot and notifies subscribers. */
+  private update(next: ArtifactListSnapshot): void {
+    this.snapshot = next;
+    this.listeners.forEach((listener) => listener());
+  }
+}
+
+export const artifactListStore = new ArtifactListStore();

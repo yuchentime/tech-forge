@@ -28,8 +28,8 @@ import {
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactSidebar } from './ArtifactSidebar';
-import { ArtifactFileChips } from './ArtifactSidebarParts';
-import { artifactHistoryStore, artifactTabsStore } from './artifact-store';
+import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
+import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
 import { ToastHost } from './toast';
 import { describeFailure } from '../../api/backend-error';
 import {
@@ -75,6 +75,16 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     agentEventBus.getSnapshot,
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const artifactTabs = useSyncExternalStore(
+    artifactTabsStore.subscribe,
+    artifactTabsStore.getSnapshot,
+    artifactTabsStore.getSnapshot,
+  );
+  const artifactList = useSyncExternalStore(
+    artifactListStore.subscribe,
+    artifactListStore.getSnapshot,
+    artifactListStore.getSnapshot,
+  );
   const [activeView, setActiveView] = useState<SidebarView>('chat');
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -95,6 +105,12 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     composerCommandStore.getSnapshot,
     composerCommandStore.getSnapshot,
   );
+  /** Changes whenever a turn registers another file, so the list refetches after each artifact. */
+  const liveArtifactToken = liveActivity.artifacts.map((file) => file.id).join('|');
+
+  useEffect(() => {
+    void artifactListStore.load(conversationState.activeConversationId);
+  }, [conversationState.activeConversationId, liveArtifactToken]);
 
   /** Fetches one history snapshot and replaces the visible local thread on success. */
   const loadConversation = useCallback(async (conversationId: string) => {
@@ -377,6 +393,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const isHistoryLoading = loadingConversationId !== null;
   const isInitialListLoading =
     !hasLoadedInitialList && conversationState.listStatus !== 'error';
+  const activeConversation = conversationState.conversations.find(
+    ({ id }) => id === conversationState.activeConversationId,
+  );
+  /** Files of the conversation on screen; a list loaded for another one never shows a count. */
+  const conversationFiles =
+    artifactList.conversationId === conversationState.activeConversationId
+      ? artifactList.files
+      : [];
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
@@ -407,6 +431,12 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
+          <header className="flex shrink-0 items-center justify-between gap-3 pb-3">
+            <h1 className="min-w-0 truncate text-sm font-semibold text-stone-800">
+              {activeConversation?.title?.trim() || '新对话'}
+            </h1>
+            <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
+          </header>
           {historyError && (
             <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               <span className="min-w-0 flex-1">{historyError}</span>
@@ -545,9 +575,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
             </ThreadPrimitive.Root>
           )}
           </div>
-          <ArtifactSidebar
-            refreshToken={liveActivity.artifacts.map((file) => file.id).join('|')}
-          />
+          <ArtifactSidebar />
         </div>
       )}
       <ToastHost />

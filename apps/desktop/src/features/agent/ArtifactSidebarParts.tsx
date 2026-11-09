@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { FilePlus, FileText, FolderOpen, X } from '@phosphor-icons/react';
+import { FilePlus, FileText, Files, FolderOpen, X } from '@phosphor-icons/react';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   ALL_FILES_TAB_ID,
@@ -101,6 +101,37 @@ export function ArtifactFileRow({
   );
 }
 
+/**
+ * Renders the conversation header entry that opens or collapses the artifact panel.
+ *
+ * It stays hidden until the conversation has produced a file, so the header carries no dead
+ * control; while the panel is open the same button collapses it.
+ */
+export function ArtifactEntry({ count, visible }: { count: number; visible: boolean }) {
+  if (count === 0) return null;
+
+  return (
+    <button
+      aria-expanded={visible}
+      aria-label={`${visible ? '收起' : '查看'}本会话生成的 ${count} 个文件`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-medium transition ${
+        visible
+          ? 'border-emerald-800/30 bg-emerald-50 text-emerald-900'
+          : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-100'
+      }`}
+      onClick={() => artifactTabsStore.toggleAll()}
+      title={visible ? '收起文件侧边栏' : '查看本会话生成的文件'}
+      type="button"
+    >
+      <Files aria-hidden="true" className="size-4" />
+      <span>文件</span>
+      <span className="rounded-full bg-stone-200/80 px-1.5 text-xs font-semibold tabular-nums text-stone-700">
+        {count}
+      </span>
+    </button>
+  );
+}
+
 /** Renders the files one response changed, as a card with a bold count header. */
 export function ArtifactFileChips({ files }: { files: readonly GeneratedFileRef[] }) {
   if (files.length === 0) return null;
@@ -119,7 +150,7 @@ export function ArtifactFileChips({ files }: { files: readonly GeneratedFileRef[
           onClick={() => artifactTabsStore.showAll()}
           type="button"
         >
-          打开侧边栏
+          查看全部
         </button>
       </div>
       <ul className="border-t border-stone-200 bg-white">
@@ -172,55 +203,68 @@ export function ArtifactTabs({
   activeId,
   onActivate,
   onClose,
+  onClosePanel,
 }: {
   tabs: readonly GeneratedFileRef[];
   activeId: string;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
+  onClosePanel: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-stretch gap-1 overflow-x-auto border-b border-stone-200 px-2 py-1.5">
-      <button
-        className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition ${
-          activeId === ALL_FILES_TAB_ID
-            ? 'bg-stone-900 text-white'
-            : 'text-stone-700 hover:bg-stone-200/70'
-        }`}
-        onClick={() => onActivate(ALL_FILES_TAB_ID)}
-        title="本会话文件"
-        type="button"
-      >
-        <FolderOpen aria-hidden="true" className="size-4" />
-        <span>本会话文件</span>
-      </button>
-      {tabs.map((tab) => (
-        <div
-          className={`flex shrink-0 items-center gap-1 rounded-lg pl-2.5 text-sm transition ${
-            activeId === tab.id
-              ? 'bg-emerald-50 text-emerald-900'
+    <div className="flex shrink-0 items-stretch border-b border-stone-200">
+      <div className="flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto px-2 py-1.5">
+        <button
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition ${
+            activeId === ALL_FILES_TAB_ID
+              ? 'bg-stone-900 text-white'
               : 'text-stone-700 hover:bg-stone-200/70'
           }`}
-          key={tab.id}
+          onClick={() => onActivate(ALL_FILES_TAB_ID)}
+          title="本会话文件"
+          type="button"
         >
-          <button
-            className="max-w-40 truncate py-1.5 text-left"
-            onClick={() => onActivate(tab.id)}
-            title={tab.fileName}
-            type="button"
+          <FolderOpen aria-hidden="true" className="size-4" />
+          <span>本会话文件</span>
+        </button>
+        {tabs.map((tab) => (
+          <div
+            className={`flex shrink-0 items-center gap-1 rounded-lg pl-2.5 text-sm transition ${
+              activeId === tab.id
+                ? 'bg-emerald-50 text-emerald-900'
+                : 'text-stone-700 hover:bg-stone-200/70'
+            }`}
+            key={tab.id}
           >
-            {tab.fileName}
-          </button>
-          <button
-            aria-label={`关闭 ${tab.fileName}`}
-            className="flex size-6 items-center justify-center rounded-md text-stone-500 hover:bg-stone-300/60 hover:text-stone-800"
-            onClick={() => onClose(tab.id)}
-            title="关闭"
-            type="button"
-          >
-            <X aria-hidden="true" className="size-3.5" />
-          </button>
-        </div>
-      ))}
+            <button
+              className="max-w-40 truncate py-1.5 text-left"
+              onClick={() => onActivate(tab.id)}
+              title={tab.fileName}
+              type="button"
+            >
+              {tab.fileName}
+            </button>
+            <button
+              aria-label={`关闭 ${tab.fileName}`}
+              className="flex size-6 items-center justify-center rounded-md text-stone-500 hover:bg-stone-300/60 hover:text-stone-800"
+              onClick={() => onClose(tab.id)}
+              title="关闭"
+              type="button"
+            >
+              <X aria-hidden="true" className="size-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        aria-label="关闭文件侧边栏"
+        className="my-1 mr-1 flex size-7 shrink-0 items-center justify-center self-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+        onClick={onClosePanel}
+        title="关闭"
+        type="button"
+      >
+        <X aria-hidden="true" className="size-4" />
+      </button>
     </div>
   );
 }
