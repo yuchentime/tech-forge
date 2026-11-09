@@ -11,11 +11,9 @@ import { rehearsalStore } from './rehearsal-store';
 export function RehearsalMode({
   conversationId,
   hasHistory,
-  onExitToChat,
 }: {
   conversationId: string | null;
   hasHistory: boolean;
-  onExitToChat: () => void;
 }) {
   const state = useSyncExternalStore(
     rehearsalStore.subscribe,
@@ -74,16 +72,31 @@ export function RehearsalMode({
     }
   };
 
+  const historyBack =
+    state.view === 'history'
+      ? () => rehearsalStore.backToSession()
+      : state.view === 'historyDetail'
+        ? () => rehearsalStore.backToHistory()
+        : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-3 pb-3">
         <div className="min-w-0">
-          {state.view === 'session' && state.detail ? (
+          {historyBack ? (
+            <button
+              className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+              onClick={historyBack}
+              type="button"
+            >
+              返回
+            </button>
+          ) : state.view === 'session' && state.detail ? (
             <p className="text-sm font-medium text-stone-700">
               已回答 {answeredCount}/{state.detail.progress.limit} 题
             </p>
           ) : (
-            <p className="text-sm font-medium text-stone-500">演练</p>
+            <></>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -130,7 +143,6 @@ export function RehearsalMode({
             currentDetail={state.detail}
             error={state.historyError}
             history={state.history}
-            onBack={() => rehearsalStore.backToSession()}
             onLoadMore={() => void rehearsalStore.loadMoreHistory()}
             onOpen={(rehearsalId) =>
               void rehearsalStore.openHistoryDetail(rehearsalId)
@@ -153,8 +165,6 @@ export function RehearsalMode({
               isEnding={false}
               isStarting={state.isStarting}
               mode="history"
-              onBackChat={onExitToChat}
-              onBackHistory={() => rehearsalStore.backToHistory()}
               onContinue={() =>
                 void rehearsalStore.start(state.historyDetail?.persona ?? '')
               }
@@ -171,7 +181,6 @@ export function RehearsalMode({
             isStarting={state.isStarting}
             mode="live"
             onAdjustPersona={() => rehearsalStore.openStart()}
-            onBackChat={onExitToChat}
             onContinue={() =>
               void rehearsalStore.start(state.detail?.persona ?? '')
             }
@@ -195,7 +204,7 @@ export function RehearsalMode({
           <RehearsalStart
             disabledReason={
               !hasHistory
-                ? '先进行一轮普通对话，演练会基于当前学习内容出题。'
+                ? '先进行一轮对话模式，演练会基于当前学习内容出题。'
                 : state.status === 'error'
                   ? '演练状态加载失败，请重试或切换会话。'
                   : null

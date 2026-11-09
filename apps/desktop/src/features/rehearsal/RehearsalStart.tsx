@@ -88,7 +88,7 @@ export function RehearsalStart({
         </div>
 
         <p className="mt-3 text-center text-xs text-stone-400">
-          演练会读取当前对话的学习内容；不会修改普通对话消息。
+          演练会读取当前对话的学习内容；不会修改对话模式消息。
         </p>
       </div>
     </div>

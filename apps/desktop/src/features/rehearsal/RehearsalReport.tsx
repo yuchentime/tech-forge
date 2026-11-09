@@ -24,8 +24,6 @@ export function RehearsalReport({
   isEnding,
   isStarting,
   onContinue,
-  onBackChat,
-  onBackHistory,
   onAdjustPersona,
   onRetryEnd,
 }: {
@@ -34,8 +32,6 @@ export function RehearsalReport({
   isEnding: boolean;
   isStarting: boolean;
   onContinue: () => void;
-  onBackChat: () => void;
-  onBackHistory?: () => void;
   onAdjustPersona?: () => void;
   onRetryEnd?: () => void;
 }) {
@@ -46,34 +42,23 @@ export function RehearsalReport({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 pb-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-stone-900">
-            {detail.topic || '演练报告'}
-          </h2>
-          <p className="mt-1 text-xs text-stone-500">
-            {mode === 'history' ? '历史演练 · ' : ''}
-            {formatRehearsalDate(detail.endedAt ?? detail.createdAt)}
-            {detail.endReason ? ` · ${endReasonLabel(detail.endReason)}` : ''}
-            {` · 已提问 ${detail.progress.asked}/${detail.progress.limit}`}
-            {detail.progress.skipped > 0
-              ? ` · 跳过 ${detail.progress.skipped}`
-              : ''}
+      <div className="shrink-0 pb-3">
+        <h2 className="truncate text-base font-semibold text-stone-900">
+          {detail.topic || '演练报告'}
+        </h2>
+        <p className="mt-1 text-xs text-stone-500">
+          {mode === 'history' ? '历史演练 · ' : ''}
+          {formatRehearsalDate(detail.endedAt ?? detail.createdAt)}
+          {detail.endReason ? ` · ${endReasonLabel(detail.endReason)}` : ''}
+          {` · 已提问 ${detail.progress.asked}/${detail.progress.limit}`}
+          {detail.progress.skipped > 0
+            ? ` · 跳过 ${detail.progress.skipped}`
+            : ''}
+        </p>
+        {detail.persona && (
+          <p className="mt-1 text-xs text-stone-400">
+            学生画像：{truncateText(detail.persona, 120)}
           </p>
-          {detail.persona && (
-            <p className="mt-1 text-xs text-stone-400">
-              学生画像：{truncateText(detail.persona, 120)}
-            </p>
-          )}
-        </div>
-        {mode === 'history' && onBackHistory && (
-          <button
-            className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
-            onClick={onBackHistory}
-            type="button"
-          >
-            返回
-          </button>
         )}
       </div>
 
@@ -165,7 +150,7 @@ export function RehearsalReport({
             <p className="font-medium">报告未完成</p>
             <p className="mt-1 leading-6">
               逐题记录已保留，但总体评估没有生成成功。
-              {mode === 'live' ? '可以重试结束，或返回普通对话。' : '请返回历史或重新演练。'}
+              {mode === 'live' ? '可以重试结束，或返回对话模式。' : '请返回历史或重新演练。'}
             </p>
             {mode === 'live' && onRetryEnd && (
               <button

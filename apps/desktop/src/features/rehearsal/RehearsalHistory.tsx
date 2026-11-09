@@ -19,7 +19,6 @@ export function RehearsalHistory({
   onResume,
   onOpen,
   onLoadMore,
-  onBack,
   onRetry,
 }: {
   history: RehearsalList | null;
@@ -29,7 +28,6 @@ export function RehearsalHistory({
   onResume: (rehearsalId: string) => void;
   onOpen: (rehearsalId: string) => void;
   onLoadMore: () => void;
-  onBack: () => void;
   onRetry: () => void;
 }) {
   const active = history?.items.filter((item) => isActiveStatus(item.status)) ?? [];
@@ -44,25 +42,6 @@ export function RehearsalHistory({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 pb-3">
-        <div>
-          <h2 className="text-base font-semibold text-stone-900">历史演练</h2>
-          <p className="mt-1 text-xs text-stone-500">
-            当前对话的演练记录；点击查看完整问答与评估。
-            {history
-              ? ` 已完成 ${history.counts.completed} 次`
-              : ''}
-          </p>
-        </div>
-        <button
-          className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
-          onClick={onBack}
-          type="button"
-        >
-          返回
-        </button>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {status === 'loading' && !history && (
           <div className="flex items-center gap-2 rounded-2xl bg-stone-50 px-4 py-6 text-sm text-stone-600" role="status">

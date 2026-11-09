@@ -43,8 +43,8 @@ export function buildPlanPrompt(input: {
   priorSummaries: string;
   personaText: string | null;
 }): string {
-  return `本次调用的 Pi session 已经携带普通对话历史，那些消息仅作为出题背景。
-不要继续普通对话，也不要重复解释；如果历史已被压缩，以压缩后的摘要为准。
+  return `本次调用的 Pi session 已经携带对话模式历史，那些消息仅作为出题背景。
+不要继续对话模式，也不要重复解释；如果历史已被压缩，以压缩后的摘要为准。
 
 ## 历史演练
 ${input.priorSummaries || '无'}
@@ -56,7 +56,7 @@ ${input.personaText?.trim() || '未提供，使用默认好奇学生画像。'}
 只输出以下 JSON：
 {
   "topic": "本次演练主题",
-  "learningSummary": "对普通对话已学内容的 500-1500 字摘要",
+  "learningSummary": "对对话模式已学内容的 500-1500 字摘要",
   "knowledgePoints": [
     { "id": "kp1", "label": "知识点", "why": "为什么值得练" }
   ],

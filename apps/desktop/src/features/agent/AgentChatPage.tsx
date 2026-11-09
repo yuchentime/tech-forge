@@ -512,7 +512,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     onClick={() => setConversationDisplayMode('conversation')}
                     type="button"
                   >
-                    普通对话
+                    对话模式
                   </button>
                   <button
                     aria-pressed={isRehearsalMode}
@@ -693,9 +693,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 <RehearsalMode
                   conversationId={conversationState.activeConversationId}
                   hasHistory={hasCompletedRound}
-                  onExitToChat={() =>
-                    setConversationDisplayMode('conversation')
-                  }
                 />
               </div>
             </div>
