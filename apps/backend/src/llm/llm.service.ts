@@ -601,6 +601,11 @@ export class LlmService {
         "- File tools enforce these rules. The system prompt is guidance, not the security boundary.",
         `\n\n User style preferences: ${stylePreference}`,
       ].join("\n");
+      // pi-memory resolves its storage root from PI_MEMORY_DIR at module load, and the Pi loader
+      // caches extension modules per cwd, so this must be set before the first reload below.
+      // Without it the extension writes to ~/.pi/agent/memory, outside the TeachForge config root.
+      process.env.PI_MEMORY_DIR = this.settings.getMemoryDirectory();
+
       const resourceLoader = new sdk.DefaultResourceLoader({
         cwd,
         agentDir,

@@ -33,6 +33,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 | API Key | 依用户要求以明文保存在 config.toml；设置页默认遮蔽，点击眼睛图标后才显示明文；省略或留空表示保留已存值，明确清除操作才删除；仅经本机设置 API 回传给设置页，不进入 Agent SSE、普通日志或 SQLite |
 | 工作空间 | 保存在 `[workspace].path`；默认值为 `.tech-forge/workspace/`；路径必须绝对，不能是 `.tech-forge` 本身或其祖先；`SettingsService.getWorkspacePath()` 返回规范化路径，LlmService 将它用于 Pi cwd 与 Agent 文件工具 |
 | 风格偏好 | SOULS.md 的非空文本在每个新 Pi session 的固定系统提示词之后追加；空白内容不改变提示词 |
+| Agent 记忆 | `pi-memory` 的存储根固定为 `<configDir>/memory`（默认 `~/.tech-forge/memory/`），与知识库、会话文件同级；`LlmService` 创建 session 前以 `PI_MEMORY_DIR` 注入，`TEACHFORGE_CONFIG_DIR` 同样会重定向它。目录由扩展在首次使用时创建，不随 workspace 变化，也不经设置 API 编辑；早期落在 `~/.pi/agent/memory/` 的内容需要手工迁移 |
 
 配置文件新建时 POSIX 权限为目录 0700、文件 0600；Windows 使用用户目录继承 ACL。配置写入先写同目录临时文件，再替换目标文件。应用只识别自身定义的 TOML 字段，格式错误时不会重置已有配置。保存不会迁移或改变 SQLite 的 TEACHFORGE_DATA_DIR。
 

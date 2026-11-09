@@ -94,6 +94,13 @@ export class SettingsService implements OnModuleInit {
   private readonly knowledgeDirectory = join(this.configDirectory, 'knowledge');
   /** Per-conversation local files (attachments and future run data), beside config and knowledge. */
   private readonly sessionsDirectory = join(this.configDirectory, 'sessions');
+  /**
+   * Agent long-term memory owned by the pi-memory extension.
+   *
+   * Kept beside config/knowledge instead of the extension's default `~/.pi/agent/memory`, so all
+   * TeachForge state lives under one root and `TEACHFORGE_CONFIG_DIR` relocates it too.
+   */
+  private readonly memoryDirectory = join(this.configDirectory, 'memory');
   private initializationPromise?: Promise<void>;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -145,6 +152,16 @@ export class SettingsService implements OnModuleInit {
   /** Returns the root for per-conversation session files (attachments and future run data). */
   getSessionsDirectory(): string {
     return this.sessionsDirectory;
+  }
+
+  /**
+   * Returns the pi-memory storage root.
+   *
+   * The Agent layer passes it to the extension as `PI_MEMORY_DIR`; the extension creates the
+   * directory itself on first use.
+   */
+  getMemoryDirectory(): string {
+    return this.memoryDirectory;
   }
 
   /**

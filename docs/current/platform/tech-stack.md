@@ -72,7 +72,7 @@ last_verified: 2026-11-09
 | 依赖 | 声明（安装） | 用途 |
 |---|---|---|
 | `@earendil-works/pi-coding-agent` | ^1.5.0（1.5.0） | session、工具循环、资源加载器；扩展文件由内置 jiti 编译 |
-| `pi-memory` | ^0.4.2（0.4.2） | 记忆扩展：`memory_*` / `scratchpad` 工具与系统提示词记忆注入，装载方式与边界见 [Agent Runtime](agent-runtime.md) |
+| `pi-memory` | ^0.4.2（0.4.2） | 记忆扩展：`memory_*` / `scratchpad` 工具与系统提示词记忆注入；存储根注入为 `<configDir>/memory`（`PI_MEMORY_DIR`），装载方式与边界见 [Agent Runtime](agent-runtime.md) |
 | 外部 LLM | 无 SDK 依赖 | DeepSeek 与自定义 Provider 由 `DeepseekLLMAdapter` / `CustomLLMAdapter` 注册进 `ModelRuntime`，配置来源 `~/.tech-forge/config.toml` |
 
 ## 6. 桌面端
