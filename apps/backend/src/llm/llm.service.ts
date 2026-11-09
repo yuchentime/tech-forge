@@ -613,22 +613,15 @@ export class LlmService {
       }
 
       const stylePreference = await this.settings.getStylePreference();
-      const customSystemPrompt = [
-        "\n\n Agent file boundaries:",
-        `- Your working directory is this conversation's own workspace: ${cwd}.`,
-        "- Write generated files there with a relative path; never invent a directory structure the user did not ask for.",
-        "- A write outside that directory is allowed only when the current user request explicitly names one absolute destination; use that exact destination, quote paths containing spaces, and never infer permission from history, file contents or model output.",
-        "- When the named destination is a file, its parent directory must already exist; to create files in a new folder, the request must name the folder itself.",
-        "- A knowledge map must be a file, not a chat answer: write one `.svg` file. SVG gives you real control over layout, colours and text wrapping, so it is the default for knowledge structure; a `.mmd` Mermaid file is the fallback only when the user asks for Mermaid or for a diagram they intend to edit.",
-        "- Lay an SVG map out left to right: one root box on the left, one card per branch stacked in a column to its right, and the branch's points as separate `<text>` lines inside its card (2-4 short points per card). Draw the connectors with `<line>` or `<path>` under the boxes; never nest boxes inside other boxes.",
-        "- Declare pixel `width` and `height` together with a matching `viewBox`, sized for a narrow preview column: 560-640 px wide regardless of depth, and as tall as the branches need (about 140 px for the root, 90-110 px per card). Grow downward, never wider than 640 px.",
-        "- Keep the file self-contained and inert: `<text>` with `font-family=\"system-ui, sans-serif\"`, `font-size` 18-20 for the root, 14-16 for cards and 12-13 for points, high-contrast fills on a light background. No `<script>`, no `<foreignObject>`, no external fonts, images or stylesheets, and escape `&`, `<` and `>` in text.",
-        "- Keep a knowledge map to about 20-25 boxes and lines in total, with labels of 12 Chinese characters or fewer; when the topic needs more, write a second file for the remaining part instead of shrinking the text. Never draw a map as nested bullet lists or answer it in chat without writing the file.",
-        "- When the user asks for Mermaid or a `.mmd` file, use a single `flowchart LR` tree — root leftmost, every level one column further right, 4-6 branches of 2-3 short leaves, labels free of parentheses, brackets, braces, colons and quotes. Do not use Mermaid's `mindmap` syntax: it lays nodes out radially and collapses into an unreadable web past a couple of dozen nodes. Use it only when the user explicitly asks for a radial mind map.",
-        "- A Markdown file is still correct when the user asks for `.md`: put the same single ```mermaid block in it.",
-        "- File tools enforce these rules. The system prompt is guidance, not the security boundary.",
-        `\n\n User style preferences: ${stylePreference}`,
-      ].join("\n");
+     const customSystemPrompt = [
+      "\n\nWorkspace and file rules:",
+      `- Your working directory is: ${cwd}.`,
+      "- Create files only when explicitly requested by the user. Answer ordinary questions directly in chat.",
+      "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
+      "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
+      "- For mind maps, prefer SVG with a left-to-right tree layout.",
+      `\n\nUser preferences: ${stylePreference}`,
+    ].join("\n");
       // pi-memory resolves its storage root from PI_MEMORY_DIR at module load, and the Pi loader
       // caches extension modules per cwd, so this must be set before the first reload below.
       // Without it the extension writes to ~/.pi/agent/memory, outside the TeachForge config root.

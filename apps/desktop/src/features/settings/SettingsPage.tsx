@@ -188,7 +188,6 @@ export function SettingsPage() {
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-stone-900">设置</h1>
-          <p className="mt-1 text-sm text-stone-500">管理模型连接与回答风格。</p>
         </div>
         <button
           className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50"
