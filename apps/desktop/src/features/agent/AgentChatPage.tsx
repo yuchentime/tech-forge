@@ -485,6 +485,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     return <AssistantMessage key={message.id} messageId={message.id} />;
                   }}
                 </ThreadPrimitive.Messages>
+                <TurnProgress activity={liveActivity} />
                 <LiveArtifactFooter files={liveActivity.artifacts} />
               </ThreadPrimitive.Viewport>
 
@@ -664,16 +665,12 @@ function AgentActivity({
 }: {
   activity: ReturnType<typeof agentEventBus.getTurnSnapshots>[string] | undefined;
 }) {
-  const [now, setNow] = useState(() => Date.now());
   // 历史活动已经是终态，挂载时直接收起；本轮运行中的活动保持展开。
   const [isExpanded, setIsExpanded] = useState(() => activity?.phase !== 'idle');
-
-  useEffect(() => {
-    if (!activity || activity.phase === 'idle') return;
-
-    const timerId = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timerId);
-  }, [activity?.phase, activity?.startedAt]);
+  const liveElapsedMs = useElapsedMs(
+    activity?.startedAt ?? 0,
+    activity !== undefined && activity.phase !== 'idle',
+  );
 
   useEffect(() => {
     // 最终回复到达后收起工具明细，只留摘要行；用户随后手动展开不会被再次收起。
@@ -683,9 +680,7 @@ function AgentActivity({
   if (!activity || activity.tools.length === 0) return null;
 
   const isFinal = activity.phase === 'idle';
-  const elapsedMs = isFinal
-    ? activity.elapsedMs
-    : Math.max(0, now - activity.startedAt);
+  const elapsedMs = isFinal ? activity.elapsedMs : liveElapsedMs;
 
   return (
     <div className="flex w-full justify-start">
@@ -720,6 +715,78 @@ function AgentActivity({
       </details>
     </div>
   );
+}
+
+/**
+ * Fills the response area while a turn is still working and has streamed no text yet,
+ * so a long model or document wait never leaves the thread blank.
+ */
+function TurnProgress({
+  activity,
+}: {
+  activity: ReturnType<typeof agentEventBus.getSnapshot>;
+}) {
+  const isWaiting = activity.phase === 'working';
+  const elapsedMs = useElapsedMs(activity.startedAt, isWaiting);
+  if (!isWaiting) return null;
+
+  return (
+    <div className="flex w-full justify-start" role="status">
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex min-w-0 items-center gap-2.5 text-sm text-stone-600">
+          <CircleNotch
+            aria-hidden="true"
+            className="size-4 shrink-0 animate-spin text-emerald-800"
+          />
+          <span className="min-w-0 animate-pulse truncate">{describeTurnStatus(activity.tools)}</span>
+          <time
+            aria-live="off"
+            className="shrink-0 tabular-nums text-stone-500"
+            dateTime={`PT${Math.floor(elapsedMs / 1000)}S`}
+          >
+            {formatDuration(elapsedMs)}
+          </time>
+        </div>
+        {isLongWait(elapsedMs) && (
+          <p className="pl-[1.625rem] text-xs leading-5 text-stone-500">
+            长文档解析和长回答会更久一些，可以随时停止生成。
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Tells the user the wait is expected rather than stuck once a turn exceeds a minute. */
+function isLongWait(elapsedMs: number): boolean {
+  return elapsedMs >= 60_000;
+}
+
+/** Summarises the live turn in one sentence: the newest running tool, or plain thinking. */
+function describeTurnStatus(
+  tools: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'],
+): string {
+  const running = [...tools].reverse().find((tool) => tool.status === 'running');
+  if (!running) return '正在思考…';
+
+  const description = describeToolActivity(running.toolName, running.status, running.args);
+  if (description.fileName) return `${description.action} ${description.fileName}`;
+  if (description.pattern) return `${description.action}“${description.pattern}”`;
+  return `${description.action}…`;
+}
+
+/** Ticks once a second while `isActive` so live durations stay current without a reload. */
+function useElapsedMs(startedAt: number, isActive: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isActive) return;
+    setNow(Date.now());
+    const timerId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timerId);
+  }, [isActive, startedAt]);
+
+  return Math.max(0, now - startedAt);
 }
 
 /** Presents one tool action with plain-language wording, target and lifecycle status. */
