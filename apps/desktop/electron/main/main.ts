@@ -9,6 +9,7 @@ import {
   dialog,
   ipcMain,
   MessageChannelMain,
+  nativeImage,
   shell,
   utilityProcess,
   type UtilityProcess,
@@ -64,6 +65,15 @@ const configuredDataDirectory = process.env.TEACHFORGE_DATA_DIR;
 if (configuredDataDirectory) {
   mkdirSync(configuredDataDirectory, { recursive: true });
   app.setPath('userData', configuredDataDirectory);
+}
+
+/** Uses the renderer's PNG asset for the macOS Dock icon while running from source. */
+function configureDevelopmentDockIcon(): void {
+  if (app.isPackaged || process.platform !== 'darwin' || !app.dock) return;
+
+  const iconPath = path.join(app.getAppPath(), 'public', 'logo.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  if (!icon.isEmpty()) app.dock.setIcon(icon);
 }
 
 /** Resolves the backend entry for packaged and development Electron builds. */
@@ -656,6 +666,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  configureDevelopmentDockIcon();
   registerBackendIpc();
   try {
     await startBackend();
