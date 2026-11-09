@@ -142,6 +142,7 @@ last_verified: 2026-11-09
 
 - 完成时 `completed=true`、`question=null`、`report` 非空。
 - `(rehearsalId, answerRequestId)` 唯一；重放返回首次结果。`turnId` 必须是当前可回答 turn。
+- 进程重启后，若 turn 已是 `answer_saved`/`failed` 且保留了回答，客户端可用同一回答和新 `answerRequestId` 重新提交；后端会采纳新请求键并继续评估，不重复创建 turn。
 - **错误**：400 空回答或超长；404；409 状态/题目已变化或并发；422 模型输出非法；502 Provider 失败；504 超时。
 
 ### Skip the current question
@@ -159,9 +160,18 @@ last_verified: 2026-11-09
 - **方法**：`POST`
 - **路径**：`/api/rehearsals/:rehearsalId/end`
 - **请求体**：无。
-- **行为**：abort 进行中的模型调用并等待退出；把 `awaiting_answer` 题标为 `unanswered`，保留 `answer_saved`/`failed` 题；转 `reporting`，生成总体报告，成功后 `completed`，失败 `failed` 且保留逐题数据。
+- **行为**：abort 进行中的模型调用并等待退出；把 `awaiting_answer` 题标为 `unanswered`，保留 `answer_saved`/`failed` 题；转 `reporting`，生成总体报告，成功后 `completed`，失败 `failed` 且保留逐题数据。**没有任何已提交回答时返回 409**，需要改用丢弃接口。
 - **响应**：HTTP 200 完整 `RehearsalDetail`（`status=completed`）。重复调用已完成演练返回已有报告。
-- **错误**：404；409 报告正在生成；502/504 报告模型失败（可重试 end）。
+- **错误**：404；409 报告正在生成或还没有任何回答；502/504 报告模型失败（可重试 end）。
+
+### Discard a rehearsal
+
+- **方法**：`DELETE`
+- **路径**：`/api/rehearsals/:rehearsalId`
+- **用途**：用户一题未答就结束演练，确认后直接丢弃本次演练。
+- **行为**：abort 并等待进行中的调用；若任一 turn 已有非空回答则返回 409，要求结束并生成评估；否则删除该 Rehearsal 及其 turns、删除已有 transcript。记录已不存在时幂等返回成功。
+- **响应**：HTTP 200 `{ "rehearsalId": "uuid", "discarded": true }`。
+- **错误**：409 已有回答或正在处理。
 
 ## 状态与计数
 
@@ -169,6 +179,13 @@ last_verified: 2026-11-09
 - `progress.currentFollowUpDepth` 只反映当前可回答/评估中的 turn；列表摘要固定为 0。
 - `endReason`：`manual`、`limit`、`failed`。
 - `turns[].status`：`awaiting_answer`、`answer_saved`、`evaluated`、`skipped`、`unanswered`、`failed`。
+
+## 重启与恢复
+
+- 问题在创建时持久化，回答在提交时写入 `rehearsal_turns.answer`；评估和后续题目随后写入。
+- 进入演练模式时读取 `latest`；`awaiting_answer` 恢复当前题和历史问答，`completed` 恢复报告，`failed` 恢复部分逐题数据。
+- 没有活跃 run 的 `evaluating`/`preparing_next` 立即 reconciliation 为 `awaiting_answer`；保存的回答会作为“上次评估未完成”显示，可重试评估。
+- 没有活跃 run 的 `reporting` 转 `failed`，可重试结束。
 
 ## 已知限制
 

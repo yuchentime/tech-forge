@@ -565,6 +565,139 @@ test('replaying an answer request does not create a second turn', async () => {
   }
 });
 
+test('ending a zero-answer rehearsal is rejected and discard removes it', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    const started = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    await assert.rejects(
+      () =>
+        ctx.service.end(started.rehearsalId, {
+          requestId: randomUUID(),
+          rehearsalId: started.rehearsalId,
+        }),
+      /还没有回答任何问题/,
+    );
+    const discarded = await ctx.service.discard(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    assert.deepEqual(discarded, {
+      rehearsalId: started.rehearsalId,
+      discarded: true,
+    });
+    await assert.rejects(
+      () =>
+        ctx.service.getById(started.rehearsalId, {
+          requestId: randomUUID(),
+          rehearsalId: started.rehearsalId,
+        }),
+      /演练记录不存在/,
+    );
+    const counts = await ctx.dataSource.query(
+      'SELECT (SELECT COUNT(*) FROM rehearsals WHERE conversationId = ?) AS rehearsals, (SELECT COUNT(*) FROM rehearsal_turns WHERE rehearsalId = ?) AS turns',
+      [conversationId, started.rehearsalId],
+    );
+    assert.equal(Number(counts[0].rehearsals), 0);
+    assert.equal(Number(counts[0].turns), 0);
+    const latest = await ctx.service.getLatest(conversationId, {
+      requestId: randomUUID(),
+      conversationId,
+    });
+    assert.equal(latest, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('discard is rejected after a submitted answer', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    const started = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    const first = currentTurn(started);
+    await ctx.service.answer(
+      started.rehearsalId,
+      {
+        turnId: first.turnId,
+        answer: '这是已经提交的回答。',
+        answerRequestId: randomUUID(),
+      },
+      { requestId: randomUUID(), rehearsalId: started.rehearsalId },
+    );
+    await assert.rejects(
+      () =>
+        ctx.service.discard(started.rehearsalId, {
+          requestId: randomUUID(),
+          rehearsalId: started.rehearsalId,
+        }),
+      /已经有回答/,
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a saved answer is restored and can be re-evaluated with a fresh request id', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    const started = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    const first = currentTurn(started);
+    const oldRequestId = randomUUID();
+    const savedAnswer = '重启前保存的回答。';
+    await ctx.dataSource.query(
+      'UPDATE rehearsal_turns SET answer = ?, answerRequestId = ?, status = ?, answeredAt = ? WHERE id = ?',
+      [savedAnswer, oldRequestId, 'answer_saved', new Date().toISOString(), first.turnId],
+    );
+    await ctx.dataSource.query(
+      'UPDATE rehearsals SET status = ?, updatedAt = ? WHERE id = ?',
+      ['evaluating', new Date().toISOString(), started.rehearsalId],
+    );
+
+    // Simulates a restart: no in-process run exists, so the saved answer is restored immediately.
+    const restored = await ctx.service.getById(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    assert.equal(restored.status, 'awaiting_answer');
+    assert.equal(restored.turns[0].answer, savedAnswer);
+    assert.equal(restored.turns[0].status, 'answer_saved');
+
+    const retried = await ctx.service.answer(
+      started.rehearsalId,
+      {
+        turnId: first.turnId,
+        answer: savedAnswer,
+        answerRequestId: randomUUID(),
+      },
+      { requestId: randomUUID(), rehearsalId: started.rehearsalId },
+    );
+    assert.equal(retried.completed, false);
+    const detail = await ctx.service.getById(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    assert.equal(detail.turns.length, 2);
+    assert.equal(detail.turns[0].status, 'evaluated');
+    assert.equal(detail.turns[1].status, 'awaiting_answer');
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('context refs merge keeps attachments, knowledge and rehearsals together', async () => {
   const ctx = await createContext();
   const conversationId = await seedConversation(ctx);

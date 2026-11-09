@@ -6,7 +6,6 @@ import {
   endReasonLabel,
   formatRehearsalDate,
   truncateText,
-  turnKindLabel,
   turnStatusLabel,
 } from './rehearsal-ui-utils';
 
@@ -130,9 +129,7 @@ export function RehearsalReport({
                   key={turn.turnId}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-                    <span>
-                      第 {turn.sequenceNo} 问 · {turnKindLabel(turn)}
-                    </span>
+                    <span>第 {turn.sequenceNo} 问</span>
                     <span>{turnStatusLabel(turn)}</span>
                   </div>
                   <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-stone-900">

@@ -53,11 +53,6 @@ export function RehearsalStart({
             留空则使用默认的好奇学生画像。画像只影响提问视角，不改变演练规则。
           </p>
 
-          {disabledReason && (
-            <div className="mt-3 rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600" role="status">
-              {disabledReason}
-            </div>
-          )}
           {error && (
             <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               {error}
@@ -73,6 +68,11 @@ export function RehearsalStart({
             {isStarting && <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />}
             {isStarting ? '正在准备演练…' : '开始演练'}
           </button>
+          {disabledReason && (
+            <p className="mt-2 text-center text-xs leading-5 text-stone-500" role="status">
+              {disabledReason}
+            </p>
+          )}
         </div>
 
         <p className="mt-3 text-center text-xs text-stone-400">

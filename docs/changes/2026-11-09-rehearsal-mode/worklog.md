@@ -12,7 +12,7 @@ created_at: 2026-11-09
 在 `feat/rehearsal-mode` 分支实现：
 
 - Backend：migration、Rehearsal 实体字段、`LlmService.generate()`、`ConversationsService.getRestorableHistory()` / `mergeUserMessageContextRefs()`、Rehearsals 状态机/Controller/DTO、普通对话 digest 注入、快照清洗、测试。
-- Desktop：演练 API/store、开始页、答题/逐题评估、报告、历史列表/只读详情、普通对话卡片，以及 `AgentChatPage` 接入。
+- Desktop：演练 API/store、开始页、答题/逐题评估、报告、历史列表/只读详情、普通对话卡片，以及 `AgentChatPage` 接入；开始按钮只在普通对话存在 completed user + assistant round 后启用，提示文案位于按钮下方。
 - Docs：current 演练领域页、Agent Runtime / 架构 / Conversation 页面、manifest 与 change 记录。
 
 ## 关键实现点
@@ -23,6 +23,8 @@ created_at: 2026-11-09
 - 报告完成写 transcript；普通对话每轮注入最近 3 次 completed 摘要，`contextRefsJson.rehearsals` 通过合并写入。
 - 历史列表只返回摘要并分页；详情复用单次读取；进行中记录置顶，浏览历史不卸载 session。
 - 每个 Rehearsal 使用进程内 run registry 串行化；`end` abort 进行中的 `generate()` 并等待退出；迟到结果通过状态/run token 丢弃。
+- 零回答结束先由 UI 确认，再调用 `DELETE /api/rehearsals/:id` 丢弃；有回答时丢弃返回 409。
+- 回答问题在提交时落库；重启后 `latest` 恢复题面/历史回答，未完成评估显示已保存回答并允许用同一回答 + 新请求键重试；无活跃 run 的 `evaluating`/`preparing_next` 立即 reconciliation。
 - migration 使用部分唯一索引保证同一 conversation 最多一个活跃 Rehearsal。
 
 ## 与设计的偏差与修正
@@ -46,7 +48,7 @@ created_at: 2026-11-09
 | 命令 | 结果 |
 |---|---|
 | `npm run build --workspace @teachforge/backend` | PASS |
-| `npm run test:rehearsal --workspace @teachforge/backend` | PASS 7/7 |
+| `npm run test:rehearsal --workspace @teachforge/backend` | PASS 10/10 |
 | `npm run test:session-entries --workspace @teachforge/backend` | PASS 4/4 |
 | `npm run test:agent-stream --workspace @teachforge/backend` | PASS 8/8 |
 | `npm run test:chat-attachments --workspace @teachforge/backend` | PASS 5/5 |
@@ -54,7 +56,7 @@ created_at: 2026-11-09
 | `npm run test:conversation-delete --workspace @teachforge/backend` | PASS 2/2 |
 | `npm run test:knowledge-context --workspace @teachforge/backend` | PASS 11/11 |
 | `npm run build --workspace @teachforge/desktop` | PASS |
-| `npm run test:rehearsal --workspace @teachforge/desktop` | PASS 3/3 |
+| `npm run test:rehearsal --workspace @teachforge/desktop` | PASS 6/6 |
 
 真实 Provider smoke（DeepSeek，临时 SQLite + 真实 config）：
 

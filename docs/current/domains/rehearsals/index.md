@@ -22,7 +22,7 @@ last_verified: 2026-11-09
 
 ### 开始与上下文
 
-- 开始前必须存在普通对话历史：至少一条已完成 user 行和一条已完成 assistant 行；存在 `pending` 普通行时返回 409。
+- 开始前必须存在普通对话历史：至少一条已完成 user 行和一条已完成 assistant 行；存在 `pending` 普通行时返回 409。桌面端只有在当前 thread 出现 completed user + assistant round 后启用「开始演练」；否则按钮置灰，并在按钮下方提示先完成一轮普通对话。
 - `ConversationsService.getRestorableHistory(conversationId, upToSequenceNo?)` 只读地投影可恢复历史，并返回 `{ history, maxSequenceNo }`；不创建 turn、不写消息。
 - 开场规划调用复用父会话的 Pi 快照（含 compaction），但 `LlmService.generate()` 不保存快照；没有快照或快照落后时按 SQLite 重建。规划输出 `topic`、`learningSummary`、3–8 个知识点和第一道基础题。
 - 后续答题、跳过和报告调用只带 `learningSummary + plan + 已有问答 + 当前状态`，不再重复注入完整普通历史。
@@ -61,6 +61,7 @@ stateDiagram-v2
 - 总提问数上限 15，包含基础题、追问和跳过；`askedQuestionCount` 在题目展示时计数。
 - 同一基础题最多 2 次追问；`followUpDepth` 为 0/1/2，第 2 次追问之后后端强制下一基础题。
 - 跳过不评估、不追问，消耗 1 个名额且不返还；第 15 问被跳过时直接完成。
+- 一题未答就点「结束演练」时，桌面端先确认；确认后调用 `DELETE /api/rehearsals/:id` 丢弃本次演练（删除 Rehearsal/Turn 与已有 transcript），不生成空报告。
 - 模型动作只有 `follow_up` / `next_question`；模型返回 `complete` 会被当作下一题处理，结束只由用户或 15 上限触发。
 - 计数从 `rehearsal_turns` 派生并写回 `rehearsals`，不信任模型返回值。
 
@@ -96,12 +97,14 @@ stateDiagram-v2
 - 回答评估失败：turn 转 `failed`，rehearsal 回 `awaiting_answer`；同一 `answerRequestId` 可重试。
 - 跳过生成失败：turn 保持 `skipped`，rehearsal 保持 `preparing_next`；同一 `turnId` 可重试。
 - 报告失败：rehearsal 转 `failed`，保留逐题数据；重试 `end`。
-- 进程中断后，读取时只 reconciliation“无活跃 run 且超过 120 秒”的行：`evaluating`/`preparing_next` 回 `awaiting_answer`，`preparing`/`reporting` 转 `failed`。
+- 进程中断后，读取时 reconciliation 无活跃 run 的行：`evaluating`/`preparing_next` 立即回 `awaiting_answer`，`reporting` 立即转 `failed`；`preparing` 等 120 秒后转 `failed`，避免误伤仍在进行的开场规划。
+- 回答在提交时已写入 `rehearsal_turns.answer`；重启后 `latest` 会恢复题面与历史问答。若上次评估未完成，桌面端显示已保存回答与「重试评估」，用同一回答 + 新请求键继续，不重复创建 turn。
 - 每个 Rehearsal 在进程内串行；`end` 会 abort 进行中的模型调用并等待其退出，迟到结果不写入。
 
 ## 当前边界
 
 - 报告生成失败时，历史和报告页只显示逐题数据，不伪造总体结论。
+- 零回答结束走丢弃，不产生报告；已有回答时丢弃返回 409。
 - 普通对话 digest 每轮重复注入，token 成本随最近 3 次报告长度增长；完整原文留在 transcript。
 - 开场复用父 Pi 快照时，模型可能延续普通对话语气；system prompt 已强制角色切换，但仍需真实长对话验收。
 - v1 使用 JSON 请求/响应，不做 SSE；没有跨会话演练历史、报告导出、人工重评或计划编辑。

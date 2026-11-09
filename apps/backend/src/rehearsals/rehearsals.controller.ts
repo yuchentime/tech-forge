@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -174,6 +175,20 @@ export class RehearsalsController {
   ): Promise<RehearsalDetailView> {
     const requestId = randomUUID();
     return this.rehearsals.end(rehearsalId, {
+      requestId,
+      rehearsalId,
+    });
+  }
+
+  /** Discards a rehearsal with no answers after the user confirms ending. */
+  @Delete(':rehearsalId')
+  @HttpCode(HttpStatus.OK)
+  discard(
+    @Param('rehearsalId', new ParseUUIDPipe({ version: '4' }))
+    rehearsalId: string,
+  ): Promise<{ rehearsalId: string; discarded: true }> {
+    const requestId = randomUUID();
+    return this.rehearsals.discard(rehearsalId, {
       requestId,
       rehearsalId,
     });

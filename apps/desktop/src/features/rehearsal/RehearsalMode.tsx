@@ -1,4 +1,4 @@
-import { CircleNotch } from '@phosphor-icons/react';
+import { CircleNotch, ListBullets } from '@phosphor-icons/react';
 import { useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
 import { RehearsalHistory } from './RehearsalHistory';
@@ -44,29 +44,69 @@ export function RehearsalMode({
     );
   }
 
-  const completedCount =
-    state.history?.counts.completed ??
-    (state.detail?.status === 'completed' ? 1 : 0);
+  const answeredCount =
+    state.detail?.turns.filter((turn) => Boolean(turn.answer?.trim())).length ??
+    0;
+  const showEndAction =
+    state.view === 'session' &&
+    state.detail !== null &&
+    ['preparing', 'awaiting_answer', 'evaluating', 'preparing_next'].includes(
+      state.detail.status,
+    );
+  const handleEnd = (): void => {
+    const detail = state.detail;
+    if (!detail) return;
+    const hasAnswers = detail.turns.some((turn) =>
+      Boolean(turn.answer?.trim()),
+    );
+    if (!hasAnswers) {
+      if (
+        window.confirm(
+          '还没有回答任何问题。结束后本次演练会被丢弃，确定吗？',
+        )
+      ) {
+        void rehearsalStore.discard();
+      }
+      return;
+    }
+    if (window.confirm('结束后会生成评估，当前题不能再回答。确定结束吗？')) {
+      void rehearsalStore.end();
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-3 pb-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="rounded-full bg-emerald-800 px-2 py-0.5 text-[11px] font-semibold text-white">
-            演练
-          </span>
-          <p className="truncate text-xs text-stone-500">
-            AI 扮演学生向你提问；回答后先评估，再决定追问或换题。
-          </p>
+        <div className="min-w-0">
+          {state.view === 'session' && state.detail ? (
+            <p className="text-sm font-medium text-stone-700">
+              已回答 {answeredCount}/{state.detail.progress.limit} 题
+            </p>
+          ) : (
+            <p className="text-sm font-medium text-stone-500">演练</p>
+          )}
         </div>
-        <button
-          className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
-          onClick={() => void rehearsalStore.openHistory()}
-          type="button"
-        >
-          历史演练
-          {completedCount > 0 ? ` (${completedCount})` : ''}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {showEndAction && (
+            <button
+              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={state.isEnding}
+              onClick={handleEnd}
+              type="button"
+            >
+              {state.isEnding ? '处理中…' : '结束演练'}
+            </button>
+          )}
+          <button
+            aria-label="历史演练"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            onClick={() => void rehearsalStore.openHistory()}
+            title="历史演练"
+            type="button"
+          >
+            <ListBullets aria-hidden className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {state.error && (
@@ -154,7 +194,6 @@ export function RehearsalMode({
             isEnding={state.isEnding}
             isSubmitting={state.isSubmitting}
             onAnswer={(answer) => void rehearsalStore.answer(answer)}
-            onEnd={() => void rehearsalStore.end()}
             onRetryAnswer={() => void rehearsalStore.retryAnswer()}
             onRetrySkip={() => void rehearsalStore.retrySkip()}
             onSkip={() => void rehearsalStore.skip()}

@@ -34,13 +34,6 @@ export function assessmentTone(level: AssessmentLevel): string {
   return 'bg-stone-100 text-stone-700';
 }
 
-/** Returns the Chinese label for a turn kind and follow-up depth. */
-export function turnKindLabel(turn: RehearsalTurn): string {
-  return turn.kind === 'follow_up'
-    ? `追问 ${turn.followUpDepth}/2`
-    : '基础题';
-}
-
 /** Returns the Chinese label for a rehearsal end reason. */
 export function endReasonLabel(reason: RehearsalEndReason | null): string {
   if (reason === 'manual') return '手动结束';

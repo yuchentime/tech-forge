@@ -20,6 +20,7 @@
     "src/features/agent/conversation-history.ts",
     "src/features/agent/tool-activity-label.ts",
     "src/features/rehearsal/rehearsal-api.ts",
+    "src/features/rehearsal/rehearsal-availability.ts",
     "src/features/rehearsal/rehearsal-store.ts"
   ]
 }

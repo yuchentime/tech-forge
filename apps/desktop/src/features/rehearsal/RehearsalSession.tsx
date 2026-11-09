@@ -4,7 +4,6 @@ import type { RehearsalDetail } from './rehearsal-api';
 import {
   assessmentLabel,
   assessmentTone,
-  turnKindLabel,
   turnStatusLabel,
 } from './rehearsal-ui-utils';
 
@@ -17,7 +16,6 @@ export function RehearsalSession({
   pendingAnswer,
   onAnswer,
   onSkip,
-  onEnd,
   onRetryAnswer,
   onRetrySkip,
 }: {
@@ -28,7 +26,6 @@ export function RehearsalSession({
   pendingAnswer: { turnId: string; answer: string; requestId: string } | null;
   onAnswer: (answer: string) => void;
   onSkip: () => void;
-  onEnd: () => void;
   onRetryAnswer: () => void;
   onRetrySkip: () => void;
 }) {
@@ -63,33 +60,10 @@ export function RehearsalSession({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 pb-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-stone-900">
-            {detail.topic || '演练进行中'}
-          </h2>
-          <p className="mt-0.5 text-xs text-stone-500">
-            已提问 {detail.progress.asked}/{detail.progress.limit}
-            {detail.progress.currentFollowUpDepth > 0
-              ? ` · 本题追问 ${detail.progress.currentFollowUpDepth}/2`
-              : ''}
-            {detail.progress.skipped > 0
-              ? ` · 跳过 ${detail.progress.skipped}`
-              : ''}
-          </p>
-        </div>
-        <button
-          className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
-          disabled={busy}
-          onClick={() => {
-            if (window.confirm('结束后会生成评估，当前题不能再回答。确定结束吗？')) {
-              onEnd();
-            }
-          }}
-          type="button"
-        >
-          {isEnding ? '正在生成评估…' : '结束演练'}
-        </button>
+      <div className="shrink-0 pb-3">
+        <h2 className="truncate text-sm font-semibold text-stone-900">
+          {detail.topic || '演练进行中'}
+        </h2>
       </div>
 
       <div
@@ -106,9 +80,7 @@ export function RehearsalSession({
             key={turn.turnId}
           >
             <div className="flex items-center justify-between gap-3 text-xs text-stone-500">
-              <span>
-                第 {turn.sequenceNo} 问 · {turnKindLabel(turn)}
-              </span>
+              <span>第 {turn.sequenceNo} 问</span>
               <span>{turnStatusLabel(turn)}</span>
             </div>
             <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-stone-900">
@@ -149,7 +121,7 @@ export function RehearsalSession({
         )}
       </div>
 
-      {answerError && (
+      {answerError && !pendingAnswer && (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
           <span className="min-w-0 flex-1">{answerError}</span>
           {pendingAnswer && (
@@ -166,7 +138,25 @@ export function RehearsalSession({
       )}
 
       <div className="mt-3 shrink-0 border-t border-stone-200 pt-3">
-        {needsNextQuestion ? (
+        {pendingAnswer ? (
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-medium">上次回答已保存，但评估没有完成。</p>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-800">
+              “{pendingAnswer.answer}”
+            </p>
+            {answerError && (
+              <p className="mt-1 text-xs text-rose-700">{answerError}</p>
+            )}
+            <button
+              className="mt-2 rounded-lg bg-amber-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              disabled={isSubmitting}
+              onClick={onRetryAnswer}
+              type="button"
+            >
+              {isSubmitting ? '正在重试…' : '重试评估'}
+            </button>
+          </div>
+        ) : needsNextQuestion ? (
           <div className="flex items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600">
             <span>下一题还没有生成成功。</span>
             <button
@@ -210,7 +200,6 @@ export function RehearsalSession({
                 >
                   跳过此题
                 </button>
-                <span className="text-xs text-stone-400">跳过消耗 1 个名额</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-stone-400">Ctrl + Enter 提交</span>

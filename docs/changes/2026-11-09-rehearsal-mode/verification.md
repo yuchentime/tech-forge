@@ -137,7 +137,7 @@ npm run test:conversation-history --workspace @teachforge/desktop
 | 项 | 命令 | 结果 | 备注 |
 |---|---|---|---|
 | 后端构建 | `npm run build --workspace @teachforge/backend` | PASS | `nest build` 无错误 |
-| 演练状态机 / 限额 / 历史 / digest | `npm run test:rehearsal --workspace @teachforge/backend` | PASS 7/7 | start 幂等、追问上限、15 问完成、手动结束、第 15 问跳过、answer 重放、context refs 合并 |
+| 演练状态机 / 限额 / 历史 / digest | `npm run test:rehearsal --workspace @teachforge/backend` | PASS 10/10 | start 幂等、追问上限、15 问完成、手动结束、第 15 问跳过、answer 重放、零回答结束/丢弃、重启恢复、context refs 合并 |
 | 快照清洗 | `npm run test:session-entries --workspace @teachforge/backend` | PASS 4/4 | string/text-block、历史行映射、注入标题兜底 |
 | Agent stream 回归 | `npm run test:agent-stream --workspace @teachforge/backend` | PASS 8/8 | 含 workspace-file-tools；macOS tmpdir realpath 修正 |
 | 会话附件回归 | `npm run test:chat-attachments --workspace @teachforge/backend` | PASS 5/5 | context refs 合并未破坏附件 |
@@ -145,10 +145,10 @@ npm run test:conversation-history --workspace @teachforge/desktop
 | 会话删除回归 | `npm run test:conversation-delete --workspace @teachforge/backend` | PASS 2/2 | |
 | 知识库上下文回归 | `npm run test:knowledge-context --workspace @teachforge/backend` | PASS 11/11 | |
 | 桌面构建 | `npm run build --workspace @teachforge/desktop` | PASS | Electron tsc + renderer tsc + Vite build |
-| 桌面演练 store | `npm run test:rehearsal --workspace @teachforge/desktop` | PASS 3/3 | 恢复、历史、answer/end/start、失败重试复用 request id |
+| 桌面演练 store | `npm run test:rehearsal --workspace @teachforge/desktop` | PASS 6/6 | 恢复、历史、answer/end/start、失败重试、开始按钮完成轮次、零回答丢弃、重启后待评估回答重试 |
 | 真实 Provider smoke | 本地 backend + DeepSeek，API 直达 | PASS | 开始生成 7 个知识点与首题；回答返回 partial + 追问；手动结束生成总体报告；历史列表 `completed=1`；latest 返回报告 |
 | 普通对话 digest | 同一 conversation 调 `/api/chat/stream` | PASS | 模型回答引用演练薄弱点；`contextRefsJson.rehearsals` 写入；快照最终不含 digest 标题 |
-| SQLite 检查 | `PRAGMA table_info` / 行查询 | PASS | migration 字段、部分唯一索引、父 `messages` 未被演练写入、历史注入块被清理 |
+| SQLite 检查 | `PRAGMA table_info` / 行查询 | PASS | migration 字段、部分唯一索引、父 `messages` 未被演练写入、历史注入块被清理；零回答 discard 后 Rehearsal/Turn 计数为 0 |
 
 残留风险：
 

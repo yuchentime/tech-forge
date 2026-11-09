@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { RehearsalStore } = require('../dist-electron/src/features/rehearsal/rehearsal-store.js');
+const {
+  hasCompletedConversationRound,
+} = require('../dist-electron/src/features/rehearsal/rehearsal-availability.js');
 
 const PLAN = {
   topic: '金字塔原理',
@@ -130,6 +133,13 @@ const completedDetail = detail({
   endedAt: '2026-11-09T12:03:00.000Z',
 });
 
+const restoredDetail = detail({
+  currentQuestion: question('t1', '请解释结论先行。'),
+  turns: [
+    turn('t1', '请解释结论先行。', 'answer_saved', '重启前保存的回答。'),
+  ],
+});
+
 const historySummary = {
   rehearsalId: 'r2',
   status: 'completed',
@@ -201,6 +211,12 @@ function installBridge() {
             },
           };
         }
+        if (method === 'DELETE' && path === '/api/rehearsals/r1') {
+          return {
+            status: 200,
+            data: { rehearsalId: 'r1', discarded: true },
+          };
+        }
         if (method === 'GET' && path === '/api/rehearsals/r2') {
           return {
             status: 200,
@@ -222,6 +238,36 @@ function installBridge() {
   };
   return requests;
 }
+
+test('a drill requires a user message followed by a completed assistant answer', () => {
+  assert.equal(hasCompletedConversationRound([]), false);
+  assert.equal(
+    hasCompletedConversationRound([{ role: 'user' }]),
+    false,
+  );
+  assert.equal(
+    hasCompletedConversationRound([
+      { role: 'user' },
+      { role: 'assistant', status: { type: 'running' } },
+    ]),
+    false,
+  );
+  assert.equal(
+    hasCompletedConversationRound([
+      { role: 'user' },
+      { role: 'assistant', status: { type: 'incomplete' } },
+    ]),
+    false,
+  );
+  assert.equal(
+    hasCompletedConversationRound([
+      { role: 'assistant', status: { type: 'complete' } },
+      { role: 'user' },
+      { role: 'assistant', status: { type: 'complete' } },
+    ]),
+    true,
+  );
+});
 
 test('the store restores an active drill and keeps it while browsing history', async () => {
   const requests = installBridge();
@@ -311,4 +357,43 @@ test('an answer failure keeps the same request id for a retry', async () => {
   assert.equal(state.detail.currentQuestion.turnId, 't2');
   assert.equal(attempts, 2);
   assert.equal(requestId.length > 0, true);
+});
+
+test('a saved answer is restored as a pending evaluation and retried', async () => {
+  installBridge();
+  const baseRequest = global.window.teachforge.request;
+  let latestCalls = 0;
+  global.window.teachforge.request = async (input) => {
+    if (
+      input.method === 'GET' &&
+      input.path === '/api/conversations/c1/rehearsals/latest'
+    ) {
+      latestCalls += 1;
+      return { status: 200, data: restoredDetail };
+    }
+    return baseRequest(input);
+  };
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+  let state = store.getSnapshot();
+  assert.equal(state.view, 'session');
+  assert.equal(state.pendingAnswer.answer, '重启前保存的回答。');
+  assert.equal(state.pendingAnswer.turnId, 't1');
+
+  await store.retryAnswer();
+  state = store.getSnapshot();
+  assert.equal(state.pendingAnswer, null);
+  assert.equal(state.detail.currentQuestion.turnId, 't2');
+  assert.equal(latestCalls, 1);
+});
+
+test('discarding a zero-answer rehearsal returns to the start view', async () => {
+  installBridge();
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+  await store.discard();
+  const state = store.getSnapshot();
+  assert.equal(state.detail, null);
+  assert.equal(state.view, 'start');
+  assert.equal(state.isEnding, false);
 });

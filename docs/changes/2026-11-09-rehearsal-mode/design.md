@@ -128,7 +128,7 @@ sequenceDiagram
 
 - 顶部保留「普通对话 / 演练模式」切换。
 - 主区域显示演练说明、可选「学生画像」文本框、居中最高视觉级别的「开始演练」。
-- 当前 conversation 没有任何已完成 user + assistant 消息时，按钮禁用，提示：「先进行一轮普通对话，演练会基于当前学习内容出题。」
+- 当前 conversation 没有 completed user + assistant round 时，按钮禁用，并在按钮下方显示一行提示：「先进行一轮普通对话，演练会基于当前学习内容出题。」正在生成、失败或取消的回答都不算完成一轮。
 - 已存在进行中 Rehearsal 时，不显示开始表单，直接恢复最近一题，并显示「结束并重新开始」。
 - 已存在已完成报告但没有进行中演练时，显示最近一次报告；底部提供「继续演练」与「重新开始」。
 - 学生画像占位符：
@@ -137,11 +137,11 @@ sequenceDiagram
 
 ### 4.3 答题页
 
-- 顶部：主题、`已提问 N/15`、`本题追问 D/2`。
+- 顶部：`已回答 N/15 题` 进度；右侧红色「结束演练」在历史演练列表图标左侧；主题放在答题区标题。
 - 消息区：按顺序展示历史问题、回答、本题评估；当前问题固定在底部。
-- 回答区：多行文本框、`提交回答`（主按钮）、`跳过此题`（次要）、`结束演练`（次要，带确认）。
+- 回答区：多行文本框、`提交回答`（主按钮）、`跳过此题`（次要）；`结束演练`移到模式页头。
 - 提交后：显示「正在评估你的回答…」；收到结果后先显示本题评估，再出现下一题或报告。
-- 新题出现后自动聚焦回答框；提交中禁用提交/跳过；`结束演练`始终可用。
+- 新题出现后自动聚焦回答框；提交中禁用提交/跳过；模式页头的`结束演练`始终可用。
 - 空回答不允许提交；长度上限 5000 字符。
 
 ### 4.4 报告页
@@ -162,7 +162,7 @@ sequenceDiagram
 
 ### 4.6 历史演练
 
-- 演练模式页头提供「历史演练」入口，带已完成演练数量角标。
+- 演练模式页头提供列表图标「历史演练」入口，鼠标经过高亮；不显示数量角标，列表页展示总数。
 - 打开后显示当前 conversation 的演练列表，按时间倒序：
   - 时间、主题、状态（进行中 / 已完成 / 报告失败）、结束原因（手动 / 达到上限）。
   - 进度：已提问数、基础题数、跳过数。
@@ -645,12 +645,12 @@ TypeORM Entity 同步新增字段；`database.options.ts` 已注册两个 Entity
 
 规则：
 
-- `counts` 是当前 conversation 的全量计数，不受 `status` / `limit` / `cursor` 影响；UI 角标用 `counts.completed`。
+- `counts` 是当前 conversation 的全量计数，不受 `status` / `limit` / `cursor` 影响；UI 历史页用 `counts.completed` 展示已完成数量。
 - `preparing` 阶段 `topic`、`startedAt` 可为 `null`；`endedAt`、`endReason` 仅在 `completed` / `failed` 时存在。
 - 排序 `createdAt DESC, id DESC`；`nextCursor` 为 `null` 表示没有更早记录。
 - 只返回摘要字段；不返回 `turns`、`plan`、完整 `overallEvaluationJson`。
 - `overallSummary` 取 `overallEvaluationJson.summary` 的前 200 字符；报告失败或未生成时为 `null`。
-- `status=all` 时进行中演练也会出现在列表；UI 负责置顶/分组。列表读取时对“过期且当前进程没有活跃 run”的行执行 reconciliation，避免长时间停留在 `evaluating`，同时不能干扰正在执行的请求。
+- `status=all` 时进行中演练也会出现在列表；UI 负责置顶/分组。列表读取时对没有活跃 run 的进行中行执行 reconciliation；`evaluating`/`preparing_next`/`reporting` 立即恢复，`preparing` 仍需超过 stale 阈值。
 - `cursor` 必须属于当前 conversation；跨会话或无法解析的 cursor 返回 400。
 - 404：conversation 不存在；400：`limit` 非法或 cursor 无法解析。
 
@@ -759,12 +759,20 @@ TypeORM Entity 同步新增字段；`database.options.ts` 已注册两个 Entity
 行为：
 
 1. 若已完成，直接返回已有报告。
-2. 若正在 `reporting`，返回 `409`（报告生成中）；若正在 `evaluating` 或 `preparing_next`，中止进行中的模型调用，等待其退出。
+2. 若没有任何已提交回答，返回 `409`，要求改用丢弃接口；若正在 `reporting`，返回 `409`（报告生成中）；若正在 `evaluating` 或 `preparing_next`，中止进行中的模型调用，等待其退出。
 3. 保存当前可用的逐题评估，把 `awaiting_answer` 的题标为 `unanswered`，把 `answer_saved` / `failed` 的题标为未完成评估。
 4. 转 `status='reporting'`，生成总体报告；成功后写 `completed` / `endedAt` / `endReason` 并写 transcript；失败则转 `failed`、`endReason='failed'`，保留逐题数据，允许重试 `end`。
 5. 返回 `{ status: 'completed', report, turns, progress }`；失败时返回安全错误。
 
-### 8.8 错误与并发约定
+### 8.8 丢弃
+
+`DELETE /api/rehearsals/:rehearsalId`
+
+- 用户一题未答就结束演练，确认后调用此接口。
+- abort 并等待进行中的调用；任一 turn 已有非空回答时返回 `409`；否则删除 Rehearsal 与 turns、删除已有 transcript。记录不存在时幂等成功。
+- 响应：`{ rehearsalId, discarded: true }`。
+
+### 8.9 错误与并发约定
 
 错误响应沿用现有 Nest 异常 + 安全中文 message；不返回 prompt、回答、评估原文。建议文案：
 
@@ -874,12 +882,12 @@ async generate(prompt: string, options: LlmGenerateOptions = {}): Promise<string
 
 ### 10.4 答题页
 
-- 顶部进度：`已提问 {asked}/15`；当前题若是追问，显示 `本题追问 {depth}/2`。
+- 顶部显示 `已回答 N/15 题`；右侧红色「结束演练」在历史演练列表图标左侧，历史图标 hover 高亮；不在正文重复已提问/追问计数。
 - 历史问答使用普通文本卡片，不引入新的 Markdown 依赖；题目与回答保留换行。
 - 当前题突出显示；回答框自动聚焦。
 - 「提交回答」主按钮；`Ctrl+Enter` 提交，避免误发。
-- 「跳过此题」需要确认吗？不需要；但按钮旁显示「跳过消耗 1 个名额」。
-- 「结束演练」始终可点；点击后确认「结束后会生成评估，不能再回答当前题」。
+- 「跳过此题」不需要确认；按钮旁不显示名额消耗说明，减少阅读干扰。
+- 「结束演练」在模式页头；点击后按是否有回答确认生成评估，或零回答时确认丢弃。
 - 评估/生成中：显示 spinner + 「正在评估你的回答…」或「学生正在思考下一题…」；禁用提交/跳过。
 - 错误：在回答框上方显示 inline alert，保留用户输入；「重试」复用同一 `answerRequestId`。
 - 新题到达后滚动到底部并聚焦回答框。
@@ -908,7 +916,7 @@ async generate(prompt: string, options: LlmGenerateOptions = {}): Promise<string
 
 ### 10.7 历史演练
 
-- 入口：演练模式页头的「历史演练」按钮，显示当前 conversation 已完成演练数量角标；普通对话卡片也提供「查看历史演练」，点击后切到演练模式并打开历史列表。
+- 入口：演练模式页头的列表图标按钮，`aria-label`/`title` 为「历史演练」，鼠标经过高亮；普通对话卡片也提供「查看历史演练」，点击后切到演练模式并打开历史列表。
 - 列表数据来自 `GET /api/conversations/:conversationId/rehearsals?limit=20&status=all`；列表只取摘要，点击某条后才请求 `GET /api/rehearsals/:id` 读取完整详情。
 - 列表分组：
   - 进行中：置顶，显示当前题/准备中、进度、`继续`；点击回到 `session`，不新建、不覆盖。
@@ -923,7 +931,7 @@ async generate(prompt: string, options: LlmGenerateOptions = {}): Promise<string
 - 分页：列表底部「加载更早」使用 `nextCursor`；加载中禁用；没有更多时隐藏。
 - 空状态：「还没有已完成的演练」；加载失败显示 inline alert + 重试。
 - 切换 conversation 时清空历史列表和选中项；历史不跨会话。
-- 无障碍：列表项使用按钮/链接语义，当前选中项 `aria-current="page"`；角标有可读文本（例如 `aria-label="历史演练，3 条"`）；打开详情后焦点移到报告标题。
+- 无障碍：历史入口图标有可读文本（`aria-label`/`title`）；列表项使用按钮/链接语义，当前选中项 `aria-current="page"`；打开详情后焦点移到报告标题。
 
 ### 10.8 无障碍与文案
 
@@ -958,11 +966,12 @@ async generate(prompt: string, options: LlmGenerateOptions = {}): Promise<string
 - 当前 turn：
   - `awaiting_answer` → 标 `unanswered`；报告把它列为「未作答」。
   - `answer_saved`/`failed` → 标「未完成评估」，报告不将其计入掌握度。
-- 报告只使用 `evaluated` 的 turn；没有有效回答时返回确定性报告（不调用模型）：「本次没有足够回答证据，无法评估掌握情况。」
+- 报告只使用 `evaluated` 的 turn；有回答但没有有效评估时返回确定性报告（不调用模型）：「本次没有足够回答证据，无法评估掌握情况。」
+- 一题未答就结束：UI 确认后调用 `DELETE /api/rehearsals/:id` 丢弃，不生成空报告；`end` 在零回答时返回 409。
 
 ### 11.3 进程中断恢复
 
-应用启动或首次读取 Rehearsal 时执行 reconciliation。只处理“当前进程没有活跃 run”且 `updatedAt` 超过 stale 阈值（建议 120 秒，大于模型 90 秒超时）的行；有活跃 run 时跳过，避免把正在评估的请求误判为中断：
+应用启动或首次读取 Rehearsal 时执行 reconciliation。有活跃 run 时跳过；`evaluating`/`preparing_next`/`reporting` 在没有活跃 run 时立即恢复，`preparing` 等 `updatedAt` 超过 stale 阈值（120 秒，大于模型 90 秒超时）再失败，避免误伤没有 lease 的开场规划：
 
 | 遗留状态 | 恢复动作 |
 |---|---|
@@ -1012,10 +1021,12 @@ reconciliation 不跨进程持有锁；它只做条件更新，失败时下次�
 | B11 | 同一 `answerRequestId` 重放 | 返回首次结果；无重复 turn |
 | B12 | 同一 turn 并发回答 | 一个 200，一个 409 |
 | B13 | 模型 JSON 非法 | 重试一次；仍失败返回 422；答案保留 |
-| B14 | 进程在 `evaluating` 中断 | 重启后回 `awaiting_answer`/`answer_saved`；可重试 |
+| B14 | 进程在 `evaluating` 中断 | 重启后立即回 `awaiting_answer`；`answer_saved` 保留回答；可用同一回答 + 新请求键重试 |
 | B15 | 报告完成后普通对话下一轮 | `promptContext` 含 digest；`contextRefsJson.rehearsals` 有记录；快照 user 消息为纯用户文本 |
 | B16 | 继续演练 | 新 Rehearsal；规划 prompt 含上一批摘要与最新普通消息 |
 | B17 | 删除 conversation | Rehearsal/Turn 行删除；transcript 随 session 目录删除；无 FK 错误 |
+| B27 | 零回答结束 | `end` 返回 409；`DELETE` 丢弃 Rehearsal/Turn/transcript |
+| B28 | 已有回答时丢弃 | `DELETE` 返回 409，保留回答 |
 | B18 | digest 超长 | 最近一次完整、较早压缩、总长度 ≤6000 字符 |
 | B19 | 同一 conversation 并发开始 | 一个成功，一个 409 |
 | B20 | 画像超长 | 422；不落库 |
@@ -1024,7 +1035,7 @@ reconciliation 不跨进程持有锁；它只做条件更新，失败时下次�
 | B23 | 历史详情 | `GET /api/rehearsals/:id` 返回完整 turns、逐题评估、总体报告、画像与计划 |
 | B24 | 历史范围 | 不返回其他 conversation 的演练；404 conversation 不存在 |
 | B25 | 历史状态筛选 | `status=active/completed/failed` 只返回对应状态；`all` 包含进行中 |
-| B26 | 列表读取恢复 | 遗留 `evaluating` 在列表读取时被 reconciliation，不长期挂在「进行中」 |
+| B26 | 列表读取恢复 | 无活跃 run 的 `evaluating` 立即回 `awaiting_answer`；`preparing` 未超过 120 秒不误判 |
 
 ### 13.2 桌面端
 
@@ -1042,7 +1053,9 @@ reconciliation 不跨进程持有锁；它只做条件更新，失败时下次�
 | U10 | 提交中 | 提交/跳过禁用；结束仍可点 |
 | U11 | 键盘 | `Ctrl+Enter` 提交；新题后焦点回到回答框 |
 | U12 | 无障碍 | 进度/评估等级有文字；loading/error 有 aria-live/alert |
-| U13 | 历史入口 | 演练页头显示「历史演练」与数量角标；普通对话卡片可跳转 |
+| U13 | 历史入口 | 演练页头显示列表图标（aria-label/title 历史演练），hover 高亮；普通对话卡片可跳转 |
+| U19 | 零回答结束 | 先确认「本次演练会被丢弃」，确认后回到开始页 |
+| U20 | 重启恢复 | 进入演练模式恢复题面/历史回答；未完成评估显示已保存回答与重试 |
 | U14 | 历史列表 | 进行中置顶；已完成显示主题/时间/结束原因/摘要；报告失败显示「报告未完成」 |
 | U15 | 历史详情 | 打开只读报告，展示完整问答、逐题评估、总体评估；无回答框/跳过/结束 |
 | U16 | 浏览历史不打断演练 | 进行中时打开历史再返回，当前题、输入、提交中状态保留 |

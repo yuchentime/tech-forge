@@ -50,6 +50,7 @@ import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { RehearsalDigestCard } from '../rehearsal/RehearsalDigestCard';
+import { hasCompletedConversationRound } from '../rehearsal/rehearsal-availability';
 import { RehearsalMode } from '../rehearsal/RehearsalMode';
 import { rehearsalStore } from '../rehearsal/rehearsal-store';
 import { SettingsPage } from '../settings/SettingsPage';
@@ -94,7 +95,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     () => agentEventBus.getSnapshotForThread(threadListState.mainThreadId),
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const isThreadEmpty = useAuiState((state) => state.thread.isEmpty);
+  const hasCompletedRound = useAuiState((state) =>
+    hasCompletedConversationRound(state.thread.messages),
+  );
   const artifactTabs = useSyncExternalStore(
     artifactTabsStore.subscribe,
     artifactTabsStore.getSnapshot,
@@ -716,7 +719,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               >
                 <RehearsalMode
                   conversationId={conversationState.activeConversationId}
-                  hasHistory={!isThreadEmpty}
+                  hasHistory={hasCompletedRound}
                   onExitToChat={() =>
                     setConversationDisplayMode('conversation')
                   }

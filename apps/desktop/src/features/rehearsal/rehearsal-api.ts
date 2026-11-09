@@ -147,7 +147,7 @@ export interface RehearsalTurnResult {
 /** One JSON request through the protected desktop bridge. */
 async function request<T>(
   path: string,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
   if (!hasDesktopBridge()) {
@@ -232,4 +232,11 @@ export function skipRehearsal(
 /** Ends the rehearsal and returns the completed detail. */
 export function endRehearsal(rehearsalId: string): Promise<RehearsalDetail> {
   return request(`/api/rehearsals/${rehearsalId}/end`, 'POST');
+}
+
+/** Discards a rehearsal with no answers after the user confirms ending. */
+export function discardRehearsal(
+  rehearsalId: string,
+): Promise<{ rehearsalId: string; discarded: true }> {
+  return request(`/api/rehearsals/${rehearsalId}`, 'DELETE');
 }

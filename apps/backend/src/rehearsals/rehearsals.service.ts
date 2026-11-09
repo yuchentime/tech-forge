@@ -10,7 +10,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DataSource, In, type EntityManager } from 'typeorm';
 import {
@@ -454,10 +454,12 @@ export class RehearsalsService {
         return this.toAnswerResult(rehearsal, turns, current);
       }
 
-      const canRetry =
-        (current.status === 'answer_saved' || current.status === 'failed') &&
-        current.answerRequestId === input.answerRequestId;
-      if (!canRetry) {
+      const retryable =
+        current.status === 'answer_saved' || current.status === 'failed';
+      const sameRequest =
+        retryable && current.answerRequestId === input.answerRequestId;
+      const sameStoredAnswer = retryable && current.answer === input.answer;
+      if (!retryable) {
         if (current.status !== 'awaiting_answer') {
           throw new ConflictException('当前题目不能回答，请刷新后重试。');
         }
@@ -465,6 +467,12 @@ export class RehearsalsService {
           throw new ConflictException('当前演练不处于可回答状态。');
         }
         await this.saveAnswer(rehearsalId, current.id, input);
+      } else if (!sameRequest && !sameStoredAnswer) {
+        throw new ConflictException('当前题目已有不同的回答，请刷新后重试。');
+      } else if (!sameRequest) {
+        // A process restart loses the in-memory idempotency key. Re-evaluating the same stored
+        // answer with a fresh key is safe because the per-rehearsal lease is the concurrency guard.
+        await this.adoptAnswerRequestId(current.id, input.answerRequestId);
       }
 
       const evaluating = await this.requireRehearsal(rehearsalId);
@@ -818,6 +826,10 @@ export class RehearsalsService {
     if (existing.status === 'reporting') {
       throw new ConflictException('报告正在生成，请稍后刷新。');
     }
+    const turnsBeforeEnd = await this.loadTurns(rehearsalId);
+    if (!turnsBeforeEnd.some((turn) => turn.answer?.trim())) {
+      throw new ConflictException('还没有回答任何问题，请确认丢弃这次演练。');
+    }
 
     if (this.runs.isActive(rehearsalId)) {
       this.runs.abort(rehearsalId);
@@ -872,6 +884,67 @@ export class RehearsalsService {
         },
       );
       throw this.mapModelError(error);
+    } finally {
+      lease.finish();
+    }
+  }
+
+  /** Discards a rehearsal that has no answers; used after the zero-answer end confirmation. */
+  async discard(
+    rehearsalId: string,
+    logContext: RequestLogContext,
+  ): Promise<{ rehearsalId: string; discarded: true }> {
+    const startedAt = Date.now();
+    const repository = this.dataSource.getRepository(RehearsalEntity);
+    const existing = await repository.findOneBy({ id: rehearsalId });
+    if (!existing) {
+      return { rehearsalId, discarded: true };
+    }
+
+    if (this.runs.isActive(rehearsalId)) {
+      this.runs.abort(rehearsalId);
+      await this.runs.wait(rehearsalId);
+    }
+    const lease = this.runs.begin(rehearsalId);
+    if (!lease) {
+      throw new ConflictException('演练正在处理中，请稍后重试。');
+    }
+
+    try {
+      const turns = await this.loadTurns(rehearsalId);
+      if (turns.some((turn) => turn.answer?.trim())) {
+        throw new ConflictException('已经有回答，请结束演练并生成评估。');
+      }
+      await this.dataSource.transaction(async (manager) => {
+        await manager
+          .getRepository(RehearsalTurnEntity)
+          .delete({ rehearsalId });
+        await manager
+          .getRepository(RehearsalEntity)
+          .delete({ id: rehearsalId });
+      });
+      this.removeTranscript(existing);
+      writeStructuredEvent(this.logger, 'log', 'rehearsal.discard.completed', {
+        ...logContext,
+        conversationId: existing.conversationId,
+        rehearsalId,
+        asked: existing.askedQuestionCount,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return { rehearsalId, discarded: true };
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        error instanceof HttpException ? 'warn' : 'error',
+        'rehearsal.discard.failed',
+        {
+          ...logContext,
+          rehearsalId,
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
     } finally {
       lease.finish();
     }
@@ -1162,6 +1235,19 @@ export class RehearsalsService {
       evaluatedTurnCount: evaluated.length,
     });
     return report;
+  }
+
+  /** Replaces a lost idempotency key when re-evaluating the same stored answer. */
+  private async adoptAnswerRequestId(
+    turnId: string,
+    answerRequestId: string,
+  ): Promise<void> {
+    await this.dataSource
+      .getRepository(RehearsalTurnEntity)
+      .update(
+        { id: turnId },
+        { answerRequestId, status: 'answer_saved' },
+      );
   }
 
   /** Saves an answer and moves the rehearsal into evaluating. */
@@ -1468,19 +1554,23 @@ export class RehearsalsService {
     const repository = this.dataSource.getRepository(RehearsalEntity);
     const rehearsal = await repository.findOneBy({ id: rehearsalId });
     if (!rehearsal) return;
-    if (Date.now() - rehearsal.updatedAt.getTime() < RECONCILE_STALE_MS) {
-      return;
-    }
+    const stale =
+      Date.now() - rehearsal.updatedAt.getTime() >= RECONCILE_STALE_MS;
     let nextStatus: RehearsalStatus | null = null;
     let endReason: RehearsalEndReason | null = rehearsal.endReason as
       | RehearsalEndReason
       | null;
     if (rehearsal.status === 'evaluating' || rehearsal.status === 'preparing_next') {
+      // Answer/skip calls hold a lease. No active run therefore means the previous process
+      // died; restore the saved question immediately so a restart can show/retry it.
       nextStatus = 'awaiting_answer';
-    } else if (
-      rehearsal.status === 'preparing' ||
-      rehearsal.status === 'reporting'
-    ) {
+    } else if (rehearsal.status === 'reporting') {
+      // End and the limit path hold a lease; no active run means the report call died.
+      nextStatus = 'failed';
+      endReason = 'failed';
+    } else if (rehearsal.status === 'preparing') {
+      // Start does not hold a lease; wait long enough for a legitimate planning call.
+      if (!stale) return;
       nextStatus = 'failed';
       endReason = 'failed';
     }
@@ -1511,6 +1601,24 @@ export class RehearsalsService {
     });
     for (const row of rows) {
       await this.reconcileRehearsal(row.id, logContext);
+    }
+  }
+
+  /** Removes a discarded rehearsal's transcript; failure is logged and does not block deletion. */
+  private removeTranscript(rehearsal: RehearsalEntity): void {
+    try {
+      rmSync(this.transcriptPath(rehearsal), { force: true });
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        'warn',
+        'rehearsal.transcript.remove_failed',
+        {
+          conversationId: rehearsal.conversationId,
+          rehearsalId: rehearsal.id,
+          ...getSafeErrorLogFields(error),
+        },
+      );
     }
   }
 

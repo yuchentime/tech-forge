@@ -1,6 +1,7 @@
 import { describeFailure } from '../../api/backend-error';
 import {
   answerRehearsal,
+  discardRehearsal,
   endRehearsal,
   getLatestRehearsal,
   getRehearsal,
@@ -132,9 +133,24 @@ export class RehearsalStore {
       const keepHistoryView =
         this.snapshot.view === 'history' ||
         this.snapshot.view === 'historyDetail';
+      const lastTurn = detail?.turns.at(-1);
+      const pendingAnswer =
+        detail &&
+        (detail.status === 'awaiting_answer' ||
+          detail.status === 'evaluating') &&
+        lastTurn &&
+        (lastTurn.status === 'answer_saved' || lastTurn.status === 'failed') &&
+        lastTurn.answer?.trim()
+          ? {
+              turnId: lastTurn.turnId,
+              answer: lastTurn.answer,
+              requestId: requestId(),
+            }
+          : null;
       this.update({
         status: 'ready',
         detail,
+        pendingAnswer,
         ...(keepHistoryView
           ? {}
           : { view: detail ? viewFor(detail) : 'start' }),
@@ -337,6 +353,31 @@ export class RehearsalStore {
   /** Retries report generation after a failed end. */
   async retryEnd(): Promise<void> {
     await this.end();
+  }
+
+  /** Discards a rehearsal with no answers after the zero-answer confirmation. */
+  async discard(): Promise<void> {
+    const detail = this.snapshot.detail;
+    if (!detail || this.snapshot.isEnding) return;
+    this.update({ isEnding: true, error: null });
+    try {
+      await discardRehearsal(detail.rehearsalId);
+      this.update({
+        isEnding: false,
+        detail: null,
+        view: 'start',
+        pendingAnswer: null,
+        answerError: null,
+        history: null,
+        historyStatus: 'idle',
+        historyError: null,
+      });
+    } catch (error) {
+      this.update({
+        isEnding: false,
+        error: describeFailure(error, '丢弃演练失败，请重试。'),
+      });
+    }
   }
 
   /** Opens the history list and loads its first page. */
