@@ -17,12 +17,14 @@
     "verify:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-ingest.cjs",
     "test:agent-stream": "npm run build && node --test test/agent-stream.test.cjs test/workspace-file-tools.test.cjs",
     "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs",
+    "verify:compaction": "npm run build && node test/verify-compaction.cjs",
     "verify:artifacts": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-artifacts.cjs",
     "test:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/retrieval.test.cjs",
     "verify:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-retrieval.cjs",
     "test:knowledge-context": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-context.test.cjs",
     "test:chat-attachments": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/chat-attachments.test.cjs",
     "test:conversation-delete": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-delete.test.cjs",
+    "test:rehearsal": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/rehearsal.test.cjs",
     "test:session-entries": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/session-entries.test.cjs"
   },
   "dependencies": {

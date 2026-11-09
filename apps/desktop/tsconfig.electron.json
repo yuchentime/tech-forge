@@ -18,6 +18,8 @@
     "src/features/agent/agent-event-bus.ts",
     "src/features/agent/agent-chat-adapter.ts",
     "src/features/agent/conversation-history.ts",
-    "src/features/agent/tool-activity-label.ts"
+    "src/features/agent/tool-activity-label.ts",
+    "src/features/rehearsal/rehearsal-api.ts",
+    "src/features/rehearsal/rehearsal-store.ts"
   ]
 }

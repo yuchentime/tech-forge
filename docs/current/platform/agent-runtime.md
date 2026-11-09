@@ -34,7 +34,8 @@ last_verified: 2026-11-09
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，装载 `pi-memory` 文件扩展并注册持久化钩子。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，装载 `pi-memory` 文件扩展并注册持久化钩子。另提供非流式 `generate()` 供演练使用。 |
+| `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不加载 `pi-memory`、不注册文件工具。 |
 | `pi-memory` 扩展 | 由 `additionalExtensionPaths` 装载的第三方 Pi 扩展：注册 `memory_write`、`memory_read`、`memory_search`、`memory_forget`、`memory_restore`、`scratchpad`、`memory_status`，并在每轮把记忆快照追加到系统提示词。记忆是纯 Markdown，存放于 `SettingsService` 提供的 `<configDir>/memory/`（默认 `~/.tech-forge/memory/`），按用户而非会话隔离。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
@@ -43,7 +44,9 @@ last_verified: 2026-11-09
 
 Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `ChatController` 生成一个内部 `requestId`，并沿 `ChatService`、`ConversationsService`、`LlmService` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
 
-`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`LlmService` 记录 SDK/session 初始化阶段、模型运行、Pi 自动压缩和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+
+Pi 自动压缩由 SDK 触发，`LlmService` 在 `stream()` 和 `generate()` 的事件订阅中记录 `llm.compaction.started`、`llm.compaction.completed`、`llm.compaction.cancelled`、`llm.compaction.failed`。字段包含触发原因（`threshold`、`overflow`、`manual`）、`tokensBefore`、`estimatedTokensAfter`、`summaryChars`、摘要请求的 `summaryUsageTotalTokens` 以及压缩前后的 `contextTokens`/`contextPercent`；失败只记录 `errorMessageChars`，不记录摘要文本或原始异常 message。`llm.session.create.completed` 记录生效的 `compactionEnabled`、`compactionReserveTokens`、`compactionKeepRecentTokens`、`modelContextWindow` 和 `compactionThresholdTokens`；`llm.provider_run.started` 与 `llm.stream.completed` 记录发送前后的上下文占用。
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
@@ -124,9 +127,20 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 `LlmService` 优先读取 `pi_session_snapshots` 作为模型上下文（含 compaction 等 Pi 条目），仅当快照最后一条持久化消息与 SQLite 最新历史不一致（崩溃或快照未保存）时回退 SQLite 重建；未命中时也走重建。当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
+上下文压缩由 Pi SDK 自动执行，应用层不调用 `session.compact()`，也不自行裁剪或摘要历史：
+
+- 触发条件为 `contextTokens > contextWindow - reserveTokens`。SDK 在发送新 user prompt 前、工具结果追加后准备下一轮 assistant 时、运行结束后各检查一次；provider 报上下文溢出或出现可恢复的 `length` 结束时，会压缩并重试一次。
+- 默认 `reserveTokens = 16384`、`keepRecentTokens = 20000`，可由 Pi 全局设置 `<agentDir>/settings.json` 或项目设置 `<cwd>/.pi/settings.json` 覆盖，并支持按 `provider/modelId` 设置 `modelOverrides`。
+- 本应用通过 `SettingsManager.applyOverrides()` 在内存中强制 `compaction.enabled = true`，不写用户全局 Pi 设置文件；即使 `<agentDir>/settings.json` 里设为 `false`，该 session 仍会压缩且原文件保持不变。压缩产生的 `CompactionEntry` 下次随快照恢复；SQLite `messages` 仍保留完整历史，不受压缩影响。
+- `billion-context-pi` 未被 `DefaultResourceLoader` 装载，只有遗留类型声明，不参与压缩。
+
+已用离线 provider 验证：恢复 40 条历史后，Pi 在发送本轮 prompt 前自动触发 `reason: "threshold"` 的压缩，上下文从 12000 token 估算降到 604 估算，压缩条目写入快照；命令为 `npm run verify:compaction --workspace @teachforge/backend`。
+
+已知限制：Pi 在缺少 provider usage 时按 `字符数 / 4` 估算 token，中文内容会被低估，因此刚由 SQLite 历史重建、且尚无 usage 的会话可能晚于真实阈值才压缩；正常带 usage 的响应不受影响。本轮新注入的附件/知识块在发送前不计入阈值，若因此溢出则由 overflow 恢复压缩并重试一次，仍可能失败（见会话附件限制）。
+
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-每次 `stream()` 结束且持久化没有失败时，`LlmService` 把 `getEntries()` 中最后一条 user 消息还原为纯用户文本（`replaceInjectedUserText`）后 upsert 回 `pi_session_snapshots`，本轮注入的附件/知识块因此不会变成后续轮的历史。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
+每次 `stream()` 结束且持久化没有失败时，`LlmService` 用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块/演练 digest，再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
 ## 会话附件
 
@@ -136,7 +150,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 2. 发送时 `ChatPromptDto.attachments`（≤10、UUIDv4 + 绝对路径）随 prompt 进入 `ChatService.stream()`；桌面桥接在 Electron Main 校验该列表，格式不对直接拒绝整次请求。
 3. `ChatService` 先 `beginTurn()` 得到会话 ID，再由 `AttachmentsService.storeForConversation()` 把文件复制到 `<configDir>/sessions/<conversationId>/attachments/<attachmentId>/<原文件名>`，解析正文写到同目录 `text.md`。复制时机受会话 ID 约束：新会话在这一刻之前不存在。`<configDir>` 默认 `~/.tech-forge`。
 4. 单份失败不影响整轮：不支持的格式记为 `unsupported`，路径不存在记为 `missing`，解析失败记为 `unreadable`，本轮以一行说明告知模型，而不是静默省略。
-5. 正文经 `renderAttachmentContext()` 拼成"本轮用户附加的文件"块，与知识块一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由它拼在本轮 user message 前面（`## 用户输入` 之后才是用户原话）。**不进入 system prompt**：否则每轮变化会打断 provider 的前缀缓存，也违反 system prompt 只承载规则的设计。注入有 40000 字符上限：按用户顺序取文件，超出被截断（模型收到"本轮只提供开头 N 字"说明），后面没有余量的文件整体跳过并同样告知。
+5. 正文经 `renderAttachmentContext()` 拼成"本轮用户附加的文件"块，与知识块、演练 digest 一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由它拼在本轮 user message 前面（`## 用户输入` 之后才是用户原话）。**不进入 system prompt**：否则每轮变化会打断 provider 的前缀缓存，也违反 system prompt 只承载规则的设计。注入有 40000 字符上限：按用户顺序取文件，超出被截断（模型收到"本轮只提供开头 N 字"说明），后面没有余量的文件整体跳过并同样告知。
 6. 正文不进入 `messages.contentJson`、不进入 SSE、不进入历史接口。user 行 `contextRefsJson.attachments` 保存 `{attachmentId, name, characters, injectedCharacters}`：前两项供气泡标签与历史投影，后两项供后续轮描述"共多少字、已提供多少字"。
 7. 附件正文只注入承载它的那一轮。之后每次请求都会追加一段"本会话可读取的附件"指针：每份附件的 `text.md` 绝对路径、总字数与已注入字数，并提示用 `read`（可带 offset/limit）或 `grep` 继续读取。附件目录不在受保护目录内，两个工具都能读；模型因此可以回到原文，而不是凭记忆补全。
 8. 指针不重复注入正文，只提供路径与规模，成本约每附件两行。
@@ -162,9 +176,24 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 
 数据库事务只覆盖短时读写，不跨模型或工具 I/O。持久化钩子写入失败时会中止 Pi 请求，并作为请求错误返回。
 
-## 待办评估
+## 演练模式
 
-`billion-context-pi` 在当前配置下是否已负责上下文压缩尚未确认。当前实现每次加载全部历史且不做应用层压缩；在问题结论形成前，不要假设扩展会自动压缩，也不要自行裁剪历史。评估记录见[Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)。
+演练是独立 Agent，不经过 `ChatService.stream()`，也不写 `messages`：
+
+- `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `LlmService.generate()`。该调用可传入父 `conversation`，让 `restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
+- 后续答题/跳过/报告调用使用新的临时 Pi session，只带 `learningSummary + plan + 已有问答`；不传 `conversation`，不写快照。
+- 演练 system prompt 由代码写死；不加载 SOULS/style preference、不加载 `pi-memory`、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
+- 每题动作只有 `follow_up` / `next_question`；第 15 问（含跳过）由后端转 `reporting`，模型不能提前结束。
+- 报告完成写 `rehearsals.overallEvaluationJson` 和 `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md`。普通对话下一轮由 `ChatService` 调 `buildConversationDigest()`，把最近 3 次摘要放进 `promptContext`；`contextRefsJson.rehearsals` 记录实际注入的 id。
+- `generate()` 不注册 `persistConversationEvent`，因此不会触发 `ConversationsService` 的消息持久化钩子。
+
+详细状态机与 API 见[演练模式](../domains/rehearsals/index.md)。
+
+## 压缩职责结论
+
+Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 工程层不触发、不实现压缩，也不会丢弃或改写 SQLite 历史。触发、配置和持久化方式见上文“持久化与恢复约定”。
+
+`billion-context-pi` 仍未接入运行链路（仅遗留类型别名），既不负责压缩，也不参与消息改写。对 `billion-context-pi` 的取舍记录在[Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)；该文件保留问题来源与结论差异，不再作为未决阻塞项。
 
 ## 扩展边界
 
@@ -175,6 +204,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. `pi-memory` 直接读写 `<configDir>/memory/`（默认 `~/.tech-forge/memory/`，由 `LlmService` 以 `PI_MEMORY_DIR` 注入）下的记忆 Markdown；目标是扩展内的固定常量，不接受模型选择的路径，因此不经过 `workspace-file-tools.ts` 的授权检查，也不进入 SQLite、SSE 或历史接口。记忆按用户全局共享，不按会话隔离；把它搬进 workspace、知识库或会话目录，或依赖扩展默认的 `~/.pi/agent/memory/`，都会破坏这条边界。
+8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具、无 `pi-memory`；普通对话只通过 digest + `contextRefsJson` 读取演练结果。
 
 ## 代码入口
 
@@ -190,6 +220,8 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`
 - 会话侧栏与 Renderer 查询状态：`apps/desktop/src/features/agent/AgentChatPage.tsx`、`ConversationSidebar.tsx`、`conversation-store.ts`
 - 会话附件：`apps/backend/src/attachments/`、`apps/desktop/src/features/agent/ComposerAttachments.tsx`、`attachment-store.ts`
+- 演练状态机、digest、transcript：`apps/backend/src/rehearsals/`
+- 演练桌面视图：`apps/desktop/src/features/rehearsal/`
 - 本机设置 UI 和 backend 文件配置：`apps/desktop/src/features/settings/SettingsPage.tsx`、`apps/backend/src/settings/`
 
 ## Pi SDK 官方文档

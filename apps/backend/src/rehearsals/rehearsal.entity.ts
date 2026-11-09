@@ -37,6 +37,34 @@ export class RehearsalEntity {
   @Column({ type: 'varchar', nullable: true })
   startRequestId!: string | null;
 
+  /** Optional student profile used only as a questioning perspective. */
+  @Column({ type: 'text', nullable: true })
+  personaText!: string | null;
+
+  /** Parent conversation sequence at the time this batch started; later messages are excluded. */
+  @Column({ type: 'integer', nullable: true })
+  contextUpToSequenceNo!: number | null;
+
+  /** Serialized topic, learning summary and knowledge-point plan. */
+  @Column({ type: 'text', nullable: true })
+  planJson!: string | null;
+
+  @Column({ type: 'integer', default: 0 })
+  askedQuestionCount!: number;
+
+  @Column({ type: 'integer', default: 0 })
+  baseQuestionCount!: number;
+
+  @Column({ type: 'integer', default: 0 })
+  skippedCount!: number;
+
+  /** Serialized overall evaluation; per-question evaluations live on rehearsal_turns. */
+  @Column({ type: 'text', nullable: true })
+  overallEvaluationJson!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  endReason!: string | null;
+
   @Column({ type: 'datetime', nullable: true })
   startedAt!: Date | null;
 

@@ -7,6 +7,7 @@ export type StructuredLogLevel = 'log' | 'debug' | 'warn' | 'error';
 export interface RequestLogContext {
   requestId: string;
   conversationId?: string;
+  rehearsalId?: string;
 }
 
 /** Serializes one whitelisted event as a JSON message through the Nest logger. */

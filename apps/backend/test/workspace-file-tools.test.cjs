@@ -15,7 +15,11 @@ const piSdkPromise = import('@earendil-works/pi-coding-agent');
 
 /** Creates an isolated workspace and removes it after the test completes. */
 async function createWorkspace(t) {
-  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'teachforge-workspace-'));
+  // macOS exposes os.tmpdir() as /var while realpath is /private/var; resolve it so the
+  // workspace boundary and the test's guarded filesystem see the same absolute path.
+  const parent = await fs.realpath(
+    await fs.mkdtemp(path.join(os.tmpdir(), 'teachforge-workspace-')),
+  );
   const workspace = path.join(parent, 'workspace');
   await fs.mkdir(workspace);
   t.after(() => fs.rm(parent, { recursive: true, force: true }));

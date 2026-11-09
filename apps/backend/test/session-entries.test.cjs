@@ -32,6 +32,54 @@ test('the snapshot keeps only the user text, never the injected context', () => 
   assert.equal(cleaned[0].message.content, '上一轮的问题');
 });
 
+test('text-block content and historical user rows are cleaned too', () => {
+  const entries = [
+    messageEntry('u1', 'user', [
+      { type: 'text', text: '## 此前的演练记录\n\n## 用户输入\n旧问题' },
+    ]),
+    messageEntry('a1', 'assistant', [{ type: 'text', text: '回答' }]),
+    messageEntry('u2', 'user', [
+      { type: 'text', text: '## 此前的演练记录\n\n## 用户输入\n新问题' },
+    ]),
+  ];
+
+  const cleaned = replaceInjectedUserText(
+    entries,
+    '新问题',
+    new Map([['u1', '旧问题']]),
+  );
+
+  assert.deepEqual(cleaned[0].message.content, [{ type: 'text', text: '旧问题' }]);
+  assert.deepEqual(cleaned[2].message.content, [{ type: 'text', text: '新问题' }]);
+  assert.deepEqual(
+    cleaned.map((entry) => [entry.id, entry.parentId]),
+    entries.map((entry) => [entry.id, entry.parentId]),
+  );
+});
+
+test('historical injected blocks are stripped even when Pi reused ids', () => {
+  const entries = [
+    messageEntry('pi-1', 'user', [
+      {
+        type: 'text',
+        text: '## 此前的演练记录\n背景\n\n## 用户输入\n旧问题',
+      },
+    ]),
+    messageEntry('a1', 'assistant', [{ type: 'text', text: '回答' }]),
+    messageEntry('pi-2', 'user', [
+      {
+        type: 'text',
+        text: '## 此前的演练记录\n背景\n\n## 用户输入\n新问题',
+      },
+    ]),
+  ];
+
+  const cleaned = replaceInjectedUserText(entries, '新问题');
+
+  assert.deepEqual(cleaned[0].message.content, [{ type: 'text', text: '旧问题' }]);
+  assert.deepEqual(cleaned[2].message.content, [{ type: 'text', text: '新问题' }]);
+});
+
 test('entries that were never composed are left untouched', () => {
   const entries = [messageEntry('u1', 'user', '干净的问题')];
 

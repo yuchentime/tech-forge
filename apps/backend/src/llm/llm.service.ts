@@ -86,6 +86,31 @@ export interface LlmStreamOptions extends LlmRequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Options for one non-streamed generation.
+ *
+ * Rehearsal planning, answer decisions and reports are JSON calls, not chat turns. They may read a
+ * parent conversation's history, but they never persist a Pi snapshot or a conversation message.
+ */
+export interface LlmGenerateOptions extends LlmRequestOptions {
+  signal?: AbortSignal;
+  /** Replaces the default chat system-prompt append; rehearsal passes its fixed drill prompt. */
+  systemPromptAppend?: string;
+  /** Explicit tool allowlist; rehearsal passes an empty array. */
+  tools?: readonly string[];
+  /** Whether to load pi-memory; rehearsal disables it to keep the student role isolated. */
+  loadMemory?: boolean;
+  /** Abort the provider call after this many milliseconds. */
+  timeoutMs?: number;
+}
+
+/** Controls how one Pi session is assembled without changing business-level request options. */
+interface PiSessionBuildOptions {
+  systemPromptAppend?: string;
+  tools?: readonly string[];
+  loadMemory?: boolean;
+}
+
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 
 /**
@@ -338,6 +363,9 @@ export class LlmService {
       }
 
       unsubscribe = session.subscribe((event) => {
+        // Pi owns the compaction trigger (threshold, overflow recovery, or manual `/compact`).
+        // Log it here because the summary is an extra provider request that changes model context.
+        logPiCompactionEvent(this.logger, logContext, session, event);
         // 所有 Pi 事件按回调顺序入队；ChatService 随后决定哪些字段可以出站。
         if (hasPersistenceError) {
           wake();
@@ -351,11 +379,15 @@ export class LlmService {
       // 先启动底层模型请求，它与下方消费队列的循环并行推进。
       // 请求成功或失败时都设置结束状态并唤醒循环，避免最后没有新片段时一直等待。
       phase = "provider_run";
+      const startingContextUsage = session.getContextUsage();
       writeStructuredEvent(this.logger, "log", "llm.provider_run.started", {
         ...logContext,
         providerId: options.providerId,
         modelId: options.modelId,
         historyMessageCount: options.conversation?.history.length ?? 0,
+        contextTokens: startingContextUsage?.tokens ?? null,
+        contextWindow: startingContextUsage?.contextWindow ?? null,
+        contextPercent: startingContextUsage?.percent ?? null,
       });
       const modelPrompt = composeModelPrompt(prompt, options.promptContext);
       const run = session.prompt(modelPrompt, { expandPromptTemplates: false }).then(
@@ -406,10 +438,13 @@ export class LlmService {
 
       const responseText = this.readAssistantText(session);
       outcome = "completed";
+      const finishedContextUsage = session.getContextUsage();
       writeStructuredEvent(this.logger, "log", "llm.stream.completed", {
         ...logContext,
         resultLength: Array.from(responseText).length,
         eventCounts: Object.fromEntries(eventCounts),
+        contextTokens: finishedContextUsage?.tokens ?? null,
+        contextPercent: finishedContextUsage?.percent ?? null,
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
@@ -437,9 +472,26 @@ export class LlmService {
       if (persistenceAbortPromise) await persistenceAbortPromise;
 
       // The snapshot must not keep the per-turn context: the next request restores from it.
+      // Map every historical user row back to its clean stored text so old injected blocks are
+      // removed too, not only the current turn's.
+      const userTextById = new Map<string, string>();
+      for (const message of options.conversation?.history ?? []) {
+        if (message.role !== 'user') continue;
+        try {
+          userTextById.set(
+            message.id,
+            this.parseTextBlocks(message.contentJson)
+              .map((block) => block.text)
+              .join('\n'),
+          );
+        } catch {
+          // A malformed historical row is left untouched; the current prompt still gets cleaned.
+        }
+      }
       const entries: SessionEntry[] = replaceInjectedUserText(
         session.sessionManager.getEntries(),
         prompt,
+        userTextById,
       );
       if (options.conversation && !hasPersistenceError && entries.length > 0) {
         try {
@@ -497,11 +549,164 @@ export class LlmService {
     }
   }
 
+  /**
+   * Runs one non-streamed model call and returns the assistant text.
+   *
+   * Rehearsal uses this for structured JSON decisions. The call may read a parent conversation's
+   * history through `conversation`, but it never persists a snapshot or a conversation message;
+   * the caller owns the rehearsal state and its own transcript.
+   */
+  async generate(
+    prompt: string,
+    options: LlmGenerateOptions = {},
+  ): Promise<string> {
+    const requestId = options.requestId ?? randomUUID();
+    const logContext = getRequestLogContext(options, requestId);
+    const startedAt = Date.now();
+    let phase = "session_create";
+    let timedOut = false;
+    let outcome: "completed" | "failed" | "cancelled" = "failed";
+    let session: PiAgentSession | undefined;
+    let unsubscribeSessionEvents: (() => void) | undefined;
+
+    writeStructuredEvent(this.logger, "log", "llm.generate.started", {
+      ...logContext,
+      promptLength: Array.from(prompt).length,
+      historyMessageCount: options.conversation?.history.length ?? 0,
+    });
+
+    try {
+      const modelSettings = await this.settings.getLlmSettings();
+      const resolved: LlmGenerateOptions = {
+        ...options,
+        ...getSelectedModelIds(modelSettings),
+      };
+      session = await this.createSession(resolved, modelSettings, undefined, {
+        systemPromptAppend: options.systemPromptAppend,
+        tools: options.tools,
+        loadMemory: options.loadMemory,
+      });
+      const activeSession = session;
+      unsubscribeSessionEvents = activeSession.subscribe((event) =>
+        logPiCompactionEvent(this.logger, logContext, activeSession, event),
+      );
+
+      const abortController = new AbortController();
+      const aborted = Promise.withResolvers<never>();
+      const abortSession = (): void => {
+        if (abortController.signal.aborted) return;
+        abortController.abort();
+        void session?.abort().catch((error: unknown) => {
+          writeStructuredEvent(this.logger, "error", "llm.generate.abort.failed", {
+            ...logContext,
+            ...getSafeErrorLogFields(error),
+          });
+        });
+      };
+      const onAbortSignal = (): void => {
+        aborted.reject(
+          new Error(
+            timedOut ? "LLM generation timed out." : "LLM generation cancelled.",
+          ),
+        );
+      };
+      abortController.signal.addEventListener("abort", onAbortSignal, {
+        once: true,
+      });
+      options.signal?.addEventListener("abort", abortSession, { once: true });
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            abortSession();
+          }, options.timeoutMs)
+        : undefined;
+
+      try {
+        if (options.signal?.aborted) abortSession();
+        phase = "provider_run";
+        const modelPrompt = composeModelPrompt(prompt, options.promptContext);
+        const run = session.prompt(modelPrompt, { expandPromptTemplates: false });
+        // The abort race may settle first; keep the provider promise from becoming unhandled.
+        void run.catch(() => undefined);
+        await Promise.race([run, aborted.promise]);
+
+        if (timedOut) {
+          throw new Error("LLM generation timed out.");
+        }
+        if (options.signal?.aborted || abortController.signal.aborted) {
+          throw new Error("LLM generation cancelled.");
+        }
+
+        const text = session.getLastAssistantText();
+        if (!text?.trim()) {
+          throw new Error("Pi SDK completed without returning assistant text.");
+        }
+        outcome = "completed";
+        writeStructuredEvent(this.logger, "log", "llm.generate.completed", {
+          ...logContext,
+          resultLength: Array.from(text).length,
+          elapsedMs: Date.now() - startedAt,
+        });
+        return text;
+      } finally {
+        clearTimeout(timer);
+        abortController.signal.removeEventListener("abort", onAbortSignal);
+        options.signal?.removeEventListener("abort", abortSession);
+      }
+    } catch (error) {
+      outcome = options.signal?.aborted ? "cancelled" : "failed";
+      writeStructuredEvent(
+        this.logger,
+        outcome === "cancelled" ? "warn" : "error",
+        outcome === "cancelled"
+          ? "llm.generate.cancelled"
+          : "llm.generate.failed",
+        {
+          ...logContext,
+          phase: timedOut ? "timeout" : phase,
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
+    } finally {
+      unsubscribeSessionEvents?.();
+      if (session) {
+        try {
+          session.dispose();
+        } catch (error) {
+          writeStructuredEvent(
+            this.logger,
+            "error",
+            "llm.session.dispose.failed",
+            { ...logContext, ...getSafeErrorLogFields(error) },
+          );
+        }
+      }
+      writeStructuredEvent(
+        this.logger,
+        outcome === "completed"
+          ? "log"
+          : outcome === "cancelled"
+            ? "warn"
+            : "error",
+        "llm.generate.terminated",
+        {
+          ...logContext,
+          outcome,
+          phase: timedOut ? "timeout" : phase,
+          elapsedMs: Date.now() - startedAt,
+        },
+      );
+    }
+  }
+
   /** Creates a request-scoped Pi session rooted in the configured Agent workspace. */
   private async createSession(
     options: LlmRequestOptions,
     modelSettings: StoredLlmSettings,
     currentUserRequest?: string,
+    buildOptions: PiSessionBuildOptions = {},
   ): Promise<PiAgentSession> {
     const startedAt = Date.now();
     const requestId = options.requestId ?? randomUUID();
@@ -612,16 +817,31 @@ export class LlmService {
         );
       }
 
-      const stylePreference = await this.settings.getStylePreference();
-     const customSystemPrompt = [
-      "\n\nWorkspace and file rules:",
-      `- Your working directory is: ${cwd}.`,
-      "- Create files only when explicitly requested by the user. Answer ordinary questions directly in chat.",
-      "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
-      "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
-      "- For mind maps, prefer SVG with a left-to-right tree layout.",
-      `\n\nUser preferences: ${stylePreference}`,
-    ].join("\n");
+      const loadMemory = buildOptions.loadMemory ?? true;
+      const toolAllowlist = buildOptions.tools ?? [
+        "read",
+        "edit",
+        "write",
+        "grep",
+        ...PI_MEMORY_TOOL_PATTERNS,
+      ];
+      let customSystemPrompt: string;
+      if (buildOptions.systemPromptAppend?.trim()) {
+        // Rehearsal supplies its own fixed prompt; chat rules and style preference would conflict
+        // with the student role and are intentionally skipped.
+        customSystemPrompt = buildOptions.systemPromptAppend;
+      } else {
+        const stylePreference = await this.settings.getStylePreference();
+        customSystemPrompt = [
+          "\n\nWorkspace and file rules:",
+          `- Your working directory is: ${cwd}.`,
+          "- Create files only when explicitly requested by the user. Answer ordinary questions directly in chat.",
+          "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
+          "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
+          "- For mind maps, prefer SVG with a left-to-right tree layout.",
+          `\n\nUser preferences: ${stylePreference}`,
+        ].join("\n");
+      }
       // pi-memory resolves its storage root from PI_MEMORY_DIR at module load, and the Pi loader
       // caches extension modules per cwd, so this must be set before the first reload below.
       // Without it the extension writes to ~/.pi/agent/memory, outside the TeachForge config root.
@@ -636,7 +856,7 @@ export class LlmService {
         noThemes: true,
         noContextFiles: true,
         // `noExtensions` only disables discovered packages; these explicit sources still load.
-        additionalExtensionPaths: [PI_MEMORY_EXTENSION_PATH],
+        additionalExtensionPaths: loadMemory ? [PI_MEMORY_EXTENSION_PATH] : [],
         extensionFactories,
         // These stay anchored to the configured root instead of the session cwd, so per-session
         // workspaces never change where user-provided skills and prompt templates are looked up.
@@ -662,8 +882,13 @@ export class LlmService {
           enabled: true,
           maxRetries: 3,
         },
+        // Force compaction on for app-owned sessions. `setCompactionEnabled()` also writes the
+        // value into the user's global Pi settings file; overrides stay inside this session.
+        compaction: {
+          enabled: true,
+        },
       });
-      settingsManager.setCompactionEnabled(true);
+      const compactionSettings = settingsManager.getCompactionSettings(model);
 
       phase = "history_restore";
       writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
@@ -698,7 +923,7 @@ export class LlmService {
         sessionManager,
         settingsManager,
         // The allowlist covers every registered tool name, so extension tools are listed too.
-        tools: ["read", "edit", "write", "grep", ...PI_MEMORY_TOOL_PATTERNS],
+        tools: [...toolAllowlist],
         excludeTools: ["bash"],
         customTools,
       });
@@ -720,6 +945,16 @@ export class LlmService {
         restoredEntryCount: restoredEntries?.length ?? 0,
         extensionCount: extensionFactories.length,
         customToolCount: customTools.length,
+        toolCount: toolAllowlist.length,
+        loadMemory,
+        compactionEnabled: compactionSettings.enabled,
+        compactionReserveTokens: compactionSettings.reserveTokens,
+        compactionKeepRecentTokens: compactionSettings.keepRecentTokens,
+        modelContextWindow: model?.contextWindow ?? null,
+        // Pi compacts when contextTokens > contextWindow - reserveTokens.
+        compactionThresholdTokens: model
+          ? Math.max(0, model.contextWindow - compactionSettings.reserveTokens)
+          : null,
         elapsedMs: Date.now() - startedAt,
       });
       return session;
@@ -943,6 +1178,62 @@ function pickSessionEntries(
     return { entries: snapshot, source: "session_snapshot" };
   }
   return { entries: rebuilt, source: "rebuilt_history" };
+}
+
+/**
+ * Logs Pi's compaction lifecycle with token metrics.
+ *
+ * Pi decides when to compact: threshold crossing, overflow recovery, or a manual `/compact`. This
+ * app never calls `session.compact()`. The summary is an extra provider request that rewrites the
+ * model context, so both the trigger and the failure must be visible to operators.
+ */
+function logPiCompactionEvent(
+  logger: Logger,
+  logContext: RequestLogContext,
+  session: PiAgentSession,
+  event: PiAgentSessionEvent,
+): void {
+  if (event.type === "compaction_start") {
+    const usage = session.getContextUsage();
+    writeStructuredEvent(logger, "log", "llm.compaction.started", {
+      ...logContext,
+      reason: event.reason,
+      contextTokens: usage?.tokens ?? null,
+      contextWindow: usage?.contextWindow ?? null,
+      contextPercent: usage?.percent ?? null,
+    });
+    return;
+  }
+  if (event.type !== "compaction_end") return;
+
+  const usage = session.getContextUsage();
+  const fields = {
+    ...logContext,
+    reason: event.reason,
+    aborted: event.aborted,
+    willRetry: event.willRetry,
+    tokensBefore: event.result?.tokensBefore ?? null,
+    estimatedTokensAfter: event.result?.estimatedTokensAfter ?? null,
+    summaryChars: event.result
+      ? Array.from(event.result.summary).length
+      : null,
+    summaryUsageTotalTokens: event.result?.usage?.totalTokens ?? null,
+    contextTokens: usage?.tokens ?? null,
+    contextPercent: usage?.percent ?? null,
+  };
+  if (event.result) {
+    writeStructuredEvent(logger, "log", "llm.compaction.completed", fields);
+    return;
+  }
+  if (event.aborted) {
+    writeStructuredEvent(logger, "warn", "llm.compaction.cancelled", fields);
+    return;
+  }
+  // The raw provider message may echo payloads; only its size is safe to log.
+  writeStructuredEvent(logger, "error", "llm.compaction.failed", {
+    ...fields,
+    errorMessageChars: event.errorMessage?.length ?? 0,
+  });
 }
 
 /** Builds the shared internal request correlation fields for LLM logs. */

@@ -73,6 +73,12 @@ export interface ConversationHistoryMessage {
   createdAt: Date;
 }
 
+/** Read-only history plus the parent cutoff used to freeze a rehearsal's background. */
+export interface RestorableConversationHistory {
+  history: ConversationHistoryMessage[];
+  maxSequenceNo: number;
+}
+
 /** One attachment recorded on an earlier turn of this conversation. */
 export interface ConversationAttachmentRef {
   attachmentId: string;
@@ -361,6 +367,97 @@ export class ConversationsService {
     }
   }
 
+  /** Returns whether a conversation row exists, without loading its messages. */
+  async conversationExists(conversationId: string): Promise<boolean> {
+    return (
+      (await this.dataSource
+        .getRepository(ConversationEntity)
+        .countBy({ id: conversationId })) > 0
+    );
+  }
+
+  /**
+   * Returns the model-restorable history for one conversation without writing anything.
+   *
+   * Rehearsal uses this to seed its opening plan from normal chat. Pending rows mean a normal turn
+   * is still in flight; including them would let an unfinished answer become drill background, so
+   * the caller gets a conflict instead.
+   */
+  async getRestorableHistory(
+    conversationId: string,
+    upToSequenceNo?: number,
+    logContext?: RequestLogContext,
+  ): Promise<RestorableConversationHistory> {
+    const startedAt = Date.now();
+    const context = {
+      ...logContext,
+      conversationId,
+      hasCutoff: upToSequenceNo !== undefined,
+    };
+    try {
+      const conversation = await this.dataSource
+        .getRepository(ConversationEntity)
+        .findOneBy({ id: conversationId });
+      if (!conversation) {
+        throw new NotFoundException('Conversation was not found.');
+      }
+
+      const query = this.dataSource
+        .getRepository(MessageEntity)
+        .createQueryBuilder('message')
+        .where('message.conversationId = :conversationId', { conversationId })
+        .orderBy('message.sequenceNo', 'ASC');
+      if (upToSequenceNo !== undefined) {
+        query.andWhere('message.sequenceNo <= :upToSequenceNo', {
+          upToSequenceNo,
+        });
+      }
+      const rows = await query.getMany();
+      if (rows.some((row) => row.status === 'pending')) {
+        throw new ConflictException(
+          'The current conversation turn is still running.',
+        );
+      }
+
+      const history = this.buildRestorableHistory(rows);
+      const maxSequenceNo = rows.reduce(
+        (maximum, row) => Math.max(maximum, row.sequenceNo),
+        0,
+      );
+      writeStructuredEvent(
+        this.logger,
+        'log',
+        'conversations.restorable_history.completed',
+        {
+          ...context,
+          rowCount: rows.length,
+          historyMessageCount: history.length,
+          maxSequenceNo,
+          elapsedMs: Date.now() - startedAt,
+        },
+      );
+      return { history, maxSequenceNo };
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ConflictException
+      ) {
+        throw error;
+      }
+      writeStructuredEvent(
+        this.logger,
+        'error',
+        'conversations.restorable_history.failed',
+        {
+          ...context,
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
+    }
+  }
+
   /**
    * Maps each turn's produced files onto the last assistant row of that turn inside the page.
    *
@@ -612,26 +709,7 @@ export class ConversationsService {
         );
 
         phase = 'build_model_history';
-        const history = priorMessages.flatMap((message) => {
-          if (message.role === 'user' && message.status === 'completed') {
-            return [this.toHistoryMessage(message)];
-          }
-          if (
-            !['completed', 'failed', 'cancelled'].includes(message.status) ||
-            message.role === 'assistantTurn' ||
-            message.role === 'toolExecution'
-          ) {
-            return [];
-          }
-          if (
-            message.role === 'assistant' ||
-            message.role === 'toolResult' ||
-            parsePersistedPiMessage(message.contentJson)
-          ) {
-            return [this.toHistoryMessage(message)];
-          }
-          return [];
-        });
+        const history = this.buildRestorableHistory(priorMessages);
         phase = 'persist_current_turn';
         writeStructuredEvent(this.logger, 'log', 'conversations.turn.phase', {
           ...logContext,
@@ -706,21 +784,33 @@ export class ConversationsService {
   }
 
   /**
-   * Records which documents a turn injected on its user row.
+   * Merges context references into a user row instead of replacing the whole JSON object.
    *
-   * This is the durable dedupe record: the next turn reads it back from the loaded history instead of
-   * keeping process state, so a restart changes nothing. A failure here must not fail the turn — the
-   * worst case is re-injecting a document.
+   * A turn can inject attachments, knowledge chunks and rehearsal digests together; writing them
+   * one by one must not erase the keys written by the previous step. This is the durable record
+   * used by the next turn for dedupe and traceability, so a failure is logged but never fails the
+   * turn — the worst case is re-injecting the same material.
    */
-  async updateUserMessageContextRefs(
+  async mergeUserMessageContextRefs(
     messageId: string,
     contextRefsJson: string,
     logContext?: RequestLogContext,
   ): Promise<void> {
     try {
-      await this.dataSource
-        .getRepository(MessageEntity)
-        .update({ id: messageId }, { contextRefsJson });
+      const repository = this.dataSource.getRepository(MessageEntity);
+      const message = await repository.findOneBy({ id: messageId });
+      if (!message) return;
+      const patch = parseContextRefs(contextRefsJson);
+      if (!patch) {
+        throw new Error('Context refs patch is not a JSON object.');
+      }
+      const existing = message.contextRefsJson
+        ? (parseContextRefs(message.contextRefsJson) ?? {})
+        : {};
+      await repository.update(
+        { id: messageId },
+        { contextRefsJson: JSON.stringify({ ...existing, ...patch }) },
+      );
     } catch (error) {
       writeStructuredEvent(this.logger, 'error', 'conversations.context_refs.failed', {
         ...logContext,
@@ -1316,6 +1406,38 @@ export class ConversationsService {
     }
   }
 
+  /**
+   * Selects rows that belong in the durable model transcript.
+   *
+   * Pending markers, assistant-turn markers and tool-execution metadata are runtime bookkeeping,
+   * not model messages. The same projection feeds normal chat turns and the rehearsal opening
+   * context so both agents see the same history.
+   */
+  private buildRestorableHistory(
+    messages: readonly MessageEntity[],
+  ): ConversationHistoryMessage[] {
+    return messages.flatMap((message) => {
+      if (message.role === 'user' && message.status === 'completed') {
+        return [this.toHistoryMessage(message)];
+      }
+      if (
+        !['completed', 'failed', 'cancelled'].includes(message.status) ||
+        message.role === 'assistantTurn' ||
+        message.role === 'toolExecution'
+      ) {
+        return [];
+      }
+      if (
+        message.role === 'assistant' ||
+        message.role === 'toolResult' ||
+        parsePersistedPiMessage(message.contentJson)
+      ) {
+        return [this.toHistoryMessage(message)];
+      }
+      return [];
+    });
+  }
+
   /** Converts a stored row into the common history representation. */
   private toHistoryMessage(message: MessageEntity): ConversationHistoryMessage {
     return {
@@ -1339,6 +1461,19 @@ export class ConversationsService {
       .where('message.conversationId = :conversationId', { conversationId })
       .getRawOne<{ maximum: number | string | null }>();
     return Number(result?.maximum ?? 0) + 1;
+  }
+}
+
+/** Parses a context-refs JSON object, returning null for malformed or non-object values. */
+function parseContextRefs(value: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
   }
 }
 

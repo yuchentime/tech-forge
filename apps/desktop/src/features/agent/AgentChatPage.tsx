@@ -49,6 +49,9 @@ import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
+import { RehearsalDigestCard } from '../rehearsal/RehearsalDigestCard';
+import { RehearsalMode } from '../rehearsal/RehearsalMode';
+import { rehearsalStore } from '../rehearsal/rehearsal-store';
 import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
@@ -91,6 +94,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     () => agentEventBus.getSnapshotForThread(threadListState.mainThreadId),
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const isThreadEmpty = useAuiState((state) => state.thread.isEmpty);
   const artifactTabs = useSyncExternalStore(
     artifactTabsStore.subscribe,
     artifactTabsStore.getSnapshot,
@@ -430,6 +434,25 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   const isHistoryLoading = loadingConversationId !== null;
   const isRehearsalMode = conversationDisplayMode === 'rehearsal';
+  const openRehearsalHistory = useCallback(() => {
+    setConversationDisplayMode('rehearsal');
+    const conversationId = conversationState.activeConversationId;
+    void (async () => {
+      await rehearsalStore.loadForConversation(conversationId);
+      await rehearsalStore.openHistory();
+    })();
+  }, [conversationState.activeConversationId]);
+  const openRehearsalReport = useCallback(
+    (rehearsalId: string) => {
+      setConversationDisplayMode('rehearsal');
+      const conversationId = conversationState.activeConversationId;
+      void (async () => {
+        await rehearsalStore.loadForConversation(conversationId);
+        await rehearsalStore.openHistoryDetail(rehearsalId);
+      })();
+    },
+    [conversationState.activeConversationId],
+  );
   const isInitialListLoading =
     !hasLoadedInitialList && conversationState.listStatus !== 'error';
   const activeConversation = conversationState.conversations.find(
@@ -457,11 +480,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         loadingConversationId={loadingConversationId}
         onNewConversation={() => {
           setActiveView('chat');
+          setConversationDisplayMode('conversation');
           startNewConversation();
         }}
         onRefresh={() => void conversationStore.refresh()}
         onSelect={(conversationId) => {
           setActiveView('chat');
+          setConversationDisplayMode('conversation');
           void loadConversation(conversationId);
         }}
         onDelete={(conversationId) => void deleteConversation(conversationId)}
@@ -550,6 +575,12 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     )}
                   </div>
                 )}
+
+                <RehearsalDigestCard
+                  conversationId={conversationState.activeConversationId}
+                  onOpenHistory={openRehearsalHistory}
+                  onOpenReport={openRehearsalReport}
+                />
 
                 {isHistoryLoading || isInitialListLoading ? (
                   <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
@@ -676,14 +707,20 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </div>
               <div
                 aria-hidden={!isRehearsalMode}
-                className={`absolute inset-0 z-10 flex items-center justify-center bg-white transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+                className={`absolute inset-0 z-10 flex min-h-0 flex-col bg-white transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
                   isRehearsalMode
                     ? 'translate-y-0 opacity-100'
                     : 'pointer-events-none translate-y-1 opacity-0'
                 }`}
                 inert={!isRehearsalMode}
               >
-                <p className="text-sm text-stone-500">这是测试页面</p>
+                <RehearsalMode
+                  conversationId={conversationState.activeConversationId}
+                  hasHistory={!isThreadEmpty}
+                  onExitToChat={() =>
+                    setConversationDisplayMode('conversation')
+                  }
+                />
               </div>
             </div>
           </div>

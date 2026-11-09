@@ -93,7 +93,7 @@ last_verified: 2026-11-09
 | `billion-context-pi` | 0.1.83 | 只有 `llm.service.ts` 中的类型别名 `BillionContextPi`（无任何调用），`DefaultResourceLoader` 也未装载 |
 | `pi-subagents` | 0.86.0 | 同上，仅类型别名 `PiSubagents`；`subagent` 工具未启用 |
 
-这两项是遗留声明，既不代表已生效能力，也不代表已被评估否决；上下文压缩是否由 `billion-context-pi` 负责仍属未结论事项，见 [Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)。按现状不要假设扩展会自动压缩历史。
+这两项是遗留声明，既不代表已生效能力，也不代表已被评估否决。上下文压缩已确认由 Pi SDK 自身的自动 compaction 负责（`billion-context-pi` 未参与），见 [Agent Runtime](agent-runtime.md#压缩职责结论) 与[Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)。按现状不要假设 `billion-context-pi` 会自动压缩历史。
 
 ## 8. 升级与兼容约束
 

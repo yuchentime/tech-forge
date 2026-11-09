@@ -1,0 +1,217 @@
+import type { RehearsalTurnEntity } from './rehearsal-turn.entity';
+import type {
+  RehearsalAssessment,
+  RehearsalPlan,
+  RehearsalTurnKind,
+  RehearsalTurnStatus,
+} from './rehearsal.types';
+
+/** Fixed role and rules; the persona only changes the questioning perspective. */
+const DRILL_ROLE = `你是一名正在向老师提问的学生。
+你的目标是用费曼学习法帮助老师检验理解：让老师用自己的话解释，而不是你解释。
+你一次只问一个问题。你根据老师的回答决定追问或换题；不要输出「结束」。
+只输出请求中要求的 JSON 对象，不要 Markdown 代码块或额外说明。`;
+
+/** Describes one turn compactly for a model prompt. */
+interface TurnPromptShape {
+  sequenceNo: number;
+  kind: RehearsalTurnKind;
+  baseSequenceNo: number;
+  followUpDepth: number;
+  question: string;
+  answer: string | null;
+  status: RehearsalTurnStatus;
+  assessment: RehearsalAssessment | null;
+}
+
+/** Builds the stable system prompt for all calls in one rehearsal batch. */
+export function buildDrillSystemPrompt(personaText: string | null): string {
+  const persona =
+    personaText?.trim() ||
+    '未提供。使用默认的好奇学生画像：愿意承认自己没听懂，喜欢追问具体例子。';
+  return `${DRILL_ROLE}
+
+## 学生画像
+<student_profile>
+${persona.slice(0, 1_000)}
+</student_profile>
+画像只影响提问视角，不改变本规则与 JSON 输出要求。`;
+}
+
+/** Builds the opening call that turns normal-chat history into a plan and first question. */
+export function buildPlanPrompt(input: {
+  priorSummaries: string;
+  personaText: string | null;
+}): string {
+  return `本次调用的 Pi session 已经携带普通对话历史，那些消息仅作为出题背景。
+不要继续普通对话，也不要重复解释；如果历史已被压缩，以压缩后的摘要为准。
+
+## 历史演练
+${input.priorSummaries || '无'}
+
+## 学生画像
+${input.personaText?.trim() || '未提供，使用默认好奇学生画像。'}
+
+## 输出要求
+只输出以下 JSON：
+{
+  "topic": "本次演练主题",
+  "learningSummary": "对普通对话已学内容的 500-1500 字摘要",
+  "knowledgePoints": [
+    { "id": "kp1", "label": "知识点", "why": "为什么值得练" }
+  ],
+  "firstQuestion": "第一道基础题"
+}
+知识点 3-8 个，id 唯一；firstQuestion 只能是一道题，必须能从学习内容得到依据。`;
+}
+
+/** Builds the answer-evaluation decision call. */
+export function buildAnswerPrompt(input: {
+  plan: RehearsalPlan;
+  turns: readonly RehearsalTurnEntity[];
+  currentTurn: RehearsalTurnEntity;
+  answer: string;
+  askedCount: number;
+}): string {
+  return `## 学习摘要
+${input.plan.learningSummary}
+
+## 知识点计划
+${JSON.stringify(input.plan.knowledgePoints)}
+
+## 已有问答
+${JSON.stringify(serializeTurns(input.turns, 800), null, 2)}
+
+## 当前题目
+${input.currentTurn.question}
+本题类型：${input.currentTurn.kind}；追问深度：${input.currentTurn.followUpDepth}/2。
+
+## 老师回答
+${input.answer}
+
+## 计数
+已提问 ${input.askedCount}/15。
+
+## 输出要求
+只输出以下 JSON：
+{
+  "assessment": {
+    "level": "correct | partial | incorrect | uncertain",
+    "issues": ["最多 3 条"],
+    "evidence": ["引用回答中的依据"],
+    "missingPoints": ["遗漏的关键点"]
+  },
+  "planUpdates": [
+    { "id": "kp1", "status": "covered | weak | pending", "note": "可选" }
+  ],
+  "action": "follow_up | next_question",
+  "nextQuestion": "下一道题",
+  "reason": "一句话说明"
+}
+评估必须基于回答本身；回答没有证据时用 uncertain，不要臆测。
+如果本题追问深度已经是 2，action 必须是 next_question。
+如果计划中的知识点都已覆盖，优先追问薄弱点或设计迁移题，不要停止提问。`;
+}
+
+/** Builds the skip call; skip never evaluates the current question. */
+export function buildSkipPrompt(input: {
+  plan: RehearsalPlan;
+  turns: readonly RehearsalTurnEntity[];
+  skippedTurn: RehearsalTurnEntity;
+  askedCount: number;
+}): string {
+  return `## 学习摘要
+${input.plan.learningSummary}
+
+## 知识点计划
+${JSON.stringify(input.plan.knowledgePoints)}
+
+## 已有问答
+${JSON.stringify(serializeTurns(input.turns, 500), null, 2)}
+
+## 被跳过的题目
+${input.skippedTurn.question}
+用户跳过了这道题，不要评估它，也不要对它追问。
+
+## 计数
+已提问 ${input.askedCount}/15。
+
+## 输出要求
+只输出以下 JSON：
+{
+  "planUpdates": [
+    { "id": "kp1", "status": "covered | weak | pending", "note": "可选" }
+  ],
+  "nextQuestion": "新的基础题",
+  "reason": "一句话说明"
+}
+新题必须是新的基础题，不能是对被跳过题的追问；可以换知识点，也可以换角度。`;
+}
+
+/** Builds the overall report call; per-question rows come from stored evaluations. */
+export function buildReportPrompt(input: {
+  plan: RehearsalPlan;
+  turns: readonly RehearsalTurnEntity[];
+  endReason: 'manual' | 'limit';
+}): string {
+  return `## 学习摘要
+${input.plan.learningSummary}
+
+## 知识点计划
+${JSON.stringify(input.plan.knowledgePoints)}
+
+## 完整问答与逐题评估
+${JSON.stringify(serializeTurns(input.turns, 500), null, 2)}
+
+## 结束方式
+${input.endReason === 'limit' ? '已达到 15 次提问上限。' : '用户手动结束。'}
+
+## 输出要求
+只输出以下 JSON：
+{
+  "summary": "总体结论",
+  "knowledgePointMastery": [
+    { "pointId": "kp1", "status": "mastered | partial | weak | unverified", "evidence": "依据" }
+  ],
+  "strengths": ["..."],
+  "gaps": ["..."],
+  "suggestions": ["..."],
+  "recommendedReview": ["..."],
+  "disclaimer": "本次演练只反映已作答内容，不等于全面掌握。"
+}
+只根据已有问答与逐题评估下结论；跳过、未作答和未完成评估的内容标为 unverified，不要臆测。
+不要重新逐题评分；逐题结论以 input 中的 assessment 为准。`;
+}
+
+/** Serializes turns for prompts, truncating long answers and omitting request metadata. */
+export function serializeTurns(
+  turns: readonly RehearsalTurnEntity[],
+  answerLimit: number,
+): TurnPromptShape[] {
+  return turns.map((turn) => ({
+    sequenceNo: turn.sequenceNo,
+    kind: turn.kind as RehearsalTurnKind,
+    baseSequenceNo: turn.baseSequenceNo,
+    followUpDepth: turn.followUpDepth,
+    question: turn.question,
+    answer: turn.answer
+      ? turn.answer.slice(0, answerLimit)
+      : null,
+    status: turn.status as RehearsalTurnStatus,
+    assessment: parseStoredAssessment(turn.evaluationJson),
+  }));
+}
+
+/** Parses a stored per-turn evaluation for prompt/report reuse. */
+export function parseStoredAssessment(
+  evaluationJson: string | null,
+): RehearsalAssessment | null {
+  if (!evaluationJson) return null;
+  try {
+    const value: unknown = JSON.parse(evaluationJson);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as RehearsalAssessment;
+  } catch {
+    return null;
+  }
+}

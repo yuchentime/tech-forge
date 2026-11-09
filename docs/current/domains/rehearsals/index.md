@@ -1,0 +1,119 @@
+---
+status: current
+layer: domain
+domain: rehearsals
+canonical_for:
+  - rehearsal-state-machine
+  - rehearsal-context-sync
+related:
+  - docs/current/domains/conversations/index.md
+  - docs/current/platform/agent-runtime.md
+  - docs/current/platform/architecture-and-code-placement.md
+  - docs/changes/2026-11-09-rehearsal-mode/design.md
+  - docs/changes/2026-11-09-rehearsal-mode/verification.md
+last_verified: 2026-11-09
+---
+
+# 演练模式（Rehearsal）
+
+演练是同一 Conversation 下的独立 Agent。它不写入普通对话消息，而是由 `RehearsalsService` 维护自己的状态机：AI 扮演一名学生，用费曼学习法向教师提问；教师回答后先做本题评估，再决定追问或换题。报告完成后，普通对话通过摘要注入继续使用演练结果。
+
+## 当前行为
+
+### 开始与上下文
+
+- 开始前必须存在普通对话历史：至少一条已完成 user 行和一条已完成 assistant 行；存在 `pending` 普通行时返回 409。
+- `ConversationsService.getRestorableHistory(conversationId, upToSequenceNo?)` 只读地投影可恢复历史，并返回 `{ history, maxSequenceNo }`；不创建 turn、不写消息。
+- 开场规划调用复用父会话的 Pi 快照（含 compaction），但 `LlmService.generate()` 不保存快照；没有快照或快照落后时按 SQLite 重建。规划输出 `topic`、`learningSummary`、3–8 个知识点和第一道基础题。
+- 后续答题、跳过和报告调用只带 `learningSummary + plan + 已有问答 + 当前状态`，不再重复注入完整普通历史。
+- 演练 Agent 使用代码写死的 system prompt，不加载 SOULS/style preference、不加载 pi-memory、注册空工具列表；它不能写文件或执行命令。
+- 学生画像可选，最多 1000 字符；它只影响提问视角，不覆盖输出格式与规则。
+
+### 状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> preparing: 开始演练
+    preparing --> awaiting_answer: 计划 + 首题
+    preparing --> failed: 生成失败
+    awaiting_answer --> evaluating: 提交回答
+    awaiting_answer --> preparing_next: 跳过
+    preparing_next --> awaiting_answer: 新基础题
+    evaluating --> awaiting_answer: 追问 / 下一题
+    evaluating --> reporting: 第 15 问完成
+    awaiting_answer --> reporting: 手动结束
+    preparing_next --> reporting: 第 15 问跳过 / 手动结束
+    evaluating --> reporting: 手动结束（中止）
+    reporting --> completed: 报告成功
+    reporting --> failed: 报告失败
+    completed --> [*]
+```
+
+- `preparing`：生成计划与首题。
+- `awaiting_answer`：当前题等待回答。
+- `evaluating`：正在评估当前回答并决定下一步。
+- `preparing_next`：跳过已落库，正在生成新基础题。
+- `reporting`：正在生成总体报告。
+- `completed` / `failed`：报告成功或失败；失败保留逐题数据，可重试结束。
+
+### 限额
+
+- 总提问数上限 15，包含基础题、追问和跳过；`askedQuestionCount` 在题目展示时计数。
+- 同一基础题最多 2 次追问；`followUpDepth` 为 0/1/2，第 2 次追问之后后端强制下一基础题。
+- 跳过不评估、不追问，消耗 1 个名额且不返还；第 15 问被跳过时直接完成。
+- 模型动作只有 `follow_up` / `next_question`；模型返回 `complete` 会被当作下一题处理，结束只由用户或 15 上限触发。
+- 计数从 `rehearsal_turns` 派生并写回 `rehearsals`，不信任模型返回值。
+
+### 结果同步
+
+- 评估完成时写 `rehearsals.overallEvaluationJson` 与各 turn 的 `evaluationJson`，并写 transcript：
+  `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md`。
+- 普通对话每轮由 `ChatService` 调用 `RehearsalsService.buildConversationDigest()`，把最近 3 次 completed 演练的摘要放进本轮 `promptContext`；总长度封顶 6000 字符。
+- digest 包含主题、学生画像、逐题问题/回答摘要/评估、总体薄弱点/建议和 transcript 路径；普通 Agent 可用 `read` 读取完整记录。
+- `contextRefsJson.rehearsals` 记录本轮实际注入的 `rehearsalIds` 与字符数；`ConversationsService.mergeUserMessageContextRefs()` 与 attachments / knowledge 合并，不再整体覆盖。
+- `LlmService` 保存 Pi 快照前用 `replaceInjectedUserText()` 清除本轮和历史的注入块；它同时处理字符串与 text-block 内容，并用代码写死的注入标题 + `## 用户输入` 分隔符清理旧快照。
+- 普通对话 UI 用独立「演练评估」卡片展示最近一次 completed 报告，不追加 assistant 消息。
+
+### 历史记录
+
+- 演练模式内可打开「历史演练」：当前 conversation 的进行中、已完成和报告失败记录。
+- 列表只返回摘要（主题、状态、结束原因、进度、总体摘要、`counts`、`nextCursor`），不返回 turns/plan/完整报告；点击后按需读取单次详情。
+- 进行中记录置顶；浏览历史不卸载当前 session，返回后题面、输入和进行中状态保留。
+- 历史范围限定在当前 conversation；跨会话历史不实现。
+
+## 持久化
+
+`rehearsals` 新增字段：`personaText`、`contextUpToSequenceNo`、`planJson`、`askedQuestionCount`、`baseQuestionCount`、`skippedCount`、`overallEvaluationJson`、`endReason`。
+
+`rehearsal_turns` 新增字段：`kind`（`base` / `follow_up`）、`baseSequenceNo`、`followUpDepth`、`pointId`；turn 状态包括 `awaiting_answer`、`answer_saved`、`evaluated`、`skipped`、`unanswered`、`failed`。
+
+同一 conversation 最多一个活跃 Rehearsal，由部分唯一索引
+`UQ_rehearsals_conversation_active`（active 状态集合）和 Service 条件检查共同保证。删除 conversation 时按现有顺序删除 `rehearsal_turns` → `rehearsals`，再删除 session 目录中的 transcript。
+
+## 失败与恢复
+
+- 模型 JSON 非法时重试一次；仍失败返回 422，保留答案供重试。
+- 回答评估失败：turn 转 `failed`，rehearsal 回 `awaiting_answer`；同一 `answerRequestId` 可重试。
+- 跳过生成失败：turn 保持 `skipped`，rehearsal 保持 `preparing_next`；同一 `turnId` 可重试。
+- 报告失败：rehearsal 转 `failed`，保留逐题数据；重试 `end`。
+- 进程中断后，读取时只 reconciliation“无活跃 run 且超过 120 秒”的行：`evaluating`/`preparing_next` 回 `awaiting_answer`，`preparing`/`reporting` 转 `failed`。
+- 每个 Rehearsal 在进程内串行；`end` 会 abort 进行中的模型调用并等待其退出，迟到结果不写入。
+
+## 当前边界
+
+- 报告生成失败时，历史和报告页只显示逐题数据，不伪造总体结论。
+- 普通对话 digest 每轮重复注入，token 成本随最近 3 次报告长度增长；完整原文留在 transcript。
+- 开场复用父 Pi 快照时，模型可能延续普通对话语气；system prompt 已强制角色切换，但仍需真实长对话验收。
+- v1 使用 JSON 请求/响应，不做 SSE；没有跨会话演练历史、报告导出、人工重评或计划编辑。
+- 15 问总上限包含追问，基础题实际数量可能是 5–15。
+
+## 代码入口
+
+- 状态机、digest、transcript、恢复：`apps/backend/src/rehearsals/rehearsals.service.ts`
+- 模型 prompt 与 JSON 校验：`rehearsal-prompts.ts`、`rehearsal-json.ts`
+- 每 Rehearsal 锁与 abort：`rehearsal-run-registry.ts`
+- HTTP 边界：`rehearsals.controller.ts`
+- 非流式模型调用：`apps/backend/src/llm/llm.service.ts` 的 `generate()`
+- 普通对话注入：`apps/backend/src/chat/chat.service.ts`
+- 快照清洗：`apps/backend/src/llm/session-entries.ts`
+- 桌面端：`apps/desktop/src/features/rehearsal/`

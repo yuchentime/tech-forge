@@ -67,8 +67,40 @@ test('ChatService delegates the prompt and request signal to the configured mode
     },
   };
 
-  const service = new ChatService(llm);
-  assert.deepEqual(await collect(service.stream('讲解缓存雪崩', signal)), [
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    startToolExecution: async () => 'tool-row-1',
+    updateToolExecution: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({ text: '', refsJson: null }),
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+  );
+  assert.deepEqual(
+    await collect(
+      service.stream(
+        '讲解缓存雪崩',
+        '11111111-1111-4111-8111-111111111111',
+        signal,
+      ),
+    ),
+    [
+    { type: 'conversation', conversationId: '11111111-1111-4111-8111-111111111111' },
     { type: 'agent_start' },
     { type: 'turn_start' },
     {
@@ -90,13 +122,15 @@ test('ChatService delegates the prompt and request signal to the configured mode
       assistantMessageEvent: { type: 'text_delta', delta: '第一段' },
     },
     { type: 'agent_end' },
-  ]);
-  assert.deepEqual(calls, [
-    {
-      prompt: '讲解缓存雪崩',
-      options: { providerId: 'deepseek', modelId: 'deepseek-flash', signal },
-    },
-  ]);
+    ],
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prompt, '讲解缓存雪崩');
+  assert.equal(calls[0].options.signal, signal);
+  assert.equal(
+    calls[0].options.conversation.id,
+    '11111111-1111-4111-8111-111111111111',
+  );
 });
 
 test('ChatPromptDto trims input and counts Unicode characters', async () => {
@@ -156,8 +190,21 @@ test('LlmService queues Pi session events in subscription order', async () => {
     getLastAssistantText() {
       return '回答';
     },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
   };
-  const service = new LlmService({}, {});
+  const service = new LlmService(
+    {},
+    {},
+    {
+      getLlmSettings: async () => ({
+        provider: 'deepseek',
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
+      }),
+    },
+    {},
+  );
   service.createSession = async () => session;
 
   assert.deepEqual(await collect(service.stream('prompt')), [
@@ -201,8 +248,21 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
     getLastAssistantText() {
       return '部分回答';
     },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
   };
-  const service = new LlmService({}, {});
+  const service = new LlmService(
+    {},
+    {},
+    {
+      getLlmSettings: async () => ({
+        provider: 'deepseek',
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
+      }),
+    },
+    {},
+  );
   service.createSession = async () => session;
   const controller = new AbortController();
   const iterator = service.stream('prompt', { signal: controller.signal });

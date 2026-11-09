@@ -15,6 +15,7 @@ import {
 import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
 import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
+import { RehearsalsService } from '../rehearsals/rehearsals.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { ConversationRunRegistry } from '../conversations/conversation-run-registry';
 import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
@@ -52,6 +53,7 @@ export class ChatService {
     private readonly knowledge: KnowledgeService,
     private readonly attachments: AttachmentsService,
     private readonly artifacts: ArtifactsService,
+    private readonly rehearsals: RehearsalsService,
     private readonly conversationRuns: ConversationRunRegistry = new ConversationRunRegistry(),
   ) {}
 
@@ -175,6 +177,36 @@ export class ChatService {
         conversationId: resolvedConversationId,
       };
 
+      phase = 'rehearsal.digest';
+      let rehearsalDigest: { text: string; refsJson: string | null } = {
+        text: '',
+        refsJson: null,
+      };
+      try {
+        rehearsalDigest = await this.rehearsals.buildConversationDigest(
+          resolvedConversationId,
+          logContext,
+        );
+        if (rehearsalDigest.refsJson) {
+          await this.conversations.mergeUserMessageContextRefs(
+            turn.userMessageId,
+            rehearsalDigest.refsJson,
+            logContext,
+          );
+        }
+      } catch (error) {
+        // A broken drill record must not block the normal conversation.
+        writeStructuredEvent(
+          this.logger,
+          'warn',
+          'chat.rehearsal_digest.failed',
+          {
+            ...logContext,
+            ...getSafeErrorLogFields(error),
+          },
+        );
+      }
+
       let attachmentContext: string | undefined;
       const requestedAttachments = dedupeAttachments(attachments);
       let currentAttachments: AttachmentRefInjected[] = [];
@@ -189,7 +221,7 @@ export class ChatService {
         attachmentContext = rendered.text;
         currentAttachments = rendered.refs;
         // Only the reference and sizes are durable: the text belongs to this turn, not the transcript.
-        await this.conversations.updateUserMessageContextRefs(
+        await this.conversations.mergeUserMessageContextRefs(
           turn.userMessageId,
           JSON.stringify({ attachments: rendered.refs }),
           logContext,
@@ -255,7 +287,7 @@ export class ChatService {
         // Recorded before the model runs so a failed or cancelled turn still reflects what was sent.
         const refsJson = this.knowledge.toContextRefsJson(knowledgeContext, userPrompt);
         if (refsJson) {
-          await this.conversations.updateUserMessageContextRefs(
+          await this.conversations.mergeUserMessageContextRefs(
             turn.userMessageId,
             refsJson,
             logContext,
@@ -275,7 +307,11 @@ export class ChatService {
       // Per-turn reference material travels with the user message, never in the system prompt:
       // the system prompt must stay identical across turns for provider prefix caching, and the
       // snapshot is cleaned of this block before it is stored.
-      const promptContext = [attachmentContext, knowledgeContext?.text]
+      const promptContext = [
+        rehearsalDigest.text,
+        attachmentContext,
+        knowledgeContext?.text,
+      ]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
 
@@ -287,6 +323,7 @@ export class ChatService {
         knowledgeOutcome: knowledgeContext?.outcome,
         injectedDocumentCount: knowledgeContext?.refs.length ?? 0,
         injectedTokens: knowledgeContext?.stats.injectedTokens ?? 0,
+        rehearsalDigestCharacters: rehearsalDigest.text.length,
         promptContextCharacters: promptContext.length,
       });
       const piEvents = this.llm.stream(userPrompt, {

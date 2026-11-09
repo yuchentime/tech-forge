@@ -21,6 +21,41 @@ routes:
       - docs/current/domains/conversations/api-contract.md
       - docs/changes/2026-11-09-chat-attachments/verification.md
     history_on_demand: []
+  rehearsal-mode:
+    description: "Implement Feynman-style rehearsal: a separate Rehearsal state machine with optional student profile, a 15-question total cap, at most 2 follow-ups per base question, skip/manual-end/limit reporting, a paginated per-conversation history with read-only Q&A and evaluation detail, and normal-chat digest injection"
+    token_budget: 24000
+    code_globs:
+      - "apps/backend/src/rehearsals/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/chat/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/database/migrations/**"
+      - "apps/backend/src/settings/settings.service.ts"
+      - "apps/backend/test/rehearsal*.test.cjs"
+      - "apps/desktop/src/features/rehearsal/**"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/changes/2026-11-09-rehearsal-mode/design.md
+    optional:
+      - docs/changes/2026-11-09-rehearsal-mode/brief.md
+      - docs/current/domains/rehearsals/api-contract.md
+      - docs/changes/2026-11-09-rehearsal-mode/tasks.md
+      - docs/changes/2026-11-09-rehearsal-mode/verification.md
+      - docs/changes/2026-11-09-rehearsal-mode/worklog.md
+      - docs/current/domains/conversations/api-contract.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/source/data-model-design.md
+      - docs/source/data-model-fields.md
+    history_on_demand:
+      - docs/changes/2026-11-09-chat-attachments/design.md
+      - docs/changes/2026-11-07-conversation-session-persistence/design.md
   conversation-deletion:
     description: "Physically delete a conversation: rows (messages, snapshots, derived tables) in one transaction plus the local session directory, triggered from the sidebar hover menu"
     token_budget: 12000
@@ -155,6 +190,7 @@ routes:
       - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/llm/**"
+      - "apps/backend/test/verify-compaction.cjs"
       - "apps/desktop/src/features/agent/**"
       - "apps/desktop/src/types/**"
       - "apps/desktop/electron/**"
@@ -179,6 +215,7 @@ routes:
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/llm/**"
       - "apps/backend/src/logging/**"
+      - "apps/backend/test/verify-compaction.cjs"
     required:
       - docs/current/index.md
       - docs/current/platform/index.md

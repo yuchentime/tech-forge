@@ -33,6 +33,21 @@ export class RehearsalTurnEntity {
   @Column({ type: 'integer' })
   sequenceNo!: number;
 
+  /** `base` for a new knowledge point, `follow_up` for a drill-down on the same one. */
+  @Column({ type: 'varchar', default: 'base' })
+  kind!: string;
+
+  /** Sequence number of the base question this turn belongs to. */
+  @Column({ type: 'integer', default: 0 })
+  baseSequenceNo!: number;
+
+  /** 0 for a base question, 1 or 2 for follow-ups. */
+  @Column({ type: 'integer', default: 0 })
+  followUpDepth!: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  pointId!: string | null;
+
   @Column({ type: 'text' })
   question!: string;
 
