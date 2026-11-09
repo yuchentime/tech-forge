@@ -379,3 +379,28 @@ routes:
       - docs/current/domains/conversations/api-contract.md
       - docs/changes/2026-11-09-artifact-sidebar/verification.md
     history_on_demand: []
+  concurrent-conversations:
+    description: "Run multiple conversations in parallel in the desktop Agent: one runtime per thread, background streaming after switching, per-thread running state, isolated composer/artifact state, and guarded deletion of running conversations"
+    token_budget: 24000
+    code_globs:
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/src/chat/**"
+      - "apps/backend/test/conversation-*.test.cjs"
+      - "apps/desktop/src/App.tsx"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/**"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-09-concurrent-conversations/design.md
+    optional:
+      - docs/changes/2026-11-09-concurrent-conversations/brief.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/platform/tech-stack.md
+    history_on_demand:
+      - docs/changes/2026-11-07-conversation-history-sidebar/design.md
+      - docs/changes/2026-11-07-conversation-session-persistence/design.md
