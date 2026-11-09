@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConversationsModule } from '../conversations/conversations.module';
-import { RetrievalModule } from '../retrieval/retrieval.module';
 import { SettingsModule } from '../settings/settings.module';
 import { CustomLLMAdapter } from './adapters/custom-llm.adapter';
 import { DeepseekLLMAdapter } from './adapters/deepseek-llm.adapter';
 import { LlmService } from './llm.service';
 
 @Module({
-  imports: [SettingsModule, ConversationsModule, RetrievalModule],
+  imports: [SettingsModule, ConversationsModule],
   providers: [LlmService, DeepseekLLMAdapter, CustomLLMAdapter],
   exports: [LlmService],
 })

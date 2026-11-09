@@ -1,8 +1,13 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EmbeddingService } from '../embedding/embedding.service';
+import {
+  clipLogText,
+  getSafeErrorLogFields,
+  writeStructuredEvent,
+} from '../logging/structured-logger';
 import { buildExpansionMatchQuery, QUERY_EXPANDER, type QueryExpander } from './query-expander';
-import { buildMatchQuery, singleHanCharacter } from './text-normalizer';
+import { buildDistinctiveMatchQuery, buildMatchQuery, singleHanCharacter } from './text-normalizer';
 
 /** Reciprocal rank fusion constant; identical to the value fixed in the design. */
 export const RRF_K = 60;
@@ -20,6 +25,8 @@ export const MIN_VECTOR_SCORE = 0.55;
 export const EXPAND_BELOW_LEXICAL_HITS = 1;
 /** Rank penalty applied to expanded-terms hits so literal query matches still lead. */
 export const EXPANSION_RANK_OFFSET = 5;
+/** Cap for the generated FTS5 MATCH expression kept in one debug line. */
+const LEXICAL_MATCH_LOG_MAX_CHARS = 300;
 
 /** One retrieval request. `documentIds` restricts the search to an explicit document set. */
 export interface RetrievalRequest {
@@ -99,33 +106,84 @@ interface ChannelHit {
  */
 @Injectable()
 export class RetrievalService {
+  private readonly logger = new Logger(RetrievalService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly embeddings: EmbeddingService,
     @Optional() @Inject(QUERY_EXPANDER) private readonly expander?: QueryExpander,
   ) {}
 
-  /** Runs lexical and dense recall, optionally adds LLM-expanded terms, and fuses the ranking. */
+  /**
+   * Runs lexical and dense recall, optionally adds LLM-expanded terms, and fuses the ranking.
+   *
+   * Emits one `retrieval.search.completed` line per non-trivial call with per-channel hit counts,
+   * per-channel elapsed time and the reason an empty result happened. Channel failures are logged
+   * where they degrade the search (dense embedding, query expansion) so a thin result set is
+   * diagnosable without reproducing the request.
+   */
   async search(request: RetrievalRequest): Promise<RetrievalHit[]> {
     const limit = request.limit ?? DEFAULT_LIMIT;
     const query = request.query?.trim() ?? '';
-    if (query === '' || limit <= 0) return [];
+    const startedAt = Date.now();
+    if (query === '' || limit <= 0) {
+      writeStructuredEvent(this.logger, 'warn', 'retrieval.search.skipped', {
+        reason: query === '' ? 'empty_query' : 'non_positive_limit',
+        queryLength: Array.from(request.query ?? '').length,
+        limit,
+      });
+      return [];
+    }
 
-    const [lexical, dense] = await Promise.all([
-      this.searchLexical(query, request.documentIds),
-      this.searchDense(query, request.documentIds, request.minVectorScore ?? MIN_VECTOR_SCORE),
+    const [[lexical, lexicalMs], [dense, denseMs]] = await Promise.all([
+      measure(() => this.searchLexical(query, request.documentIds)),
+      measure(() =>
+        this.searchDense(query, request.documentIds, request.minVectorScore ?? MIN_VECTOR_SCORE),
+      ),
     ]);
 
     // Expansion costs a model round-trip, so it only runs when literal terms under-deliver. It is
     // strictly additive: the original terms keep their own ranked list and therefore their rank.
+    const expansionRequested =
+      Boolean(this.expander) &&
+      request.expand !== false &&
+      lexical.length < EXPAND_BELOW_LEXICAL_HITS;
     let expanded: ChannelHit[] = [];
-    if (this.expander && request.expand !== false && lexical.length < EXPAND_BELOW_LEXICAL_HITS) {
-      expanded = await this.searchExpanded(query, request.documentIds);
+    let expansionMs = 0;
+    if (expansionRequested) {
+      [expanded, expansionMs] = await measure(() =>
+        this.searchExpanded(query, request.documentIds),
+      );
     }
 
     const fused = this.fuse(lexical, dense, expanded).slice(0, limit);
-    if (fused.length === 0) return [];
-    return this.hydrate(fused);
+    const hits = fused.length === 0 ? [] : await this.hydrate(fused);
+    const candidateCount = lexical.length + dense.length + expanded.length;
+    writeStructuredEvent(this.logger, 'log', 'retrieval.search.completed', {
+      query: clipLogText(query),
+      queryLength: Array.from(query).length,
+      limit,
+      scopedDocumentCount: request.documentIds?.length ?? 0,
+      lexicalHitCount: lexical.length,
+      denseHitCount: dense.length,
+      expandedHitCount: expanded.length,
+      expansion: expansionRequested
+        ? expanded.length > 0
+          ? 'used'
+          : 'no_hits'
+        : 'skipped',
+      fusedCount: fused.length,
+      hitCount: hits.length,
+      hydrateDroppedCount: fused.length - hits.length,
+      outcome:
+        hits.length > 0 ? 'hit' : candidateCount === 0 ? 'no_candidates' : 'hydrate_missing',
+      durationMs: Date.now() - startedAt,
+      lexicalDurationMs: lexicalMs,
+      denseDurationMs: denseMs,
+      expansionDurationMs: expansionMs,
+      topChunkIds: hits.slice(0, 3).map((hit) => hit.chunkId),
+    });
+    return hits;
   }
 
   /** Runs the expansion channel; any failure means "no expansion", never a failed search. */
@@ -133,22 +191,57 @@ export class RetrievalService {
     if (!this.expander) return [];
     try {
       const expansion = await this.expander.expand(query);
-      if (!expansion) return [];
+      if (!expansion) {
+        writeStructuredEvent(this.logger, 'debug', 'retrieval.expansion.empty', {
+          query: clipLogText(query),
+        });
+        return [];
+      }
       const match = buildExpansionMatchQuery(expansion);
+      writeStructuredEvent(this.logger, 'debug', 'retrieval.expansion.terms', {
+        query: clipLogText(query),
+        keywords: expansion.keywords.map((keyword) => clipLogText(keyword, 60)),
+        correctedQuery: expansion.correctedQuery
+          ? clipLogText(expansion.correctedQuery)
+          : undefined,
+        match: clipLogText(match, LEXICAL_MATCH_LOG_MAX_CHARS),
+        usable: Boolean(match),
+      });
       if (!match) return [];
-      return await this.searchLexicalByMatch(match, documentIds);
-    } catch {
+      return await this.searchLexicalByMatch(match, documentIds, 'expanded');
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'debug', 'retrieval.expansion.failed', {
+        query: clipLogText(query),
+        ...getSafeErrorLogFields(error),
+      });
       return [];
     }
   }
 
-  /** Runs the FTS5 channel for the query terms; returns no hits when nothing is indexable. */
+  /**
+   * Runs the FTS5 channel for the query terms; returns no hits when nothing is indexable.
+   *
+   * Specific names are tried first. A question that names its subject ("… EDMA …") must not lose to a
+   * long document that merely shares the question's generic words, and measured on a real corpus it
+   * did. Falling back to the broad expression keeps ordinary questions unchanged.
+   */
   private async searchLexical(query: string, documentIds?: string[]): Promise<ChannelHit[]> {
     const singleCharacter = singleHanCharacter(query);
     if (singleCharacter) return this.searchSubstring(singleCharacter, documentIds);
+    const distinctive = buildDistinctiveMatchQuery(query);
+    if (distinctive) {
+      const focused = await this.searchLexicalByMatch(distinctive, documentIds, 'lexical');
+      if (focused.length > 0) return focused;
+    }
     const match = buildMatchQuery(query);
-    if (!match) return [];
-    return this.searchLexicalByMatch(match, documentIds);
+    if (!match) {
+      writeStructuredEvent(this.logger, 'warn', 'retrieval.lexical.no_indexable_terms', {
+        query: clipLogText(query),
+        queryLength: Array.from(query).length,
+      });
+      return [];
+    }
+    return this.searchLexicalByMatch(match, documentIds, 'lexical');
   }
 
   /**
@@ -173,13 +266,19 @@ export class RetrievalService {
         LIMIT ?`,
       scope ? [character, ...scope, CHANNEL_DEPTH] : [character, CHANNEL_DEPTH],
     );
+    writeStructuredEvent(this.logger, 'debug', 'retrieval.lexical.substring_scanned', {
+      character,
+      scopedDocumentCount: scope?.length ?? 0,
+      rowCount: rows.length,
+    });
     return rows.map((row, rank) => ({ chunkId: row.chunkId, score: CHANNEL_DEPTH - rank }));
   }
 
   /** Runs one FTS5 MATCH expression and returns chunks ordered by bm25. */
   private async searchLexicalByMatch(
     match: string,
-    documentIds?: string[],
+    documentIds: string[] | undefined,
+    channel: 'lexical' | 'expanded',
   ): Promise<ChannelHit[]> {
     const scope = documentIds && documentIds.length > 0 ? documentIds : undefined;
     const rows = await this.dataSource.query<Array<{ chunkId: string; score: number }>>(
@@ -193,6 +292,13 @@ export class RetrievalService {
         LIMIT ?`,
       scope ? [match, ...scope, CHANNEL_DEPTH] : [match, CHANNEL_DEPTH],
     );
+    writeStructuredEvent(this.logger, 'debug', 'retrieval.lexical.matched', {
+      channel,
+      match: clipLogText(match, LEXICAL_MATCH_LOG_MAX_CHARS),
+      scopedDocumentCount: scope?.length ?? 0,
+      rowCount: rows.length,
+      topScore: rows.length > 0 ? Number((-Number(rows[0].score)).toFixed(4)) : undefined,
+    });
     // FTS5 bm25() is negative (lower is better); flip so callers see a monotonic score.
     return rows.map((row) => ({ chunkId: row.chunkId, score: -Number(row.score) }));
   }
@@ -206,8 +312,15 @@ export class RetrievalService {
     let queryVector: Float32Array;
     try {
       queryVector = await this.embeddings.embedOne(query);
-    } catch {
+    } catch (error) {
       // Embeddings unavailable: retrieval degrades to the lexical channel instead of failing.
+      writeStructuredEvent(this.logger, 'warn', 'retrieval.dense_channel.failed', {
+        query: clipLogText(query),
+        modelId: this.embeddings.modelId,
+        // Embedding failures are technical (missing model file, load error), not user content.
+        detail: clipLogText(error instanceof Error ? error.message : String(error)),
+        ...getSafeErrorLogFields(error),
+      });
       return [];
     }
 
@@ -223,15 +336,36 @@ export class RetrievalService {
     );
 
     const hits: ChannelHit[] = [];
+    let skippedByWidth = 0;
+    let skippedByFloor = 0;
+    let bestBelowFloor = 0;
     for (const row of rows) {
       const vector = toFloat32(row.vector);
-      if (vector.length !== queryVector.length) continue;
+      if (vector.length !== queryVector.length) {
+        skippedByWidth += 1;
+        continue;
+      }
       let dot = 0;
       for (let index = 0; index < vector.length; index += 1) dot += vector[index] * queryVector[index];
-      if (dot <= minScore) continue;
+      if (dot <= minScore) {
+        skippedByFloor += 1;
+        bestBelowFloor = Math.max(bestBelowFloor, dot);
+        continue;
+      }
       hits.push({ chunkId: row.chunkId, score: dot });
     }
     hits.sort((a, b) => b.score - a.score);
+    writeStructuredEvent(this.logger, 'debug', 'retrieval.dense_channel.scored', {
+      modelId: this.embeddings.modelId,
+      dimension: this.embeddings.dimension,
+      scopedDocumentCount: scope?.length ?? 0,
+      vectorRowCount: rows.length,
+      acceptedCount: hits.length,
+      skippedByWidth,
+      skippedByFloor,
+      bestBelowFloor: Number(bestBelowFloor.toFixed(4)),
+      topScore: hits.length > 0 ? Number(hits[0].score.toFixed(4)) : undefined,
+    });
     return hits.slice(0, CHANNEL_DEPTH);
   }
 
@@ -326,6 +460,13 @@ export class RetrievalService {
       })
       .filter((hit): hit is RetrievalHit => hit !== null);
   }
+}
+
+/** Runs one channel and returns its value with the elapsed milliseconds recorded for the trace. */
+async function measure<T>(run: () => Promise<T>): Promise<[T, number]> {
+  const startedAt = Date.now();
+  const value = await run();
+  return [value, Date.now() - startedAt];
 }
 
 /** Reinterprets a BLOB as Float32Array without copying when the buffer is already aligned. */

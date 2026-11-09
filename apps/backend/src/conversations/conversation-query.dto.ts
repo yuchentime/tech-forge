@@ -1,4 +1,4 @@
-import { IsOptional, IsUUID } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsOptional, IsUUID } from 'class-validator';
 
 /** Describes one sidebar row returned by the Conversation list API. */
 export interface ConversationSummaryDto {
@@ -25,6 +25,20 @@ export interface ConversationToolActivityDto {
   path?: string;
   status: 'completed' | 'failed';
   durationMs?: number;
+}
+
+/** Describes the explicit knowledge scope of one conversation. */
+export interface ConversationKnowledgeScopeDto {
+  /** Documents this conversation may search; empty means the default range applies. */
+  documentIds: string[];
+}
+
+/** Validates an explicit knowledge scope replacement. */
+export class SetKnowledgeScopeDto {
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  documentIds!: string[];
 }
 
 /** Describes one bounded visible-message page and whether an older page exists. */

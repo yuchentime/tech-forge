@@ -1,18 +1,46 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+  Optional,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, extname, isAbsolute, join, relative, sep } from 'node:path';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { DataSource, In, Repository, type EntityManager } from 'typeorm';
 import { DocumentParserService } from '../platform/document-parser/document-parser.service';
 import { EmbeddingService } from '../embedding/embedding.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   isDocumentParserError,
   type ParseDocumentResult,
 } from '../platform/document-parser/document-parser.types';
-import { chunkDocument, DocumentChunkLimitError, type DocumentChunk } from './chunking/document-chunker';
+import {
+  chunkDocument,
+  DocumentChunkLimitError,
+  joinParsedPages,
+  type DocumentChunk,
+} from './chunking/document-chunker';
 import { getChunkTokenCounter } from './chunking/token-counter';
 import { toSearchTerms } from '../retrieval/text-normalizer';
+import { ConversationDocumentEntity } from './conversation-document.entity';
 import { DocumentChunkEntity } from './document-chunk.entity';
 import { DocumentVersionEntity } from './document-version.entity';
 import { DocumentEntity } from './document.entity';
@@ -50,6 +78,21 @@ export interface IngestDocumentResult {
   warnings: Array<{ code: string; message: string }>;
 }
 
+/** Outcome of importing one file from disk into the knowledge library. */
+export interface ImportDocumentResult extends IngestDocumentResult {
+  /**
+   * Absolute path of the retained copy under the app-owned knowledge root (never the Agent
+   * workspace); null when nothing was copied.
+   */
+  storedPath: string | null;
+}
+
+/** Outcome of one deletion, including whether both file copies could be removed. */
+export interface DeleteDocumentResult {
+  /** `partial` means the rows are gone but at least one file copy could not be removed. */
+  fileCleanup: 'complete' | 'partial';
+}
+
 /** Read model for the document list. */
 export interface DocumentSummary {
   id: string;
@@ -61,6 +104,9 @@ export interface DocumentSummary {
     status: DocumentProcessingStatus;
     originalName: string;
     chunkCount: number;
+    byteSize: number | null;
+    createdAt: Date;
+    processingError: string | null;
   } | null;
 }
 
@@ -85,12 +131,17 @@ const CHUNK_INSERT_BATCH = 200;
  * Owns the document ingest business line: local file path in, persisted document/version/chunks out.
  *
  * Responsibilities: identity and versioning, copying the source file into managed storage, invoking
- * the platform parser, chunking, and persisting chunks inside one transaction. Index building and
+ * the platform parser, chunking, and persisting chunks inside one transaction. Also owns the
+ * knowledge-library use cases that wrap ingest: importing a picked file through the Agent workspace
+ * and deleting a document together with every derived row and file copy. Index building and
  * retrieval are separate business lines and are not implemented here.
  */
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
+  private readonly logger = new Logger(DocumentsService.name);
   private readonly storageRoot: string;
+  /** Serialises imports and deletions so heavy CPU work and SQLite writes never interleave. */
+  private libraryQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
     @InjectRepository(DocumentEntity)
@@ -102,9 +153,37 @@ export class DocumentsService {
     private readonly dataSource: DataSource,
     private readonly parser: DocumentParserService,
     private readonly embeddings: EmbeddingService,
+    private readonly settings: SettingsService,
     @Optional() @Inject(DOCUMENTS_STORAGE_ROOT) storageRoot?: string,
   ) {
     this.storageRoot = storageRoot ?? resolveDefaultStorageRoot();
+  }
+
+  /**
+   * Relocates a legacy `<workspace>/knowledge` directory out of the Agent workspace.
+   *
+   * Earlier builds stored the retained copies inside the workspace, where a default `grep` could read
+   * the uploaded originals. The move is best-effort and never destructive: an existing target wins,
+   * and a failure is logged because imports already write to the new location.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const legacyDirectory = join(await this.settings.getWorkspacePath(), 'knowledge');
+      const targetDirectory = this.settings.getKnowledgeDirectory();
+      if (!existsSync(legacyDirectory) || existsSync(targetDirectory)) return;
+      mkdirSync(dirname(targetDirectory), { recursive: true });
+      renameSync(legacyDirectory, targetDirectory);
+      this.logger.log(
+        `documents.knowledge_dir.migrated ${JSON.stringify({
+          from: legacyDirectory,
+          to: targetDirectory,
+        })}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `documents.knowledge_dir.migrate_failed ${JSON.stringify({ detail: describeDetail(error) })}`,
+      );
+    }
   }
 
   /** Parses one local file and persists document, version and chunks. Idempotent per content hash. */
@@ -165,6 +244,25 @@ export class DocumentsService {
       throw error;
     }
 
+    // The converted text is kept next to the source copy so the user (and a user-directed `read`)
+    // can open what the model actually sees. Failure is a warning: the rows are still searchable.
+    let convertedMarkdownWarning: { code: string; message: string } | undefined;
+    try {
+      this.writeConvertedMarkdown(document.id, versionNo, originalName, parsed.pages);
+    } catch (error) {
+      convertedMarkdownWarning = {
+        code: 'CONVERTED_MARKDOWN_FAILED',
+        message: '转换后的 Markdown 没能保存，资料本身仍然可以检索。',
+      };
+      this.logger.warn(
+        `documents.ingest.converted_markdown_failed ${JSON.stringify({
+          documentId: document.id,
+          versionNo,
+          detail: describeDetail(error),
+        })}`,
+      );
+    }
+
     await this.updateStatus(version.id, 'chunking');
 
     let chunkCount: number;
@@ -177,7 +275,7 @@ export class DocumentsService {
         countTokens: getChunkTokenCounter().count,
       });
       chunkCount = chunks.length;
-      persisted = await this.persistChunks(version.id, chunks);
+      persisted = await this.persistChunks(version.id, chunks, document.title);
     } catch (error) {
       await this.markFailed(version.id, describeError(error));
       throw error;
@@ -187,6 +285,7 @@ export class DocumentsService {
       code: String(warning.code),
       message: warning.message,
     }));
+    if (convertedMarkdownWarning) warnings.push(convertedMarkdownWarning);
 
     // Dense vectors are a separate phase on purpose: a failure here must not discard the lexical
     // index that was already committed, so the version stays `indexed` and reports a warning.
@@ -202,7 +301,12 @@ export class DocumentsService {
       status = 'ready';
     } catch (error) {
       const message = describeError(error);
-      warnings.push({ code: 'EMBEDDING_FAILED', message });
+      // The warning is shown in the knowledge library, so it carries user-facing copy; the
+      // technical detail stays on the version row for diagnostics.
+      warnings.push({
+        code: 'EMBEDDING_FAILED',
+        message: '这份资料暂时只能用关键词搜索，还不能按意思搜索。',
+      });
       await this.versionRepositoryErrorNote(version.id, message);
     }
 
@@ -215,6 +319,208 @@ export class DocumentsService {
       duplicate: false,
       warnings,
     };
+  }
+
+  /**
+   * Imports one picked local file into the knowledge library.
+   *
+   * The bytes are first written to `<workspace>/knowledge/.importing/<uuid>/` so the upload lives in
+   * the configured Agent workspace, then ingest runs on that copy. A duplicate or failed ingest
+   * removes the staging directory, and a successful ingest renames it to the document id so deletion
+   * can locate the copy without extra bookkeeping.
+   *
+   * Failures split in two: anything that stops the import (unreadable source, unsupported format,
+   * unwritable workspace, parse/chunk error) is thrown with user-facing Chinese copy and logged;
+   * a failure to keep the upload copy after a successful ingest degrades to a warning because the
+   * indexed content is already usable.
+   */
+  async importFromPath(input: { filePath: string; title?: string }): Promise<ImportDocumentResult> {
+    return this.runExclusive(async () => {
+      const sourcePath = this.validateInput({ filePath: input.filePath });
+      const originalName = basename(sourcePath);
+      if (!this.parser.supportsFile(originalName)) {
+        throw new BadRequestException({
+          statusCode: 400,
+          code: 'UNSUPPORTED_FILE_TYPE',
+          message: `这种文件暂时不能导入（${extname(originalName) || '无扩展名'}）。支持 PDF、Word（.docx）、Markdown（.md）和 TXT。`,
+        });
+      }
+
+      try {
+        this.assertReadable(sourcePath);
+      } catch (error) {
+        this.logger.warn(
+          `documents.import.source_unreadable ${JSON.stringify({ detail: describeDetail(error) })}`,
+        );
+        throw new BadRequestException({
+          statusCode: 400,
+          code: 'SOURCE_UNREADABLE',
+          message: '无法读取所选文件，它可能已被移动、重命名或删除，请重新选择。',
+          detail: describeDetail(error),
+        });
+      }
+
+      const knowledgeDirectory = this.settings.getKnowledgeDirectory();
+      const stagingDirectory = join(knowledgeDirectory, '.importing', randomUUID());
+      const stagedPath = join(stagingDirectory, originalName);
+      try {
+        mkdirSync(stagingDirectory, { recursive: true });
+        copyFileSync(sourcePath, stagedPath);
+      } catch (error) {
+        this.removeDirectory(stagingDirectory, 'import_staging_failed');
+        this.logger.error(
+          `documents.import.staging_failed ${JSON.stringify({ detail: describeDetail(error) })}`,
+        );
+        throw new InternalServerErrorException({
+          statusCode: 500,
+          code: 'WORKSPACE_UNWRITABLE',
+          message: '没能把资料保存到知识库目录，请确认本机磁盘可写或稍后重试。',
+          detail: describeDetail(error),
+        });
+      }
+
+      let result: IngestDocumentResult;
+      try {
+        result = await this.ingestFile({
+          filePath: stagedPath,
+          title: input.title,
+          isShared: true,
+        });
+      } catch (error) {
+        this.removeDirectory(stagingDirectory, 'import_failed');
+        // Parse and chunk failures are about the file's content, so surface the reason instead of
+        // the generic 500 the default exception filter would return.
+        if (error instanceof HttpException) throw error;
+        const failure = describeIngestFailure(error);
+        this.logger.warn(
+          `documents.import.failed ${JSON.stringify({ code: failure.code, detail: failure.detail })}`,
+        );
+        throw new UnprocessableEntityException({
+          statusCode: 422,
+          code: failure.code,
+          message: failure.message,
+          detail: failure.detail,
+        });
+      }
+
+      if (result.duplicate) {
+        this.removeDirectory(stagingDirectory, 'import_duplicate');
+        return { ...result, storedPath: null };
+      }
+
+      const targetDirectory = join(knowledgeDirectory, result.documentId);
+      try {
+        this.removeDirectory(targetDirectory, 'import_replace_existing_copy');
+        mkdirSync(dirname(targetDirectory), { recursive: true });
+        renameSync(stagingDirectory, targetDirectory);
+      } catch (error) {
+        // The ingest is committed and searchable, so this must not fail the request.
+        this.removeDirectory(stagingDirectory, 'import_promote_failed');
+        this.logger.error(
+          `documents.import.upload_copy_failed ${JSON.stringify({
+            documentId: result.documentId,
+            detail: describeDetail(error),
+          })}`,
+        );
+        return {
+          ...result,
+          storedPath: null,
+          warnings: [
+            ...result.warnings,
+            {
+              code: 'UPLOAD_COPY_FAILED',
+              message:
+                '资料已经可以搜索，但原文件没能另存到知识库目录，删除这份资料时不会连带删除那个文件。',
+            },
+          ],
+        };
+      }
+
+      return { ...result, storedPath: join(targetDirectory, originalName) };
+    });
+  }
+
+  /**
+   * Deletes one document and everything derived from it.
+   *
+   * Rows are removed in one transaction in foreign-key and FTS-trigger order, then both file copies
+   * are removed after commit. A document that is still parsing or chunking is refused, because its
+   * ingest would keep writing rows for a document that no longer exists. A file that cannot be
+   * removed is reported as `partial` cleanup instead of being ignored.
+   */
+  async deleteDocument(documentId: string): Promise<DeleteDocumentResult> {
+    return this.runExclusive(async () => {
+      const document = await this.requireDocument(documentId);
+      const versions = await this.versions.find({ where: { documentId } });
+      const isProcessing = versions.some(
+        (version) =>
+          version.processingStatus === 'parsing' || version.processingStatus === 'chunking',
+      );
+      if (isProcessing) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'DOCUMENT_PROCESSING',
+          message: '这份资料还在处理中，等处理完再删除。',
+        });
+      }
+
+      await this.dataSource.transaction(async (manager) => {
+        // `chunk_embeddings` has no foreign key, so an untouched row would stay retrievable.
+        await manager.query('DELETE FROM "chunk_embeddings" WHERE "documentId" = ?', [documentId]);
+        // Deleting the term stream first lets the AFTER DELETE triggers keep `chunk_fts` in sync.
+        await manager.query(
+          `DELETE FROM "chunk_search_terms" WHERE "chunkId" IN (
+             SELECT "id" FROM "document_chunks"
+              WHERE "documentVersionId" IN (
+                SELECT "id" FROM "document_versions" WHERE "documentId" = ?))`,
+          [documentId],
+        );
+        await manager.query(
+          `DELETE FROM "document_chunks" WHERE "documentVersionId" IN (
+             SELECT "id" FROM "document_versions" WHERE "documentId" = ?)`,
+          [documentId],
+        );
+        await manager.delete(DocumentVersionEntity, { documentId });
+        await manager.delete(ConversationDocumentEntity, { documentId });
+        await manager.delete(DocumentEntity, { id: document.id });
+      });
+
+      const storageCopyRemoved = this.removeDirectory(
+        join(this.storageRoot, 'documents', documentId),
+        'delete_storage_copy',
+      );
+      const knowledgeCopyRemoved = this.removeDirectory(
+        join(this.settings.getKnowledgeDirectory(), documentId),
+        'delete_knowledge_copy',
+      );
+
+      return {
+        fileCleanup:
+          storageCopyRemoved && knowledgeCopyRemoved ? 'complete' : ('partial' as const),
+      };
+    });
+  }
+
+  /**
+   * Removes one managed directory tree.
+   *
+   * Cleanup runs after the database commit, so a failure must not turn a successful operation into
+   * an error; it is logged and reported to the caller instead of disappearing.
+   */
+  private removeDirectory(directoryPath: string, reason: string): boolean {
+    try {
+      rmSync(directoryPath, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `documents.file.cleanup_failed ${JSON.stringify({
+          reason,
+          path: directoryPath,
+          detail: describeDetail(error),
+        })}`,
+      );
+      return false;
+    }
   }
 
   /** Lists documents with their latest version and chunk counts. */
@@ -239,6 +545,9 @@ export class DocumentsService {
               status: latest.processingStatus as DocumentProcessingStatus,
               originalName: latest.originalName,
               chunkCount: chunkCounts.get(latest.id) ?? 0,
+              byteSize: latest.byteSize,
+              createdAt: latest.createdAt,
+              processingError: latest.processingError,
             }
           : null,
       };
@@ -278,6 +587,9 @@ export class DocumentsService {
             status: latest.status,
             originalName: latest.originalName,
             chunkCount: latest.chunkCount,
+            byteSize: latest.byteSize,
+            createdAt: latest.createdAt,
+            processingError: latest.processingError,
           }
         : null,
       versions: summaries,
@@ -300,6 +612,38 @@ export class DocumentsService {
     }));
   }
 
+  /**
+   * Resolves which documents this conversation may search.
+   *
+   * An explicit per-conversation selection wins: once the user pins documents to a conversation, the
+   * knowledge command searches only those, otherwise pinning would be a no-op on a single-library
+   * install where every imported document is shared. With no explicit selection, scope is the
+   * documents linked to the conversation plus every shared document, falling back to the whole
+   * library when nothing is linked.
+   */
+  async resolveKnowledgeScope(
+    conversationId: string,
+    explicitDocumentIds?: readonly string[],
+  ): Promise<string[]> {
+    if (explicitDocumentIds && explicitDocumentIds.length > 0) {
+      const selected = await this.documents.find({
+        where: { id: In([...new Set(explicitDocumentIds)]) },
+      });
+      return selected.map((document) => document.id);
+    }
+
+    const linked = await this.dataSource
+      .getRepository(ConversationDocumentEntity)
+      .find({ where: { conversationId } });
+    const shared = await this.documents.find({ where: { isShared: true } });
+    const ids = new Set(shared.map((document) => document.id));
+    for (const row of linked) ids.add(row.documentId);
+    if (ids.size === 0) {
+      for (const document of await this.documents.find()) ids.add(document.id);
+    }
+    return [...ids];
+  }
+
   /** Resolves the target document: an existing one when `documentId` is given, otherwise a new one. */
   private async resolveDocument(
     input: IngestDocumentInput,
@@ -315,17 +659,17 @@ export class DocumentsService {
   /** Loads one document by id or throws a caller-actionable error. */
   private async requireDocument(documentId: string): Promise<DocumentEntity> {
     const existing = await this.documents.findOne({ where: { id: documentId } });
-    if (!existing) throw new Error('指定的资料不存在');
+    if (!existing) throw new NotFoundException('没有找到这份资料，它可能已经被删除。');
     return existing;
   }
 
   /** Rejects relative or empty input paths before touching storage. */
   private validateInput(input: IngestDocumentInput): string {
     if (!input || typeof input.filePath !== 'string' || input.filePath.trim() === '') {
-      throw new Error('缺少本地文件路径');
+      throw new BadRequestException('没有选择要导入的文件。');
     }
     if (!isAbsolute(input.filePath)) {
-      throw new Error('文件路径必须是绝对路径');
+      throw new BadRequestException('文件地址不完整，请重新选择文件。');
     }
     return input.filePath;
   }
@@ -333,13 +677,41 @@ export class DocumentsService {
   /** Ensures the path is a regular, readable file. */
   private assertReadable(filePath: string): number {
     const stats = statSync(filePath);
-    if (!stats.isFile()) throw new Error('路径不是普通文件');
+    if (!stats.isFile()) throw new BadRequestException('选择的不是一个文件，请重新选择。');
     return stats.size;
+  }
+
+  /** Runs one library mutation after the previous one settled, serialising CPU and write load. */
+  private runExclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.libraryQueue.then(task, task);
+    this.libraryQueue = run.catch(() => undefined);
+    return run;
   }
 
   /** Uses the file bytes as the idempotency key for repeated ingest runs. */
   private hashFile(filePath: string): string {
     return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+  }
+
+  /**
+   * Writes the parsed text of a converted format as Markdown beside the stored source copy.
+   *
+   * Formats that are already their own readable form (`.md`, `.txt`) are skipped: the stored source
+   * file *is* the text, and duplicating it would create a second copy that can drift. The file uses
+   * `joinParsedPages`, the same assembly as the chunker, so chunk offsets remain valid against it.
+   */
+  private writeConvertedMarkdown(
+    documentId: string,
+    versionNo: number,
+    originalName: string,
+    pages: ParseDocumentResult['pages'],
+  ): void {
+    const extension = extname(originalName).toLowerCase();
+    if (extension === '.md' || extension === '.markdown' || extension === '.txt') return;
+    const targetDirectory = join(this.storageRoot, 'documents', documentId, `v${versionNo}`);
+    mkdirSync(targetDirectory, { recursive: true });
+    const baseName = basename(originalName, extname(originalName)) || 'parsed';
+    writeFileSync(join(targetDirectory, `${baseName}.md`), joinParsedPages(pages), 'utf8');
   }
 
   /** Copies the source file under the managed storage root and returns its relative path. */
@@ -364,6 +736,7 @@ export class DocumentsService {
   private async persistChunks(
     documentVersionId: string,
     chunks: DocumentChunk[],
+    documentTitle: string,
   ): Promise<Array<{ chunkId: string; content: string }>> {
     const persisted: Array<{ chunkId: string; content: string }> = [];
     await this.dataSource.transaction(async (manager) => {
@@ -374,7 +747,11 @@ export class DocumentsService {
           persisted.push({ chunkId: id, content: chunk.content });
           terms.push({
             chunkId: id,
-            heading: toSearchTerms(chunk.locator.headingPath.join(' ')),
+            // The document title indexes as the top-level heading of every chunk. Without it a
+            // question naming the document ("EDMA", "LLM4LB") cannot find its own chunks: the
+            // body of an English paper does not contain the Chinese question words, and the
+            // handbook that does contain them wins on term count.
+            heading: toSearchTerms([documentTitle, ...chunk.locator.headingPath].join(' ')),
             body: toSearchTerms(chunk.content),
           });
           return manager.create(DocumentChunkEntity, {
@@ -514,4 +891,82 @@ function describeError(error: unknown): string {
   if (isDocumentParserError(error)) return `${error.code}: ${error.message}`;
   if (error instanceof DocumentChunkLimitError) return `${error.code}: ${error.message}`;
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Technical detail for logs and API payloads; never shown as the primary message. */
+function describeDetail(error: unknown): string {
+  if (isDocumentParserError(error)) return `${error.code}: ${error.message}`;
+  if (error instanceof DocumentChunkLimitError) return `${error.code}: ${error.message}`;
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** User-facing copy plus the technical detail for one ingest failure. */
+function describeIngestFailure(error: unknown): {
+  message: string;
+  code: string;
+  detail: string;
+} {
+  if (isDocumentParserError(error)) {
+    const detail = `${error.code}: ${error.message}`;
+    switch (error.code) {
+      case 'NO_TEXT_LAYER':
+        return {
+          message:
+            '这份 PDF 里没有可以读取的文字，可能是扫描件或图片。可以换成带文字的 PDF，或者改用 Word / Markdown / TXT 文件。',
+          code: error.code,
+          detail,
+        };
+      case 'UNSUPPORTED_FORMAT':
+        return {
+          message: '文件内容和扩展名对不上，可能已经损坏。请用原软件重新另存后再试。',
+          code: error.code,
+          detail,
+        };
+      case 'INVALID_INPUT_FILE':
+        return {
+          message: '无法读取这份文件，请确认它仍然存在并且可以打开。',
+          code: error.code,
+          detail,
+        };
+      case 'FILE_TOO_LARGE':
+        return {
+          message: '这份文件太大，暂时无法导入，请拆分后再试。',
+          code: error.code,
+          detail,
+        };
+      case 'PARSER_TIMEOUT':
+      case 'PARSER_CANCELLED':
+        return {
+          message: '处理这份资料时超时或被中断，请稍后重试。',
+          code: error.code,
+          detail,
+        };
+      case 'EMPTY_PARSE_RESULT':
+        return {
+          message: '这份资料里没有找到可以读取的文字，请换一份文件。',
+          code: error.code,
+          detail,
+        };
+      default:
+        return {
+          message: '这份资料没能读取成功，请确认文件没有损坏，或换一种格式。',
+          code: error.code,
+          detail,
+        };
+    }
+  }
+
+  if (error instanceof DocumentChunkLimitError) {
+    return {
+      message: '这份资料内容太多，一次处理不了，请拆分后再导入。',
+      code: error.code,
+      detail: `${error.code}: ${error.message}`,
+    };
+  }
+
+  return {
+    message: '处理这份资料时出错了，请稍后重试。',
+    code: 'IMPORT_FAILED',
+    detail: describeDetail(error),
+  };
 }

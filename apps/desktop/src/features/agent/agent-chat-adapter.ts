@@ -4,6 +4,7 @@ import type {
 } from '@assistant-ui/react';
 import type { ChatStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
+import { composerCommandStore } from './composer-command-store';
 import { conversationStore } from './conversation-store';
 
 /** Extracts the newest user message because the backend runs each turn alone. */
@@ -60,11 +61,16 @@ export const agentChatAdapter: ChatModelAdapter = {
       resolve?.(null);
     };
 
+    // The chip never enters the textarea, so the command is attached here. It is part of the stored
+    // user message, which is what the backend parses and what dedupe reads back later.
+    const command = composerCommandStore.getSnapshot();
+    const prompt = command ? `${command} ${userMessage.prompt}` : userMessage.prompt;
     requestId = window.teachforge.streamChat(
-      userMessage.prompt,
+      prompt,
       receiveEvent,
       conversationStore.getSnapshot().activeConversationId ?? undefined,
     );
+    composerCommandStore.reset();
     agentEventBus.begin(userMessage.id || requestId, requestId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();

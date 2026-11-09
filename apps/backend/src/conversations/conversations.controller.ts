@@ -1,18 +1,24 @@
 import {
+  Body,
   Controller,
   Get,
   Logger,
   Param,
   ParseUUIDPipe,
+  Put,
   Query,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ConversationsService } from './conversations.service';
 import type {
+  ConversationKnowledgeScopeDto,
   ConversationMessagePageDto,
   ConversationSummaryDto,
 } from './conversation-query.dto';
-import { ConversationMessagesQueryDto } from './conversation-query.dto';
+import {
+  ConversationMessagesQueryDto,
+  SetKnowledgeScopeDto,
+} from './conversation-query.dto';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
 
 /** Exposes read-only conversation summaries and visible message history. */
@@ -98,5 +104,55 @@ export class ConversationsController {
         );
         throw error;
       });
+  }
+
+  /** Returns which documents this conversation may search. */
+  @Get(':conversationId/knowledge-scope')
+  async getKnowledgeScope(
+    @Param('conversationId', new ParseUUIDPipe({ version: '4' })) conversationId: string,
+  ): Promise<ConversationKnowledgeScopeDto> {
+    return this.conversations.getKnowledgeScope(conversationId);
+  }
+
+  /** Replaces the explicit knowledge scope; an empty list restores the default range. */
+  @Put(':conversationId/knowledge-scope')
+  async setKnowledgeScope(
+    @Param('conversationId', new ParseUUIDPipe({ version: '4' })) conversationId: string,
+    @Body() input: SetKnowledgeScopeDto,
+  ): Promise<ConversationKnowledgeScopeDto> {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    writeStructuredEvent(this.logger, 'log', 'conversations.http.knowledge_scope.accepted', {
+      requestId,
+      conversationId,
+      documentCount: input.documentIds.length,
+    });
+    try {
+      const result = await this.conversations.setKnowledgeScope(
+        conversationId,
+        input.documentIds,
+        { requestId, conversationId },
+      );
+      writeStructuredEvent(this.logger, 'log', 'conversations.http.knowledge_scope.completed', {
+        requestId,
+        conversationId,
+        documentCount: result.documentIds.length,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        'error',
+        'conversations.http.knowledge_scope.failed',
+        {
+          requestId,
+          conversationId,
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
+    }
   }
 }

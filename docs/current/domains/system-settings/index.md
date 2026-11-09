@@ -23,7 +23,7 @@ last_verified: 2026-11-08
 
 设置入口位于 Agent 对话侧栏底部。打开后主区域显示模型配置和风格偏好；侧栏仍可切换设置与对话。设置由本机 backend 管理，不属于 SQLite 业务数据，也不通过 renderer 文件系统访问。
 
-backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页编辑。密钥输入框默认遮蔽内容，用户可点击输入框右侧的眼睛图标临时显示或再次隐藏。工作空间默认与配置文件分开，指向 `.tech-forge/workspace/`，可在设置页编辑并保存。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
+backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`；设置 `TEACHFORGE_CONFIG_DIR` 可把该根目录重定向到任意绝对路径（便携部署与隔离集成测试使用，默认仍是 `~/.tech-forge`）。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页编辑。密钥输入框默认遮蔽内容，用户可点击输入框右侧的眼睛图标临时显示或再次隐藏。工作空间默认与配置文件分开，指向 `.tech-forge/workspace/`，可在设置页编辑并保存。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
 
 | 配置 | 当前行为 |
 |---|---|

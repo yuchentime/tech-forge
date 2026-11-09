@@ -4,7 +4,12 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { createWorkspaceFileTools } = require('../dist/llm/tools/workspace-file-tools.js');
+// `dist` is the packaged build; `BACKEND_TEST_BUILD_DIR` lets the same suite run from `.test-dist`
+// when a dev backend holds `dist` open on Windows.
+const buildDirectory = path.resolve(__dirname, '..', process.env.BACKEND_TEST_BUILD_DIR ?? 'dist');
+const { createWorkspaceFileTools } = require(
+  path.join(buildDirectory, 'llm', 'tools', 'workspace-file-tools.js'),
+);
 
 const piSdkPromise = import('@earendil-works/pi-coding-agent');
 
@@ -92,4 +97,42 @@ test('reads external files but rejects ungranted external writes and edits', asy
 
   assert.equal(await fs.readFile(outsideFile, 'utf8'), 'original');
   assert.equal(existsSync(path.join(workspace, 'outside.txt')), false);
+});
+
+test('guards a directory by default but honours an explicit user request', async (t) => {
+  const { parent, workspace } = await createWorkspace(t);
+  const knowledge = path.join(parent, 'knowledge');
+  await fs.mkdir(knowledge);
+  const original = path.join(knowledge, 'origin.md');
+  await fs.writeFile(original, 'uploaded original bytes');
+  const sdk = await piSdkPromise;
+
+  // The model naming a path on its own is not permission: default deny.
+  const guarded = await createWorkspaceFileTools(sdk, workspace, undefined, {
+    guardedDirectories: [knowledge],
+  });
+  const guardedRead = guarded.find((tool) => tool.name === 'read');
+  await assert.rejects(executeTool(guardedRead, { path: original }, workspace));
+  await assert.rejects(
+    executeTool(guardedRead, { path: path.join('..', 'knowledge', 'origin.md') }, workspace),
+  );
+
+  // The user asking for that exact file in this turn lifts the default.
+  const granted = await createWorkspaceFileTools(sdk, workspace, undefined, {
+    guardedDirectories: [knowledge],
+    currentUserRequest: `请读一下 ${original}`,
+  });
+  const grantedRead = granted.find((tool) => tool.name === 'read');
+  const result = await executeTool(grantedRead, { path: original }, workspace);
+  assert.match(JSON.stringify(result), /uploaded original bytes/);
+
+  // A contradictory request ("don't read ...") must not grant anything.
+  const negated = await createWorkspaceFileTools(sdk, workspace, undefined, {
+    guardedDirectories: [knowledge],
+    currentUserRequest: `不要读 ${original}`,
+  });
+  const negatedRead = negated.find((tool) => tool.name === 'read');
+  await assert.rejects(executeTool(negatedRead, { path: original }, workspace));
+
+  assert.equal(await fs.readFile(original, 'utf8'), 'uploaded original bytes');
 });

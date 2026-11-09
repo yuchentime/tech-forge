@@ -64,6 +64,16 @@ interface Accumulator extends Range {
   tokens: number;
 }
 
+/**
+ * Concatenates parsed pages exactly as the chunker indexes them.
+ *
+ * Exported so retained Markdown copies share one assembly rule: `locator.charStart/charEnd` are
+ * offsets into this string, and a second join implementation would silently invalidate them.
+ */
+export function joinParsedPages(pages: ParsedPage[]): string {
+  return pages.map((page) => page.text).join('\n\n');
+}
+
 /** Builds the searchable text and the page offset table used for locators. */
 function buildSource(pages: ParsedPage[]): { text: string; pageRanges: PageRange[] } {
   let text = '';

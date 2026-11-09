@@ -33,12 +33,20 @@ export type WorkspaceFileSystem = Pick<
 export interface WorkspaceFileToolPolicy {
   /** App-owned config and style files must never become Agent file-tool targets. */
   protectedPaths?: readonly string[];
+  /**
+   * Directories the Agent must not read unless the user asks for them in this turn.
+   *
+   * The point is intent, not secrecy: the knowledge library is a set of documents the model should
+   * consult through the `/知识库` context instead of grepping originals. An absolute path named in the
+   * current request lifts the default; a path invented by the model does not.
+   */
+  guardedDirectories?: readonly string[];
   /** Only the current stream request may grant a temporary external write target. */
   currentUserRequest?: string;
 }
 
-/** Describes a one-session write exception derived from one explicit user path. */
-interface ExternalWriteGrant {
+/** Describes a one-session exception derived from one explicit user path. */
+interface ExternalPathGrant {
   kind: 'directory' | 'file';
   path: string;
 }
@@ -89,10 +97,10 @@ export async function createWorkspaceFileTools(
     fileSystem,
   );
   const protectedPaths = (policy.protectedPaths ?? []).map((path) => resolve(path));
-  const externalGrant = deriveExternalWriteGrant(
-    policy.currentUserRequest ?? '',
-    workspaceRoot,
-  );
+  const guardedDirectories = (policy.guardedDirectories ?? []).map((path) => resolve(path));
+  const currentUserRequest = policy.currentUserRequest ?? '';
+  const externalGrant = deriveExternalWriteGrant(currentUserRequest, workspaceRoot);
+  const readGrant = deriveGuardedReadGrant(currentUserRequest, guardedDirectories);
 
   const readOperations: ReadOperations = {
     access: async (filePath) => {
@@ -100,6 +108,8 @@ export async function createWorkspaceFileTools(
         workspaceRoot,
         filePath,
         protectedPaths,
+        guardedDirectories,
+        readGrant,
         fileSystem,
       );
       await fileSystem.access(safePath, fsConstants.R_OK);
@@ -109,6 +119,8 @@ export async function createWorkspaceFileTools(
         workspaceRoot,
         filePath,
         protectedPaths,
+        guardedDirectories,
+        readGrant,
         fileSystem,
       );
       return fileSystem.readFile(safePath);
@@ -118,6 +130,8 @@ export async function createWorkspaceFileTools(
         workspaceRoot,
         filePath,
         protectedPaths,
+        guardedDirectories,
+        readGrant,
         fileSystem,
       );
       return sdk.detectSupportedImageMimeTypeFromFile(safePath);
@@ -223,6 +237,8 @@ async function resolveReadableFile(
   workspaceRoot: string,
   filePath: string,
   protectedPaths: readonly string[],
+  guardedDirectories: readonly string[],
+  readGrant: ExternalPathGrant | undefined,
   fileSystem: WorkspaceFileSystem,
 ): Promise<string> {
   if (typeof filePath !== 'string' || filePath.trim() === '') {
@@ -239,7 +255,60 @@ async function resolveReadableFile(
     fileInfo,
     fileSystem,
   );
+  await assertOutsideGuardedDirectories(
+    requestedPath,
+    canonicalPath,
+    guardedDirectories,
+    readGrant,
+    fileSystem,
+  );
   return canonicalPath;
+}
+
+/**
+ * Default-denies reads inside a guarded directory.
+ *
+ * Only a path named explicitly in the current user request bypasses the default, so "should I read
+ * the knowledge originals" stays a user decision instead of a model one. Symlink and `..` aliases are
+ * covered because both the lexical and canonical paths are compared.
+ */
+async function assertOutsideGuardedDirectories(
+  requestedPath: string,
+  resolvedPath: string,
+  guardedDirectories: readonly string[],
+  readGrant: ExternalPathGrant | undefined,
+  fileSystem: WorkspaceFileSystem,
+): Promise<void> {
+  if (guardedDirectories.length === 0) return;
+  const requested = resolve(requestedPath);
+  const resolved = resolve(resolvedPath);
+
+  for (const guardedDirectory of guardedDirectories) {
+    const lexical = resolve(guardedDirectory);
+    const canonical = await fileSystem.realpath(lexical).catch(() => lexical);
+    const inside =
+      isPathWithin(lexical, requested) ||
+      isPathWithin(lexical, resolved) ||
+      isPathWithin(canonical, resolved);
+    if (!inside) continue;
+    if (grantCoversPath(readGrant, requested, resolved)) return;
+    throw workspaceBoundaryError();
+  }
+}
+
+/** Reports whether one prompt-derived grant names the requested file or an ancestor directory. */
+function grantCoversPath(
+  grant: ExternalPathGrant | undefined,
+  requestedPath: string,
+  resolvedPath: string,
+): boolean {
+  if (!grant) return false;
+  if (grant.kind === 'file') {
+    return areSamePath(grant.path, requestedPath) || areSamePath(grant.path, resolvedPath);
+  }
+  return (
+    isPathWithin(grant.path, requestedPath) || isPathWithin(grant.path, resolvedPath)
+  );
 }
 
 /** Resolves a write/edit target under the workspace or the current-turn grant. */
@@ -247,7 +316,7 @@ async function resolveWritableFile(
   workspaceRoot: string,
   filePath: string,
   protectedPaths: readonly string[],
-  externalGrant: ExternalWriteGrant | undefined,
+  externalGrant: ExternalPathGrant | undefined,
   fileSystem: WorkspaceFileSystem,
   allowMissing: boolean,
 ): Promise<string> {
@@ -329,6 +398,7 @@ async function assertNotManagedFile(
     ) {
       throw workspaceBoundaryError();
     }
+
 
     const managedCanonical = await fileSystem
       .realpath(managedLexical)
@@ -543,7 +613,7 @@ async function ensureWorkspaceDirectory(
 function deriveExternalWriteGrant(
   currentUserRequest: string,
   workspaceRoot: string,
-): ExternalWriteGrant | undefined {
+): ExternalPathGrant | undefined {
   const candidates = extractAbsolutePromptPaths(currentUserRequest);
   if (candidates.length !== 1) return undefined;
 
@@ -615,6 +685,18 @@ function hasClearUnquotedPathBoundary(
 const HAS_WRITE_INTENT =
   /\b(?:write|save|create|generate|export|store|put)\b|写入|写到|保存|创建|生成|导出|输出|存放|放到|新建/iu;
 
+/** Detects an explicit request to read a file in this same prompt line. */
+const HAS_READ_INTENT =
+  /\b(?:read|open|show|cat|print)\b|读|阅读|查看|看看|看下|打开|引用|贴出|列出|念/iu;
+
+/** Rejects language that explicitly forbids reading in this prompt line. */
+function hasNegatedReadIntent(line: string): boolean {
+  return (
+    /(?:不要|别|无需|不需要|禁止|勿)\s*(?:读|阅读|查看|打开|引用)/u.test(line) ||
+    /\b(?:do not|don't|never)\s+(?:read|open|show)\b/i.test(line)
+  );
+}
+
 /** Rejects language that explicitly forbids the write action in this prompt. */
 function hasNegatedWriteIntent(line: string): boolean {
   return (
@@ -624,11 +706,45 @@ function hasNegatedWriteIntent(line: string): boolean {
   );
 }
 
+/**
+ * Derives a one-turn read exception for a guarded directory.
+ *
+ * The request must name exactly one path inside a guarded directory and express read intent on that
+ * line. Extra paths outside the guarded directories (a write destination, for example) do not
+ * disqualify it, and a model-invented path never produces a grant because the request is the source.
+ */
+function deriveGuardedReadGrant(
+  currentUserRequest: string,
+  guardedDirectories: readonly string[],
+): ExternalPathGrant | undefined {
+  if (guardedDirectories.length === 0 || currentUserRequest.trim() === '') return undefined;
+  const guarded = guardedDirectories.map((path) => resolve(path));
+  const candidates = extractAbsolutePromptPaths(currentUserRequest).filter((candidate) =>
+    guarded.some((directory) => isPathWithin(directory, resolve(candidate.path))),
+  );
+  if (candidates.length !== 1) return undefined;
+
+  const candidate = candidates[0];
+  const lineStart = currentUserRequest.lastIndexOf('\n', candidate.start - 1) + 1;
+  const nextNewline = currentUserRequest.indexOf('\n', candidate.end);
+  const lineEnd = nextNewline < 0 ? currentUserRequest.length : nextNewline;
+  const line = currentUserRequest.slice(lineStart, lineEnd);
+  if (!HAS_READ_INTENT.test(line) || hasNegatedReadIntent(line)) return undefined;
+  if (!candidate.quoted && !hasClearUnquotedPathBoundary(currentUserRequest, candidate.end, lineEnd)) {
+    return undefined;
+  }
+  if (!isAbsolute(candidate.path)) return undefined;
+  return {
+    kind: classifyExternalTarget(candidate.path, line) ?? 'file',
+    path: resolve(candidate.path),
+  };
+}
+
 /** Distinguishes a named directory grant from an exact file grant conservatively. */
 function classifyExternalTarget(
   path: string,
   promptLine: string,
-): ExternalWriteGrant['kind'] | undefined {
+): ExternalPathGrant['kind'] | undefined {
   const pathIndex = promptLine.indexOf(path);
   const before = promptLine.slice(Math.max(0, pathIndex - 32), pathIndex);
   const after = promptLine.slice(pathIndex + path.length, pathIndex + path.length + 24);

@@ -13,7 +13,7 @@ related:
   - docs/source/data-model-design.md
   - docs/source/data-model-fields.md
   - docs/source/system-configuration-design.md
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 ---
 
 # TeachForge 当前架构与代码放置指南
@@ -70,10 +70,12 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 |---|---|---|
 | `apps/desktop/src/main.tsx` | React renderer 入口，挂载 `App` 和全局样式 | 保持为应用启动与根组件装配点 |
 | `apps/desktop/src/App.tsx` | 装配 Agent `LocalRuntime`、`AssistantRuntimeProvider` 与占满窗口的 `AgentChatPage` | 新业务不要持续堆进该文件；按领域拆到 `src/features/<domain>/` |
-| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换、新建和设置入口；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；设置视图只替换右侧主区域，根 Conversation Runtime 保持挂载 |
+| `apps/desktop/src/features/agent/` | `AgentChatPage` 启动时通过共享 `ConversationStore` 加载会话列表并恢复仍存在的活动会话；默认读取最近 30 条可见消息，并可按需前置更早历史；`ConversationSidebar` 负责切换、新建和设置入口；`agent-chat-adapter` 消费 Pi 文本增量与事件并刷新摘要；`agent-event-bus` 发布本轮 UI 活动状态；`SlashCommandMenu` 在 composer 内提供 `/` 命令菜单（清空草稿走 `aui.composer.setText`，不用受控 hack，命令文本存 `composer-command-store`）；选择菜单项后命令以标签挂在输入区内（`composer-command-store`），发送时由 `agent-chat-adapter` 拼回 `/查询知识库 `；知识库说明写在输入框占位符，无常驻工具栏 | 页面经受限的 `window.teachforge.request()` 调用本地 API，不接触模型凭据；侧栏列表和消息视口各自滚动，输入区位于消息视口外并固定可见；设置视图只替换右侧主区域，根 Conversation Runtime 保持挂载 |
 | `apps/desktop/src/features/settings/` | 本机模型 Provider、工作空间路径和 `SOULS.md` 风格编辑页 | 只使用 `window.teachforge.request()` 访问本地设置 API；GET 将已保存密钥回填到普通文本控件；只在本机设置页明文显示 |
+| `apps/desktop/src/features/knowledge/` | 知识库视图：资料列表、导入、删除 | 经 `window.teachforge.pickImportFiles()` 取绝对路径后调 `/api/documents/*`；导入期间轮询列表展示 `parsing → ready`；不读取文件字节，也不访问知识库目录 |
+| `apps/desktop/src/api/backend-error.ts` | 后端错误信封的安全消息提取 | 多个 feature 复用同一实现，避免各自解析 `message` 字段 |
 | `apps/desktop/src/types/desktop-bridge.ts` 与 `chat-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
-| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP 和固定 Agent SSE 路径；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
+| `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP（`backend-request.ts`：每次请求关闭连接、socket 级失败重试一次、中文错误、记录方法/路径/错误码）和固定 Agent SSE 路径、提供只返回路径的系统文件选择器；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
 | `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamChat`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
@@ -86,15 +88,15 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 |---|---|---|
 | `platform` / `health` | 进程级能力及健康状态 | `PlatformModule` 装配 `HealthModule` 与 `DocumentParserModule`；health 提供 `/api/health` |
 | `platform` / `document-parser` | 文件解析适配层：把 PDF/DOCX/MD/TXT 转成按页文本与质量告警 | `DocumentParserModule` 导出 `DocumentParserService`；v1 使用 `pdfjs-dist` 与 `mammoth`，无 Python、无子进程、无模型下载；`documents` 域尚未接入 |
-| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供摘要列表和每页最多 30 条的可见文本历史；user 行可嵌套安全工具摘要。Entity 与 `ConversationsService` 管理 SQLite 持久化、历史投影、pending 对账及 Pi 历史恢复 |
+| `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供摘要列表、每页最多 30 条的可见文本历史，以及会话知识库范围读写（`GET/PUT /:conversationId/knowledge-scope`，存在 `conversations.metadataJson`）；user 行可嵌套安全工具摘要。Entity 与 `ConversationsService` 管理 SQLite 持久化、历史投影、pending 对账及 Pi 历史恢复 |
 | `rehearsals` | Rehearsal/RehearsalTurn、提问、回答和轮次评估 | Entity 已注册；Service 为空壳。评估直接属于 RehearsalTurn |
-| `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | `DocumentsService.ingestFile()` 实现"本地文件路径 → 解析 → 分块（500 tokens、10% 重叠）→ 事务写 `documents` / `document_versions` / `document_chunks` / `chunk_search_terms` → 向量写 `chunk_embeddings`"，状态 `parsing → chunking → indexed → ready`（embedding 失败停在 `indexed`；解析或分块失败为 `failed` + `processingError`），按 `contentHash` 幂等，可指定 `documentId` 追加版本；`listDocuments` / `getDocumentDetail` / `listVersionChunks` 提供读取。上传入口与会话关联未实现 |
+| `documents` | 共享/会话资料、文件版本、解析状态、分片与关联 | `DocumentsService.ingestFile()` 实现"本地文件路径 → 解析 → 分块（500 tokens、10% 重叠）→ 事务写 `documents` / `document_versions` / `document_chunks` / `chunk_search_terms` → 向量写 `chunk_embeddings`"，状态 `parsing → chunking → indexed → ready`（embedding 失败停在 `indexed`；解析或分块失败为 `failed` + `processingError`），按 `contentHash` 幂等，可指定 `documentId` 追加版本；`listDocuments` / `getDocumentDetail` / `listVersionChunks` 提供读取；`DocumentsController` 暴露 `GET /api/documents`、`POST /api/documents/import`（复制进 `[workspace].path` 后入库）、`DELETE /api/documents/:id`（清六表 + 两份文件副本，处理中返回 409）。会话关联未实现 |
 | `artifacts` | Agent 生成物料的文件记录和元数据 | 单表 Artifact Entity 已注册；Service 为空壳，不设计 ArtifactVersion |
 | `settings` | 本机模型 Provider、Agent 默认输出路径与风格偏好文件 | `SettingsController` 暴露 `GET/PUT /api/settings`；`SettingsService` 独占 `.tech-forge/config.toml` 和 `SOULS.md`，默认输出目录为 `.tech-forge/workspace/`，并提供 `getWorkspacePath()` 与托管文件路径；API Key 仅由本机设置 API 返回设置页，不进入 Agent SSE、日志或 SQLite |
 | `retrieval` | 按 Conversation 资料范围组合检索上下文 | `RetrievalService.search()` 实现词法 + 向量双通道与 RRF 融合（k=60，候选 50/路，默认返回 12），支持 `documentIds` 范围过滤与向量下限 0.55；向量不可用时退回词法单路。`LlmQueryExpander` 在词法零命中时用已配置模型做错字纠正与同义词扩展，只增补、800 ms 预算、失败回落。`text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造 |
-| `knowledge` | 共享知识集合的领域操作 | Service 为空壳 |
+| `knowledge` | 本轮知识上下文：`/查询知识库` 命令解析、会话范围、分片选择、重排与渲染 | `KnowledgeService` 只消费 `documents`、`retrieval` 与 `chunk-reranker`；不拥有存储，不做范围判定（范围归 `documents`） |
 | `embedding` | 文本向量化能力 | `EmbeddingService` 加载随仓库分发的 `bge-small-zh-v1.5` q8 模型（`assets/models`，离线，148 ms 加载），批量 32 编码并返回已归一化的 512 维向量；失败时调用方可降级 |
-| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护；额外注册 `search_documents` 工具（返回资料分片与文档元数据数组，由模型自行决定是否调用） |
+| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 generate/stream；每个 session 从 SettingsService 读取 Provider、SOULS.md 和 workspace；Pi cwd、会话分组、资源加载和自定义文件工具共用 workspace；工具适配层实施读写分离与托管文件保护；不注册检索工具：知识库由 `/知识库` 命令在 `ChatService` 中显式触发，注入块经 `LlmRequestOptions.knowledgeContext` 传入 system prompt 末尾 |
 | `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
@@ -122,7 +124,7 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
 - 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。[Pi session 快照迁移](../../../apps/backend/src/database/migrations/1793940000000-pi-session-snapshots.ts)另行创建 `pi_session_snapshots` 表；`LlmService` 每轮结束后 upsert Pi `getEntries()`，下一轮优先使用快照（含 compaction），仅当快照落后于 SQLite 最新消息时回退重建。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。
-- Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。独立于 SQLite 数据目录，本机模型设置在用户主目录 `.tech-forge/config.toml`，风格偏好在同目录 `SOULS.md`；每个新 Pi session 读取模型、风格和 workspace 配置。`config.toml` 的 `[workspace].path` 默认是 `.tech-forge/workspace/`，旧默认值映射到该目录；Pi cwd 和文件工具都使用此路径。config.toml 与 SOULS.md 仍固定归 SettingsService 所有。API Key 按用户要求明文写入 TOML，并经本机设置 API 返回 Renderer 设置页显示；候选草案建议使用操作系统安全存储，差异记录在[系统设置当前事实](../domains/system-settings/index.md)。
+- Electron 当前将 `TEACHFORGE_DATA_DIR` 设置为 `app.getPath('userData')`；backend 未提供该变量时回退到当前工作目录 `.data`。独立于 SQLite 数据目录，本机模型设置在用户主目录 `.tech-forge/config.toml`（`TEACHFORGE_CONFIG_DIR` 可覆盖该根目录），风格偏好在同目录 `SOULS.md`；每个新 Pi session 读取模型、风格和 workspace 配置。`config.toml` 的 `[workspace].path` 默认是 `.tech-forge/workspace/`，旧默认值映射到该目录；Pi cwd 和文件工具都使用此路径。config.toml 与 SOULS.md 仍固定归 SettingsService 所有。API Key 按用户要求明文写入 TOML，并经本机设置 API 返回 Renderer 设置页显示；候选草案建议使用操作系统安全存储，差异记录在[系统设置当前事实](../domains/system-settings/index.md)。
 - `Course` API 与桌面端课程原型不再注册或调用；不要把它复制成新的 Course/Class/Lesson 依赖路径。
 - `main.ts` 使用 Electron 生成的本地随机 token 和 loopback origin 检查保护本机 HTTP；这是进程边界保护，不是用户账号、身份模型或多租户隔离。
 - Agent SSE 路径由 Electron Main 固定代理；Main 注入本地 token 并按 SSE 帧增量解析，再经每请求独立的 `MessageChannelMain` 交给 Preload。Renderer 可收到 `conversation` 元数据、`agent_start`、`turn_start/end`、`tool_execution_start/end`、text-only `message_update`、`agent_end` 与安全终态事件；未知事件和非白名单字段不会穿过桌面桥，Renderer 不能指定本地 HTTP 地址或读取 token。

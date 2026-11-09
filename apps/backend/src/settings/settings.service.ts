@@ -71,11 +71,23 @@ const LLM_SETTING_KEYS = new Set([
 /** Owns the per-user TOML configuration and Markdown style preference files. */
 @Injectable()
 export class SettingsService implements OnModuleInit {
-  private readonly configDirectory = join(homedir(), '.tech-forge');
+  /**
+   * Per-user configuration root; `TEACHFORGE_CONFIG_DIR` relocates it (portable installs and
+   * isolated integration tests), otherwise it is `<home>/.tech-forge`.
+   */
+  private readonly configDirectory = process.env.TEACHFORGE_CONFIG_DIR ?? join(homedir(), '.tech-forge');
   private readonly configPath = join(this.configDirectory, CONFIG_FILE_NAME);
   private readonly soulsPath = join(this.configDirectory, SOULS_FILE_NAME);
   /** Separates Agent-created files from the app-owned config and style files. */
   private readonly defaultWorkspacePath = join(this.configDirectory, 'workspace');
+  /**
+   * Knowledge-library copies live beside the config, never inside the workspace.
+   *
+   * Keeping them out of the Agent's working directory is what stops a default `grep` from walking the
+   * uploaded originals; `workspace-file-tools` additionally guards the subtree so a model-chosen path
+   * cannot read it either.
+   */
+  private readonly knowledgeDirectory = join(this.configDirectory, 'knowledge');
   private initializationPromise?: Promise<void>;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -119,6 +131,11 @@ export class SettingsService implements OnModuleInit {
     return this.readLlmSettings();
   }
 
+  /** Returns the app-owned knowledge library root, deliberately outside the Agent workspace. */
+  getKnowledgeDirectory(): string {
+    return this.knowledgeDirectory;
+  }
+
   /** Returns the saved Agent output root without exposing it through LLM settings. */
   async getWorkspacePath(): Promise<string> {
     await this.ensureInitialized();
@@ -127,7 +144,9 @@ export class SettingsService implements OnModuleInit {
 
   /**
    * Returns app-owned file paths only so Agent tools can deny aliases to them.
-   * SettingsService remains the sole reader and writer of both files.
+   * SettingsService remains the sole reader and writer of both files. The knowledge library is not
+   * listed here: it is a guarded directory (`getKnowledgeDirectory`), readable only when the current
+   * user request names it.
    */
   async getManagedFilePaths(): Promise<readonly string[]> {
     await this.ensureInitialized();

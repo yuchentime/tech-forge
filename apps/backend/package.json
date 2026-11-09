@@ -12,13 +12,14 @@
     "test:conversation-history": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-history.test.cjs",
     "test:document-parser": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-parser.test.cjs",
     "test:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-ingest.test.cjs",
+    "test:knowledge-library": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-library.test.cjs",
     "verify:document-parser": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-parser.cjs",
     "verify:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-ingest.cjs",
     "test:agent-stream": "npm run build && node --test test/agent-stream.test.cjs test/workspace-file-tools.test.cjs",
     "verify:agent-stream": "npm run build && node test/verify-agent-stream.cjs",
     "test:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/retrieval.test.cjs",
     "verify:retrieval": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-retrieval.cjs",
-    "test:document-tool": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-search-tool.test.cjs"
+    "test:knowledge-context": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-context.test.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",

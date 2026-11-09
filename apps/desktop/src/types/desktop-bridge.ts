@@ -16,6 +16,8 @@ export type { ChatStreamEvent } from './chat-stream-event';
 export type DesktopBridge = {
   getBackendState(): Promise<{ ready: boolean; port: number | null }>;
   request<T = unknown>(input: BackendRequest): Promise<BackendResponse<T>>;
+  /** Opens the native file picker and returns the chosen absolute paths (empty when cancelled). */
+  pickImportFiles(): Promise<string[]>;
   /** Starts one validated chat stream and returns its cancellation request ID. */
   streamChat(
     prompt: string,
@@ -34,6 +36,7 @@ export function hasDesktopBridge(): boolean {
     bridge &&
       typeof bridge.getBackendState === 'function' &&
       typeof bridge.request === 'function' &&
+      typeof bridge.pickImportFiles === 'function' &&
       typeof bridge.streamChat === 'function' &&
       typeof bridge.cancelChatStream === 'function',
   );

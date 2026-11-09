@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Eye, EyeClosed } from '@phosphor-icons/react';
+import { readBackendErrorMessage } from '../../api/backend-error';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 type ProviderId = 'deepseek' | 'custom';
@@ -54,7 +55,7 @@ export function SettingsPage() {
         path: '/api/settings',
       });
       if (response.status !== 200 || !isLocalSettingsView(response.data)) {
-        throw new Error(readErrorMessage(response.data, '读取设置失败，请重试。'));
+        throw new Error(readBackendErrorMessage(response.data, '读取设置失败，请重试。'));
       }
       setSettings(response.data);
       setProvider(response.data.llm.provider);
@@ -117,7 +118,7 @@ export function SettingsPage() {
         },
       });
       if (response.status !== 200 || !isLocalSettingsView(response.data)) {
-        throw new Error(readErrorMessage(response.data, '保存设置失败，请重试。'));
+        throw new Error(readBackendErrorMessage(response.data, '保存设置失败，请重试。'));
       }
       setSettings(response.data);
       setProvider(response.data.llm.provider);
@@ -594,17 +595,4 @@ function isLocalSettingsView(value: unknown): value is LocalSettingsView {
 function getDefaultWorkspacePath(configDirectory: string): string {
   const separator = configDirectory.includes('\\') ? '\\' : '/';
   return `${configDirectory.replace(/[\\/]+$/, '')}${separator}workspace`;
-}
-
-/** Extracts a safe human-readable message from a backend error envelope. */
-function readErrorMessage(value: unknown, fallback: string): string {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return fallback;
-  }
-  const message = (value as { message?: unknown }).message;
-  if (typeof message === 'string') return message;
-  if (Array.isArray(message) && message.every((part) => typeof part === 'string')) {
-    return message.join(' ');
-  }
-  return fallback;
 }

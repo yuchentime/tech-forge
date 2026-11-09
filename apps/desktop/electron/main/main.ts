@@ -13,12 +13,17 @@ import {
   type UtilityProcess,
   type IpcMainEvent,
   type MessagePortMain,
+  type OpenDialogOptions,
   type WebContents,
 } from 'electron';
 import type {
   ChatStreamEvent,
   BackendRequest,
 } from '../../src/types/desktop-bridge';
+import {
+  getNetworkErrorCode,
+  requestBackend,
+} from './backend-request';
 import { SseParser } from './sse-parser';
 import { decodeChatSseMessage } from './stream-protocol';
 import { routeChatStreamEvent } from './stream-routing';
@@ -235,30 +240,46 @@ function registerBackendIpc(): void {
     port: backendPort ?? null,
   }));
 
+  // Returns absolute paths only: the Renderer never reads file bytes, and the backend copies the
+  // chosen file into the configured workspace itself.
+  ipcMain.handle('documents:pick-files', async () => {
+    const options: OpenDialogOptions = {
+      title: '选择要导入资料库的资料',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '资料库资料', extensions: ['pdf', 'docx', 'md', 'markdown', 'txt'] },
+      ],
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? [] : result.filePaths;
+  });
+
   ipcMain.handle('backend:request', async (_event, value: unknown) => {
     if (!isBackendRequest(value)) {
-      throw new Error('Invalid backend request.');
+      throw new Error('请求无效，请重试。');
     }
     if (!backendPort || !backendToken) {
-      throw new Error('The local backend is not ready.');
+      throw new Error('本地服务还没准备好，请稍后重试；如果一直失败，请重启 TeachForge。');
     }
 
     const input = value as BackendRequest;
-    const body = input.body === undefined ? undefined : JSON.stringify(input.body);
-    const response = await fetch(`http://127.0.0.1:${backendPort}${input.path}`, {
-      method: input.method,
-      headers: {
-        'x-teachforge-token': backendToken,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body,
-    });
-
-    const contentType = response.headers.get('content-type') ?? '';
-    const data = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text();
-    return { status: response.status, data };
+    try {
+      return await requestBackend(
+        { port: backendPort, token: backendToken },
+        input,
+      );
+    } catch (error) {
+      // Keep the failing method/path in the desktop log so a reset can be traced to a request.
+      console.error('[desktop] backend request failed', {
+        method: input.method,
+        path: input.path,
+        code: getNetworkErrorCode(error),
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   });
 
   ipcMain.on('chat:stream:start', (event, value: unknown) => {

@@ -18,6 +18,7 @@ const { DocumentParserService } = load('platform/document-parser/document-parser
 const { PdfTextParser } = load('platform/document-parser/parsers/pdf-text.parser.js');
 const { DocxParser } = load('platform/document-parser/parsers/docx.parser.js');
 const { PlainTextParser } = load('platform/document-parser/parsers/plain-text.parser.js');
+const { EmbeddingService } = load('embedding/embedding.service.js');
 
 /**
  * Manual end-to-end check: local file path in, persisted document rows out.
@@ -49,6 +50,9 @@ async function main() {
     dataSource.getRepository(DocumentChunkEntity),
     dataSource,
     parser,
+    new EmbeddingService(),
+    // Import-only dependency; ingest itself never touches the workspace.
+    { getWorkspacePath: async () => dataDirectory },
     dataDirectory,
   );
 

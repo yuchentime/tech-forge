@@ -101,8 +101,14 @@ export function singleHanCharacter(input: string): string | null {
  *
  * Per Han run: a single bigram stays a term, two bigrams become a phrase (order matters and recall is
  * still fine), and longer runs become an OR of bigrams because a three-word Chinese query rarely
- * appears as one contiguous phrase — BM25 then sorts by how many bigrams matched. Separate runs and
- * ASCII words are AND-ed. Returns `null` when the query has no indexable term.
+ * appears as one contiguous phrase — BM25 then sorts by how many bigrams matched.
+ *
+ * Runs are OR-ed, not AND-ed. The input is a natural-language question ("LLM4LB 是什么？落地时的
+ * 主要挑战是什么"), so requiring every clause in one chunk returns nothing: measured on a real
+ * corpus, the distinctive term matched 7 chunks while the AND expression matched 0. BM25 still ranks
+ * chunks that match more terms higher, so recall comes from OR and precision from the ranking.
+ *
+ * Returns `null` when the query has no indexable term.
  */
 export function buildMatchQuery(input: string): string | null {
   const terms = splitTerms(clean(input));
@@ -122,7 +128,47 @@ export function buildMatchQuery(input: string): string | null {
     if (values.length <= 3) groups.push(quotePhrase(values));
     else groups.push(`(${values.map((value) => quotePhrase([value])).join(' OR ')})`);
   }
-  return groups.length > 0 ? groups.join(' AND ') : null;
+  return groups.length > 0 ? groups.join(' OR ') : null;
+}
+
+/** Longest Han run kept as a contiguous phrase in the focused pass. */
+const DISTINCTIVE_HAN_MAX_CHARS = 12;
+
+/**
+ * Builds a MATCH expression from the terms that *name* what the user asked about.
+ *
+ * A natural-language question mixes specific names (`LLM4LB`, `EDMA`, `学生手册`) with generic words
+ * (`什么`, `主要`, `挑战`). OR-ing all of them lets a long Chinese handbook outrank the paper the
+ * question actually names, because the handbook matches more of the generic words. This expression
+ * keeps only the specific ones: ASCII tokens of three or more characters and Han runs of three or
+ * more characters as contiguous phrases. Callers use it first and fall back to the broad expression
+ * when it finds nothing.
+ */
+export function buildDistinctiveMatchQuery(input: string): string | null {
+  const terms = splitTerms(clean(input));
+  if (terms.length === 0) return null;
+
+  const termsByRun = new Map<number, string[]>();
+  for (const term of terms) {
+    const bucket = termsByRun.get(term.runId) ?? [];
+    bucket.push(term.value);
+    termsByRun.set(term.runId, bucket);
+  }
+
+  const groups: string[] = [];
+  for (const values of termsByRun.values()) {
+    const isAscii = values.length === 1 && !HAN.test(values[0]);
+    if (isAscii) {
+      if (values[0].length >= 3) groups.push(quotePhrase(values));
+      continue;
+    }
+    // A Han run contributes only when it is long enough to name something, and only as a phrase:
+    // its bigrams OR-ed would reintroduce the generic-word problem.
+    const runLength = values.length + 1;
+    if (runLength < 3 || runLength > DISTINCTIVE_HAN_MAX_CHARS) continue;
+    groups.push(quotePhrase(values));
+  }
+  return groups.length > 0 ? groups.join(' OR ') : null;
 }
 
 /** Quotes a term group as an FTS5 phrase, escaping embedded double quotes. */

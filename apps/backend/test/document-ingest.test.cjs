@@ -3,9 +3,17 @@ require('reflect-metadata');
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createHash } = require('node:crypto');
-const { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } = require('node:fs');
+const {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join, resolve } = require('node:path');
+const { dirname, join, resolve } = require('node:path');
 const { Module } = require('@nestjs/common');
 const { NestFactory } = require('@nestjs/core');
 const { TypeOrmModule } = require('@nestjs/typeorm');
@@ -51,6 +59,8 @@ test.after(() => {
 async function createIntegrationApp() {
   const dataDirectory = mkdtempSync(join(scratchRoot, 'data-'));
   process.env.TEACHFORGE_DATA_DIR = dataDirectory;
+  // DocumentsModule pulls in SettingsService, which would otherwise touch the real ~/.tech-forge.
+  process.env.TEACHFORGE_CONFIG_DIR = mkdtempSync(join(scratchRoot, 'config-'));
 
   class IntegrationModule {}
   Module({
@@ -123,6 +133,9 @@ test('ingest persists document, version and chunks and copies the source file', 
     const copiedPath = join(ctx.dataDirectory, versions[0].workspaceRelativePath);
     assert.ok(statSync(copiedPath).isFile(), `missing copied file at ${copiedPath}`);
     assert.equal(readFileSync(copiedPath, 'utf8'), readFileSync(source, 'utf8'));
+
+    // Markdown is already its own readable form: no second copy may be written next to it.
+    assert.deepEqual(readdirSync(dirname(copiedPath)).sort(), ['lesson.md']);
 
     // Offsets must slice back to the parser output, which is what a citation will rely on.
     const parsed = await ctx.parser.parse({ inputPath: source, originalName: 'lesson.md' });
@@ -255,6 +268,22 @@ test('ingest handles a real DOCX file and keeps heading locators', async () => {
     assert.ok(chunkRows.some((row) => row.content.includes('## 重点提示')));
     // DOCX has no paging semantics, so no page numbers may be invented.
     assert.ok(locators.every((locator) => locator.pageStart === 1));
+
+    // The converted Markdown is retained beside the stored source, and it is the text the chunk
+    // offsets refer to (same page join as the chunker), so a citation can open the file.
+    const versionRows = await rows(
+      ctx.dataSource,
+      'SELECT workspaceRelativePath FROM document_versions LIMIT 1',
+    );
+    const versionDirectory = dirname(join(ctx.dataDirectory, versionRows[0].workspaceRelativePath));
+    const convertedPath = join(versionDirectory, 'lesson.md');
+    assert.ok(statSync(convertedPath).isFile(), `missing converted markdown at ${convertedPath}`);
+    const converted = readFileSync(convertedPath, 'utf8');
+    assert.ok(converted.includes('## 重点提示'));
+    const parsed = await ctx.parser.parse({ inputPath: source, originalName: 'lesson.docx' });
+    const joined = parsed.pages.map((page) => page.text).join('\n\n');
+    assert.equal(converted, joined);
+    assert.equal(chunkRows[0].content, converted.slice(locators[0].charStart, locators[0].charEnd));
   } finally {
     await ctx.close();
   }
@@ -289,7 +318,7 @@ test('read models report document, version and chunk state', async () => {
     assert.equal(await ctx.service.getDocumentDetail('missing-id'), null);
     await assert.rejects(
       () => ctx.service.ingestFile({ filePath: source, documentId: 'missing-id' }),
-      /已经存在|不存在/,
+      /已经存在|没有找到/,
     );
     assert.equal(existsSync(ctx.databaseFile), true);
   } finally {

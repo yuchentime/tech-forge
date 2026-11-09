@@ -1,4 +1,26 @@
 routes:
+  knowledge-library-management:
+    description: "Implement or change the knowledge base view: file import into the configured workspace, document list, and deletion"
+    token_budget: 22000
+    code_globs:
+      - "apps/backend/src/documents/**"
+      - "apps/backend/src/settings/**"
+      - "apps/backend/test/knowledge-library.test.cjs"
+      - "apps/desktop/src/features/knowledge/**"
+      - "apps/desktop/src/features/agent/**"
+      - "apps/desktop/src/types/desktop-bridge.ts"
+      - "apps/desktop/electron/**"
+    required:
+      - docs/current/index.md
+      - docs/current/domains/documents/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-08-knowledge-base-management/design.md
+    optional:
+      - docs/current/domains/system-settings/index.md
+      - docs/current/domains/retrieval/index.md
+      - docs/decisions/2026-11-08-local-knowledge-retrieval.md
+      - docs/changes/2026-11-08-knowledge-base-management/verification.md
+    history_on_demand: []
   document-parser-adapter:
     description: "Design or implement the internal PDF, PPTX, and image parsing adapter with a packaged MinerU sidecar and optional DeepSeek Vision"
     token_budget: 16000
@@ -20,14 +42,14 @@ routes:
       - docs/changes/2026-11-07-local-workspace-setting/design.md
     history_on_demand: []
   knowledge-retrieval:
-    description: "Change or extend document ingest, lexical/dense retrieval, query expansion, and the search_documents agent tool"
+    description: "Change or extend document ingest, lexical/dense retrieval, query expansion, and the slash-triggered knowledge context"
     token_budget: 20000
     code_globs:
       - "apps/backend/src/retrieval/**"
       - "apps/backend/src/embedding/**"
       - "apps/backend/src/knowledge/**"
       - "apps/backend/src/documents/**"
-      - "apps/backend/src/llm/tools/document-search-tool.ts"
+      - "apps/backend/src/chat/**"
       - "apps/backend/src/database/migrations/**"
       - "apps/backend/assets/models/**"
     required:
@@ -39,6 +61,8 @@ routes:
     optional:
       - docs/source/data-model-design.md
       - docs/source/data-model-fields.md
+      - docs/changes/2026-11-09-knowledge-command-context/brief.md
+      - docs/changes/2026-11-09-knowledge-storage-isolation/brief.md
       - docs/changes/2026-11-08-knowledge-retrieval/design.md
       - docs/changes/2026-11-08-document-parser-adapter/design.md
     history_on_demand:

@@ -37,6 +37,20 @@ export function writeStructuredEvent(
   }
 }
 
+/** Default cap for one free-text field copied into a structured log line. */
+export const LOG_TEXT_MAX_CHARS = 200;
+
+/**
+ * Clips free text before it enters a log field.
+ *
+ * Diagnostics need to see what was searched for, but a pasted document must not flood one line;
+ * callers keeping whole documents out of logs should log identifiers and lengths instead.
+ */
+export function clipLogText(value: unknown, maxChars = LOG_TEXT_MAX_CHARS): string {
+  const text = typeof value === 'string' ? value.trim() : String(value ?? '');
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
 /** Returns safe exception type/code/stack metadata without logging its message. */
 export function getSafeErrorLogFields(error: unknown): Record<string, unknown> {
   if (!(error instanceof Error)) {

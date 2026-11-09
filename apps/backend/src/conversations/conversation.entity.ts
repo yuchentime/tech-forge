@@ -15,6 +15,13 @@ export class ConversationEntity {
   @Column({ type: 'text', nullable: true })
   title!: string | null;
 
+  /**
+   * Conversation-level preferences as JSON; currently only the knowledge scope.
+   * Kept out of message rows: preferences are one value per conversation, not per turn.
+   */
+  @Column({ type: 'text', nullable: true })
+  metadataJson!: string | null;
+
   @CreateDateColumn({ type: 'datetime' })
   createdAt!: Date;
 

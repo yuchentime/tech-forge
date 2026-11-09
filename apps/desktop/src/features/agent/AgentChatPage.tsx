@@ -10,9 +10,11 @@ import {
   CaretDown,
   Check,
   CircleNotch,
+  Database,
   FileText,
   Stack,
   WarningCircle,
+  X,
   XCircle,
 } from '@phosphor-icons/react';
 import {
@@ -25,8 +27,11 @@ import {
 } from 'react';
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { ConversationSidebar } from './ConversationSidebar';
+import { ConversationSidebar, type SidebarView } from './ConversationSidebar';
+import { SlashCommandMenu, useSlashCommandMenu } from './SlashCommandMenu';
+import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
+import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
@@ -49,7 +54,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     agentEventBus.getTurnSnapshots,
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeView, setActiveView] = useState<SidebarView>('chat');
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
@@ -62,6 +67,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const restoredInitialConversation = useRef(false);
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollAnchor = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const slashMenu = useSlashCommandMenu(composerInputRef);
+  const composerCommand = useSyncExternalStore(
+    composerCommandStore.subscribe,
+    composerCommandStore.getSnapshot,
+    composerCommandStore.getSnapshot,
+  );
 
   /** Fetches one history snapshot and replaces the visible local thread on success. */
   const loadConversation = useCallback(async (conversationId: string) => {
@@ -292,6 +304,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     setHistoryError(null);
     setHistoryErrorConversationId(null);
     conversationStore.setActiveConversationId(null);
+    composerCommandStore.reset();
     runtime.thread.reset([]);
   }, [isRunning, runtime]);
 
@@ -303,23 +316,27 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       <ConversationSidebar
         isBusy={isRunning || isHistoryLoading || isInitialListLoading}
-        isSettingsOpen={isSettingsOpen}
+        activeView={activeView}
         loadingConversationId={loadingConversationId}
         onNewConversation={() => {
-          setIsSettingsOpen(false);
+          setActiveView('chat');
           startNewConversation();
         }}
         onRefresh={() => void conversationStore.refresh()}
         onSelect={(conversationId) => {
-          setIsSettingsOpen(false);
+          setActiveView('chat');
           void loadConversation(conversationId);
         }}
-        onToggleSettings={() => setIsSettingsOpen((open) => !open)}
+        onSelectView={(view) =>
+          setActiveView((current) => (current === view ? 'chat' : view))
+        }
         state={conversationState}
       />
 
-      {isSettingsOpen ? (
+      {activeView === 'settings' ? (
         <SettingsPage />
+      ) : activeView === 'knowledge' ? (
+        <KnowledgeBasePage />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
           {historyError && (
@@ -403,12 +420,31 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </ThreadPrimitive.Viewport>
 
               <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
-                <ComposerPrimitive.Root className="rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+                <ComposerPrimitive.Root className="relative rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+                  <SlashCommandMenu menu={slashMenu} />
+                  {composerCommand && (
+                    <div className="mb-2 flex items-center">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-0.5 pl-2 pr-1 text-xs font-medium text-emerald-900">
+                        <Database className="h-3.5 w-3.5" aria-hidden />
+                        查询资料库
+                        <button
+                          aria-label="移除资料库查询"
+                          className="rounded-full p-0.5 text-emerald-700 transition hover:bg-emerald-100"
+                          onClick={() => composerCommandStore.reset()}
+                          type="button"
+                        >
+                          <X className="h-3 w-3" aria-hidden />
+                        </button>
+                      </span>
+                    </div>
+                  )}
                   <ComposerPrimitive.Input
                     aria-label="发送给备课助手"
                     className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
                     disabled={isLoadingEarlierMessages}
-                    placeholder="写下你正在准备的内容或问题…"
+                    onKeyDown={slashMenu.handleKeyDown}
+                    placeholder="写下你正在准备的内容或问题…输入 / 可查询本地上传的资料库"
+                    ref={composerInputRef}
                     rows={3}
                     submitMode="ctrlEnter"
                   />

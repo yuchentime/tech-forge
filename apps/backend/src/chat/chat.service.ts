@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
 import { ConversationsService } from '../conversations/conversations.service';
+import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
+import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
 import {
   getSafeErrorLogFields,
@@ -35,6 +37,7 @@ export class ChatService {
   constructor(
     private readonly llm: LlmService,
     private readonly conversations: ConversationsService,
+    private readonly knowledge: KnowledgeService,
   ) {}
 
   /** Persists a turn, restores its prior context, and streams safe Pi events. */
@@ -50,6 +53,9 @@ export class ChatService {
       requestId,
       conversationId: resolvedConversationId,
     };
+    // Retrieval is an explicit user decision: only the leading command turns it on for this turn.
+    const parsedCommand = parseKnowledgeCommand(prompt);
+    const userPrompt = parsedCommand.prompt;
     let phase = 'request_start';
     let releaseLock: (() => void) | undefined;
     let turn:
@@ -69,6 +75,8 @@ export class ChatService {
       ...logContext,
       requestedConversation: conversationId !== undefined,
       promptLength: Array.from(prompt).length,
+      knowledgeCommand: parsedCommand.force,
+      userPromptLength: Array.from(userPrompt).length,
     });
 
     try {
@@ -121,7 +129,7 @@ export class ChatService {
       });
       turn = await this.conversations.beginTurn(
         resolvedConversationId,
-        prompt,
+        userPrompt,
         conversationId === undefined,
         logContext,
       );
@@ -129,6 +137,7 @@ export class ChatService {
         ...logContext,
         historyMessageCount: turn.history.length,
         assistantTurnId: turn.assistantTurnId,
+        loadedChunkCount: turn.loadedChunkIds.length,
       });
       if (signal.aborted) {
         assistantStatus = 'cancelled';
@@ -144,15 +153,53 @@ export class ChatService {
         conversationId: resolvedConversationId,
       };
 
+      let knowledgeContext: KnowledgeContextResult | undefined;
+      if (parsedCommand.force) {
+        phase = 'knowledge.context';
+        // Scope is conversation state, not model judgement: an explicit selection restricts the
+        // search, and an empty one keeps the default range.
+        const scope = await this.conversations.getKnowledgeScope(resolvedConversationId);
+        knowledgeContext = await this.knowledge.buildContext({
+          conversationId: resolvedConversationId,
+          query: userPrompt,
+          loadedChunkIds: turn.loadedChunkIds,
+          explicitDocumentIds: scope.documentIds,
+          logContext,
+          signal,
+        });
+        // Recorded before the model runs so a failed or cancelled turn still reflects what was sent.
+        const refsJson = this.knowledge.toContextRefsJson(knowledgeContext, userPrompt);
+        if (refsJson) {
+          await this.conversations.updateUserMessageContextRefs(
+            turn.userMessageId,
+            refsJson,
+            logContext,
+          );
+        }
+        if (signal.aborted) {
+          assistantStatus = 'cancelled';
+          writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
+            ...logContext,
+            phase,
+            reason: 'aborted_after_knowledge_context',
+          });
+          return;
+        }
+      }
+
       phase = 'llm.stream';
       const llmStartedAt = Date.now();
       writeStructuredEvent(this.logger, 'log', 'chat.llm.stream.started', {
         ...logContext,
         historyMessageCount: turn.history.length,
+        knowledgeOutcome: knowledgeContext?.outcome,
+        injectedDocumentCount: knowledgeContext?.refs.length ?? 0,
+        injectedTokens: knowledgeContext?.stats.injectedTokens ?? 0,
       });
-      const piEvents = this.llm.stream(prompt, {
+      const piEvents = this.llm.stream(userPrompt, {
         requestId,
         signal,
+        knowledgeContext: knowledgeContext?.text,
         conversation: {
           id: resolvedConversationId,
           history: turn.history.map((message) => ({

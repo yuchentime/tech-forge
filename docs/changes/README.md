@@ -20,7 +20,10 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
-| Local Knowledge Retrieval | 本地知识库：解析、分块、词法索引、向量化与双通道检索已实现；上传入口与会话编排未实现 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
+| Local Knowledge Retrieval | 本地知识库：解析、分块、词法索引、向量化与双通道检索已实现；会话编排见下一条 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
+| `/知识库` 斜杠注入 | 检索触发权归用户：命令解析、会话范围、整篇文档注入、token 预算、按版本去重与 `contextRefsJson`；删除 Agent 检索工具 | [简报](2026-11-09-knowledge-command-context/brief.md) · [验收](2026-11-09-knowledge-command-context/verification.md) |
+| 知识库存储隔离 | 副本迁出 Agent workspace 到 `<configDir>/knowledge`，受保护目录子树拒绝读写，旧目录启动时迁移，`workspacePath` → `storedPath` | [简报](2026-11-09-knowledge-storage-isolation/brief.md) · [验收](2026-11-09-knowledge-storage-isolation/verification.md) |
+| 知识库管理 | 侧栏知识库视图、文件导入到 workspace 并入库、资料列表与彻底删除（含后端 API 与 Electron 文件选择器） | [简报](2026-11-08-knowledge-base-management/brief.md) · [设计](2026-11-08-knowledge-base-management/design.md) · [验收](2026-11-08-knowledge-base-management/verification.md) |
 | Document Parser Adapter | 不依赖会话或知识库业务的本地文档/图片解析适配层；v1 文本层提取（PDF/DOCX/MD/TXT），MinerU 保留为升级路径 | [设计](2026-11-08-document-parser-adapter/design.md) · [验收](2026-11-08-document-parser-adapter/verification.md) · [工作记录](2026-11-08-document-parser-adapter/worklog.md) |
 | Conversation Tool Activity History | 历史 API 将已持久化工具摘要附于 user turn，并在桌面切换/翻页时恢复活动 UI | [简报](2026-11-08-conversation-tool-activity-history/brief.md) · [设计](2026-11-08-conversation-tool-activity-history/design.md) · [验收](2026-11-08-conversation-tool-activity-history/verification.md) · [工作记录](2026-11-08-conversation-tool-activity-history/worklog.md) |
 | Chat API Rename | Chat 流式 API、NestJS 模块命名与 Electron bridge 契约 | [简报](2026-11-08-chat-api-rename/brief.md) · [工作记录](2026-11-08-chat-api-rename/worklog.md) |

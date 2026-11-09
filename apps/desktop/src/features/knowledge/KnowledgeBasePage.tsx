@@ -1,0 +1,701 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ArrowClockwise,
+  CheckCircle,
+  CircleNotch,
+  FileText,
+  Trash,
+  UploadSimple,
+  X,
+  XCircle,
+} from '@phosphor-icons/react';
+import { describeFailure, readBackendErrorMessage } from '../../api/backend-error';
+import { hasDesktopBridge } from '../../types/desktop-bridge';
+
+/** Lifecycle values the backend may report for the latest document version. */
+type DocumentStatus = 'parsing' | 'chunking' | 'indexed' | 'ready' | 'failed';
+
+/** One row of the knowledge library list, as returned by `GET /api/documents`. */
+interface DocumentSummary {
+  id: string;
+  title: string;
+  isShared: boolean;
+  versionCount: number;
+  latest: {
+    versionNo: number;
+    status: DocumentStatus;
+    originalName: string;
+    chunkCount: number;
+    byteSize: number | null;
+    createdAt: string;
+    processingError: string | null;
+  } | null;
+}
+
+/** Outcome of one deletion, as returned by `DELETE /api/documents/:documentId`. */
+interface DeleteResult {
+  documentId: string;
+  fileCleanup: 'complete' | 'partial';
+}
+
+/** Outcome of one import, as returned by `POST /api/documents/import`. */
+interface ImportResult {
+  documentId: string;
+  chunkCount: number;
+  status: DocumentStatus;
+  duplicate: boolean;
+  warnings: Array<{ code: string; message: string }>;
+}
+
+/** Per-file progress shown in the import feedback panel. */
+interface ImportEntry {
+  id: number;
+  name: string;
+  state: 'pending' | 'importing' | 'done' | 'duplicate' | 'failed';
+  message?: string;
+}
+
+/** Monotonic key for import feedback rows; the file path itself is not a stable key. */
+let nextImportId = 0;
+
+/**
+ * Renders the knowledge library: imported materials, native file import and deletion.
+ *
+ * The page only talks to the local backend through the restricted desktop bridge. Import runs one
+ * file at a time because the backend serialises ingest anyway, and the list is polled while imports
+ * are in flight so `parsing → chunking → ready` is visible without a progress protocol.
+ */
+export function KnowledgeBasePage() {
+  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [listStatus, setListStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [listError, setListError] = useState<string | null>(null);
+  const [imports, setImports] = useState<ImportEntry[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isPickingFiles, setIsPickingFiles] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [fileCleanupWarning, setFileCleanupWarning] = useState(false);
+  const [pollFailures, setPollFailures] = useState(0);
+
+  /** Loads the library list; silent polls never replace a visible error or clear the rows. */
+  const loadDocuments = useCallback(async (silent = false) => {
+    if (!silent) {
+      setListStatus('loading');
+      setListError(null);
+    }
+    if (!hasDesktopBridge()) {
+      setListStatus('error');
+      setListError('请通过 TeachForge 桌面应用管理资料库。');
+      return;
+    }
+
+    try {
+      const response = await window.teachforge.request<unknown>({
+        method: 'GET',
+        path: '/api/documents',
+      });
+      if (
+        response.status !== 200 ||
+        !Array.isArray(response.data) ||
+        !response.data.every(isDocumentSummary)
+      ) {
+        throw new Error(readBackendErrorMessage(response.data, '读取资料列表失败，请重试。'));
+      }
+      setDocuments(response.data);
+      setListStatus('ready');
+      setListError(null);
+      setPollFailures(0);
+    } catch (error) {
+      if (silent) {
+        // A background refresh must not replace the list with an error, but repeated failures are
+        // still counted so the user is told the view may be stale.
+        setPollFailures((count) => count + 1);
+        return;
+      }
+      setListStatus('error');
+      setListError(describeFailure(error, '读取资料列表失败，请重试。'));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [loadDocuments]);
+
+  const isImporting = imports.some(
+    (entry) => entry.state === 'pending' || entry.state === 'importing',
+  );
+
+  useEffect(() => {
+    if (!isImporting) return;
+    const timer = window.setInterval(() => {
+      void loadDocuments(true);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [isImporting, loadDocuments]);
+
+  /** Picks files natively, then imports them one at a time and reports each outcome. */
+  const importDocuments = useCallback(async () => {
+    setImportError(null);
+    if (!hasDesktopBridge()) {
+      setImportError('请通过 TeachForge 桌面应用导入资料。');
+      return;
+    }
+
+    setIsPickingFiles(true);
+    let picked: string[];
+    try {
+      picked = await window.teachforge.pickImportFiles();
+    } catch (error) {
+      setImportError(describeFailure(error, '无法打开文件选择器，请重试。'));
+      return;
+    } finally {
+      setIsPickingFiles(false);
+    }
+
+    if (picked.length === 0) return;
+
+    const queued = picked.map((filePath) => ({
+      id: nextImportId++,
+      filePath,
+      name: fileNameOf(filePath),
+    }));
+    setImports((current) => [
+      ...queued.map(({ id, name }) => ({ id, name, state: 'pending' as const })),
+      ...current,
+    ]);
+
+    for (const item of queued) {
+      updateImport(setImports, item.id, (entry) => ({ ...entry, state: 'importing' }));
+      try {
+        const response = await window.teachforge.request<unknown>({
+          method: 'POST',
+          path: '/api/documents/import',
+          body: { filePath: item.filePath },
+        });
+        if (response.status !== 200 || !isImportResult(response.data)) {
+          throw new Error(readBackendErrorMessage(response.data, '导入失败，请重试。'));
+        }
+        const result = response.data;
+        // A duplicate can point at an earlier failed attempt; saying "already imported" would hide it.
+        const failedBefore = result.duplicate && result.status === 'failed';
+        updateImport(setImports, item.id, (entry) => ({
+          ...entry,
+          state: failedBefore ? 'failed' : result.duplicate ? 'duplicate' : 'done',
+          message: failedBefore
+            ? '这份文件上次导入没有成功，请先删除那条失败记录，再重新导入。'
+            : result.duplicate
+              ? '该文件已入库，未重复导入。'
+              : describeImportSuccess(result),
+        }));
+      } catch (error) {
+        updateImport(setImports, item.id, (entry) => ({
+          ...entry,
+          state: 'failed',
+          message: describeFailure(error, '导入失败，请重试。'),
+        }));
+      }
+      await loadDocuments(true);
+    }
+
+    await loadDocuments(true);
+  }, [loadDocuments]);
+
+  /** Deletes one confirmed document and drops it from the list without a reload. */
+  const deleteDocument = useCallback(async (documentId: string) => {
+    setDeletingId(documentId);
+    setDeleteError(null);
+    try {
+      const response = await window.teachforge.request<unknown>({
+        method: 'DELETE',
+        path: `/api/documents/${encodeURIComponent(documentId)}`,
+      });
+      if (response.status !== 200 || !isDeleteResult(response.data)) {
+        throw new Error(readBackendErrorMessage(response.data, '删除失败，请重试。'));
+      }
+      setDocuments((current) => current.filter((document) => document.id !== documentId));
+      setPendingDeleteId(null);
+      setFileCleanupWarning(response.data.fileCleanup !== 'complete');
+    } catch (error) {
+      setDeleteError(describeFailure(error, '删除失败，请重试。'));
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
+
+  const readyCount = documents.filter((document) => document.latest?.status === 'ready').length;
+
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight text-stone-900">资料库</h1>
+          <p className="mt-1 truncate text-sm text-stone-500">
+            {documents.length === 0
+              ? '导入资料后，提问时就能用上它们。'
+              : `共 ${documents.length} 份资料 · 可以搜索 ${readyCount} 份`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            aria-label="刷新资料列表"
+            className="flex size-9 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-wait disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+            disabled={listStatus === 'loading'}
+            onClick={() => void loadDocuments()}
+            title="刷新资料列表"
+            type="button"
+          >
+            <ArrowClockwise
+              aria-hidden="true"
+              className={`size-4 ${listStatus === 'loading' ? 'animate-spin' : ''}`}
+            />
+          </button>
+          <button
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+            disabled={isPickingFiles || isImporting}
+            onClick={() => void importDocuments()}
+            type="button"
+          >
+            {isImporting ? (
+              <CircleNotch aria-hidden="true" className="size-4 animate-spin" />
+            ) : (
+              <UploadSimple aria-hidden="true" className="size-4" />
+            )}
+            <span>{isImporting ? '正在导入…' : '导入资料'}</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
+        <div className="mx-auto w-full max-w-4xl space-y-4 pb-8">
+          {importError && (
+            <div
+              className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+              role="alert"
+            >
+              <span className="min-w-0 flex-1">{importError}</span>
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => setImportError(null)}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+
+          {imports.length > 0 && (
+            <section className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+              <header className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-2.5">
+                <h2 className="text-sm font-medium text-stone-800">本次导入</h2>
+                <button
+                  className="text-xs font-medium text-stone-500 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={isImporting}
+                  onClick={() => setImports([])}
+                  type="button"
+                >
+                  清除记录
+                </button>
+              </header>
+              <ul className="divide-y divide-stone-100">
+                {imports.map((entry) => (
+                  <li className="flex items-start gap-3 px-4 py-2.5 text-sm" key={entry.id}>
+                    <ImportStateIcon state={entry.state} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-stone-800">{entry.name}</span>
+                      {entry.message && (
+                        <span
+                          className={`mt-0.5 block text-xs ${
+                            entry.state === 'failed' ? 'text-rose-700' : 'text-stone-500'
+                          }`}
+                        >
+                          {entry.message}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {deleteError && (
+            <div
+              className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+              role="alert"
+            >
+              <span className="min-w-0 flex-1">{deleteError}</span>
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => setDeleteError(null)}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+
+          {fileCleanupWarning && (
+            <div
+              className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              role="status"
+            >
+              <span className="min-w-0 flex-1">
+                资料已删除，但有一个文件没能删掉，可以到工作空间里手动删除。
+              </span>
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => setFileCleanupWarning(false)}
+                type="button"
+              >
+                知道了
+              </button>
+            </div>
+          )}
+
+          {isImporting && pollFailures >= 2 && (
+            <p className="text-xs text-stone-500" role="status">
+              资料列表暂时刷新失败，正在继续重试；导入本身不受影响。
+            </p>
+          )}
+
+          {listStatus === 'loading' ? (
+            <p className="py-12 text-center text-sm text-stone-500" role="status">
+              正在加载资料…
+            </p>
+          ) : listStatus === 'error' ? (
+            <div
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800"
+              role="alert"
+            >
+              <p>{listError}</p>
+              <button
+                className="mt-3 font-medium underline underline-offset-2"
+                onClick={() => void loadDocuments()}
+                type="button"
+              >
+                重试
+              </button>
+            </div>
+          ) : documents.length === 0 ? (
+            <p className="py-12 text-center text-sm leading-6 text-stone-500">
+              还没有资料。导入 PDF、Word、Markdown 或 TXT 后，提问时就能用上它们。
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {documents.map((document) => (
+                <DocumentRow
+                  confirmDelete={pendingDeleteId === document.id}
+                  deleting={deletingId === document.id}
+                  document={document}
+                  key={document.id}
+                  onCancelDelete={() => setPendingDeleteId(null)}
+                  onConfirmDelete={() => void deleteDocument(document.id)}
+                  onRequestDelete={() => {
+                    setDeleteError(null);
+                    setPendingDeleteId(document.id);
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Renders one material with its status and a two-step deletion confirmation. */
+function DocumentRow({
+  document,
+  confirmDelete,
+  deleting,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}: {
+  document: DocumentSummary;
+  confirmDelete: boolean;
+  deleting: boolean;
+  onRequestDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+}) {
+  const latest = document.latest;
+  const displayName = latest?.originalName ?? document.title;
+
+  return (
+    <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+      <div className="flex items-start gap-3">
+        <FileText aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-stone-500" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-stone-900" title={displayName}>
+            {displayName}
+          </p>
+          <p className="mt-1 truncate text-xs text-stone-500">
+            {[
+              document.versionCount > 1 ? `v${latest?.versionNo ?? document.versionCount}` : null,
+              latest ? `${latest.chunkCount} 段` : '还没导入完成',
+              latest?.byteSize !== null && latest?.byteSize !== undefined
+                ? formatBytes(latest.byteSize)
+                : null,
+              latest ? formatImportedAt(latest.createdAt) : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        </div>
+        {latest && <StatusBadge status={latest.status} />}
+      </div>
+
+      {confirmDelete ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-stone-100 pt-3 text-xs text-stone-700">
+          <span className="min-w-0 flex-1">
+            确认删除「{displayName}」？删除后这份资料不会再出现在搜索和回答里。
+          </span>
+          <button
+            className="rounded-lg px-3 py-1.5 font-medium text-stone-600 transition hover:bg-stone-100 disabled:opacity-40"
+            disabled={deleting}
+            onClick={onCancelDelete}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="flex items-center gap-1.5 rounded-lg bg-rose-700 px-3 py-1.5 font-medium text-white transition hover:bg-rose-800 disabled:cursor-wait disabled:opacity-60"
+            disabled={deleting}
+            onClick={onConfirmDelete}
+            type="button"
+          >
+            {deleting && <CircleNotch aria-hidden="true" className="size-3.5 animate-spin" />}
+            <span>{deleting ? '正在删除…' : '删除'}</span>
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex justify-end">
+          <button
+            aria-label={`删除 ${displayName}`}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 disabled:cursor-wait disabled:opacity-40"
+            disabled={deleting || latest?.status === 'parsing' || latest?.status === 'chunking'}
+            onClick={onRequestDelete}
+            title={
+              latest?.status === 'parsing' || latest?.status === 'chunking'
+                ? '处理完成后才能删除'
+                : '删除这份资料'
+            }
+            type="button"
+          >
+            <Trash aria-hidden="true" className="size-3.5" />
+            <span>删除</span>
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** Maps the processing status to a Chinese label and a distinct colour plus icon. */
+function StatusBadge({ status }: { status: DocumentStatus }) {
+  const label = getStatusLabel(status);
+  const hint = getStatusHint(status);
+  const className =
+    status === 'ready'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : status === 'indexed'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
+        : status === 'failed'
+          ? 'border-rose-200 bg-rose-50 text-rose-800'
+          : 'border-stone-200 bg-stone-100 text-stone-700';
+  const isBusy = status === 'parsing' || status === 'chunking';
+
+  return (
+    <span
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+      title={hint ?? undefined}
+    >
+      {isBusy ? (
+        <CircleNotch aria-hidden="true" className="size-3 animate-spin" />
+      ) : status === 'failed' ? (
+        <XCircle aria-hidden="true" className="size-3" />
+      ) : (
+        <CheckCircle aria-hidden="true" className="size-3" />
+      )}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+/** Renders the import feedback icon for one queued file. */
+function ImportStateIcon({ state }: { state: ImportEntry['state'] }) {
+  if (state === 'failed') {
+    return <XCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-rose-600" />;
+  }
+  if (state === 'pending' || state === 'importing') {
+    return (
+      <CircleNotch
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 animate-spin text-stone-500"
+      />
+    );
+  }
+  if (state === 'duplicate') {
+    return <X aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-stone-400" />;
+  }
+  return <CheckCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-600" />;
+}
+
+/** Names a status for users who should not have to learn the internal lifecycle. */
+function getStatusLabel(status: DocumentStatus): string {
+  switch (status) {
+    case 'ready':
+      return '可以搜索';
+    case 'indexed':
+      return '只能关键词搜索';
+    case 'failed':
+      return '导入失败';
+    case 'parsing':
+      return '正在读取';
+    case 'chunking':
+      return '正在整理';
+    default:
+      return '未知';
+  }
+}
+
+/** Explains a non-ready status in plain language; technical detail stays in the tooltip tail. */
+function getStatusHint(status: DocumentStatus): string | null {
+  switch (status) {
+    case 'indexed':
+      return '这份资料暂时只能用关键词搜索，还不能按意思搜索。';
+    case 'failed':
+      return '这份资料没能导入成功，可以删除后重新导入。';
+    case 'parsing':
+      return '正在读取文件内容…';
+    case 'chunking':
+      return '正在整理内容，方便之后搜索…';
+    default:
+      return null;
+  }
+}
+
+/** Summarises one successful import without repeating the status label in the panel. */
+function describeImportSuccess(result: ImportResult): string {
+  const base = `${result.chunkCount} 段`;
+  const warning = result.warnings
+    .map((entry) => getWarningCopy(entry.code))
+    .find((copy): copy is string => Boolean(copy));
+  return warning ? `${base} · ${warning}` : base;
+}
+
+/**
+ * Translates warning codes into plain language.
+ *
+ * The API keeps the technical parser message for diagnostics; this list is the only place where a
+ * reader with no AI background is expected to understand the outcome.
+ */
+function getWarningCopy(code: string): string | null {
+  switch (code) {
+    case 'EMBEDDING_FAILED':
+      return '暂时只能用关键词搜索';
+    case 'UPLOAD_COPY_FAILED':
+      return '原文件没能另存到工作空间';
+    case 'TOC_LIKE':
+      return '目录页已跳过';
+    case 'MULTI_COLUMN_SUSPECTED':
+      return '多栏排版的阅读顺序可能不准';
+    case 'UNSTRUCTURED_TABLE':
+      return '表格内容被简化成普通文字';
+    case 'EMPTY_PAGE':
+      return '空白页已跳过';
+    case 'CONVERSION_MESSAGE':
+      return '文件转换有提示，部分内容可能不完整';
+    default:
+      return '部分内容可能没有完整读取';
+  }
+}
+
+/** Updates one import entry in place, keeping the newest entries first. */
+function updateImport(
+  setImports: React.Dispatch<React.SetStateAction<ImportEntry[]>>,
+  id: number,
+  update: (entry: ImportEntry) => ImportEntry,
+): void {
+  setImports((current) => current.map((entry) => (entry.id === id ? update(entry) : entry)));
+}
+
+/** Reads the trailing file name from an absolute path with either separator. */
+function fileNameOf(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** Formats the latest import time with a stable Chinese locale. */
+function formatImportedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+/** Formats a byte count for the compact row metadata. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Validates one list row before it reaches the DOM. */
+function isDocumentSummary(value: unknown): value is DocumentSummary {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { id, title, isShared, versionCount, latest } = value as DocumentSummary;
+  if (typeof id !== 'string' || typeof title !== 'string') return false;
+  if (typeof isShared !== 'boolean' || typeof versionCount !== 'number') return false;
+  if (latest === null) return true;
+  if (typeof latest !== 'object') return false;
+  return (
+    typeof latest.versionNo === 'number' &&
+    isDocumentStatus(latest.status) &&
+    typeof latest.originalName === 'string' &&
+    typeof latest.chunkCount === 'number' &&
+    (latest.byteSize === null || typeof latest.byteSize === 'number') &&
+    typeof latest.createdAt === 'string' &&
+    (latest.processingError === null || typeof latest.processingError === 'string')
+  );
+}
+
+/** Validates one delete response before showing a cleanup warning. */
+function isDeleteResult(value: unknown): value is DeleteResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { documentId, fileCleanup } = value as DeleteResult;
+  return (
+    typeof documentId === 'string' && (fileCleanup === 'complete' || fileCleanup === 'partial')
+  );
+}
+
+/** Validates one import response before showing its numbers. */
+function isImportResult(value: unknown): value is ImportResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { documentId, chunkCount, status, duplicate, warnings } = value as ImportResult;
+  return (
+    typeof documentId === 'string' &&
+    typeof chunkCount === 'number' &&
+    isDocumentStatus(status) &&
+    typeof duplicate === 'boolean' &&
+    Array.isArray(warnings)
+  );
+}
+
+/** Narrows a value to the known processing statuses. */
+function isDocumentStatus(value: unknown): value is DocumentStatus {
+  return (
+    value === 'parsing' ||
+    value === 'chunking' ||
+    value === 'indexed' ||
+    value === 'ready' ||
+    value === 'failed'
+  );
+}

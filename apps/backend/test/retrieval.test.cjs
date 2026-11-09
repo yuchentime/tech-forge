@@ -43,6 +43,16 @@ test.after(() => {
  */
 async function createIntegrationApp() {
   const dataDirectory = mkdtempSync(join(scratchRoot, 'data-'));
+  const configDirectory = mkdtempSync(join(scratchRoot, 'config-'));
+  const workspacePath = join(configDirectory, 'workspace');
+  // Isolate settings and the Agent workspace: a run must never read or move the developer's
+  // real ~/.tech-forge files.
+  writeFileSync(
+    join(configDirectory, 'config.toml'),
+    `[workspace]\npath = ${JSON.stringify(workspacePath)}\n`,
+    'utf8',
+  );
+  process.env.TEACHFORGE_CONFIG_DIR = configDirectory;
   process.env.TEACHFORGE_DATA_DIR = dataDirectory;
 
   class IntegrationModule {}
@@ -229,6 +239,69 @@ test('retrieval degrades to the lexical channel when vectors are missing', async
   }
 });
 
+test('a natural-language question keeps lexical recall on its distinctive term', async () => {
+  const ctx = await createIntegrationApp();
+  const paper = writeFixture(
+    'paper.md',
+    '# LLM4LB\n\nLLM4LB is a link-level simulation framework for low-altitude networks.\n\n' +
+      '## Challenges\n\nDeployment requires calibrated channel models.',
+  );
+  const handbook = writeFixture(
+    'handbook.md',
+    '# 学生手册\n\n学生应当遵守考试纪律，关于抄袭的范围界定见第三章。',
+  );
+
+  try {
+    await ctx.documents.ingestFile({ filePath: paper });
+    await ctx.documents.ingestFile({ filePath: handbook });
+    // Measured failure: with AND-ed query runs this question matched zero chunks even though the
+    // distinctive term appears in the paper, because the Chinese clauses exist only in the handbook.
+    const hits = await ctx.retrieval.search({
+      query: 'LLM4LB 是什么？落地时的主要挑战是什么',
+      limit: 5,
+      expand: false,
+    });
+    assert.ok(hits.length > 0);
+    assert.ok(
+      hits.some((hit) => hit.document.fileName === 'paper.md'),
+      'the distinctive ASCII term must reach the paper',
+    );
+    assert.ok(hits.some((hit) => hit.score.lexicalRank !== undefined));
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a specific name beats generic question words in the lexical channel', async () => {
+  const ctx = await createIntegrationApp();
+  const paper = writeFixture(
+    'EDMA-paper.md',
+    '# EDMA\n\n环境分割多址的可行性结论是：在给定天线增益下可达到目标容量。',
+  );
+  const handbook = writeFixture(
+    'handbook.md',
+    Array.from(
+      { length: 80 },
+      (_, index) => `## 条款 ${index}\n\n本条款说明主要要求与挑战，学生需要了解什么可以做。`,
+    ).join('\n\n'),
+  );
+
+  try {
+    await ctx.documents.ingestFile({ filePath: paper });
+    await ctx.documents.ingestFile({ filePath: handbook });
+    const hits = await ctx.retrieval.search({
+      query: '环境分割多址 EDMA 的可行性结论是什么',
+      limit: 8,
+      expand: false,
+    });
+    // The handbook matches the question's generic words; the paper matches its name.
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].document.fileName, 'EDMA-paper.md');
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('a query with no indexable term returns no lexical contribution', async () => {
   const ctx = await createIntegrationApp();
   const source = writeFixture('empty.md', '# 光合作用\n\n光合作用是植物把光能转为化学能的过程。');
@@ -270,6 +343,16 @@ test('single Han character queries use the substring fallback', async () => {
 /** Boots the same graph but with a scripted query expander standing in for the chat model. */
 async function createAppWithExpander(expander) {
   const dataDirectory = mkdtempSync(join(scratchRoot, 'data-'));
+  const configDirectory = mkdtempSync(join(scratchRoot, 'config-'));
+  const workspacePath = join(configDirectory, 'workspace');
+  // Isolate settings and the Agent workspace: a run must never read or move the developer's
+  // real ~/.tech-forge files.
+  writeFileSync(
+    join(configDirectory, 'config.toml'),
+    `[workspace]\npath = ${JSON.stringify(workspacePath)}\n`,
+    'utf8',
+  );
+  process.env.TEACHFORGE_CONFIG_DIR = configDirectory;
   process.env.TEACHFORGE_DATA_DIR = dataDirectory;
 
   class ExpansionModule {}

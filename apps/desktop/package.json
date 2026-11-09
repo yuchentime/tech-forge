@@ -10,7 +10,8 @@
     "build:electron": "tsc --project tsconfig.electron.json",
     "build:renderer": "tsc --noEmit --project tsconfig.app.json && vite build",
     "test:agent-stream": "npm run build:electron && node --test test/agent-stream.test.cjs",
-    "test:conversation-history": "npm run build:electron && node --test test/conversation-history.test.cjs"
+    "test:conversation-history": "npm run build:electron && node --test test/conversation-history.test.cjs",
+    "test:backend-request": "npm run build:electron && node --test test/backend-request.test.cjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.32",

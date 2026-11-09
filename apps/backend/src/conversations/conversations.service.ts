@@ -41,6 +41,14 @@ export interface ConversationTurn {
   conversationId: string;
   history: ConversationHistoryMessage[];
   assistantTurnId: string;
+  /** Row id of this turn's user message, so callers can record what was injected for it. */
+  userMessageId: string;
+  /**
+   * Chunk ids already present in the conversation's stored context refs.
+   * Dedupe is derived from the history itself, so it survives restarts and cannot drift from what the
+   * model actually received.
+   */
+  loadedChunkIds: string[];
 }
 
 /** Provides one previous user, assistant, or Pi tool-result row for restoration. */
@@ -50,6 +58,11 @@ export interface ConversationHistoryMessage {
   contentJson: string;
   status: string;
   createdAt: Date;
+}
+
+/** Explicit knowledge scope for one conversation; empty means the default range applies. */
+export interface ConversationKnowledgeScope {
+  documentIds: string[];
 }
 
 /** Defines terminal statuses for a request-level assistant turn marker. */
@@ -417,7 +430,7 @@ export class ConversationsService {
           throw new NotFoundException('Conversation was not found.');
         }
         if (!conversation) {
-          conversation = conversations.create({ id: conversationId, title: null });
+          conversation = conversations.create({ id: conversationId, title: null, metadataJson: null });
           await conversations.save(conversation);
         }
 
@@ -540,6 +553,8 @@ export class ConversationsService {
           conversationId,
           history,
           assistantTurnId: assistantTurn.id,
+          userMessageId: userMessage.id,
+          loadedChunkIds: collectLoadedChunkIds(priorMessages),
         };
       });
       writeStructuredEvent(this.logger, 'log', 'conversations.turn.begin.completed', {
@@ -559,6 +574,76 @@ export class ConversationsService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Records which documents a turn injected on its user row.
+   *
+   * This is the durable dedupe record: the next turn reads it back from the loaded history instead of
+   * keeping process state, so a restart changes nothing. A failure here must not fail the turn — the
+   * worst case is re-injecting a document.
+   */
+  async updateUserMessageContextRefs(
+    messageId: string,
+    contextRefsJson: string,
+    logContext?: RequestLogContext,
+  ): Promise<void> {
+    try {
+      await this.dataSource
+        .getRepository(MessageEntity)
+        .update({ id: messageId }, { contextRefsJson });
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'conversations.context_refs.failed', {
+        ...logContext,
+        messageId,
+        ...getSafeErrorLogFields(error),
+      });
+    }
+  }
+
+  /**
+   * Reads the explicit knowledge scope of one conversation.
+   *
+   * A missing conversation or missing metadata both mean "no override": the default range
+   * (shared + conversation documents) then applies.
+   */
+  async getKnowledgeScope(conversationId: string): Promise<ConversationKnowledgeScope> {
+    const conversation = await this.dataSource
+      .getRepository(ConversationEntity)
+      .findOneBy({ id: conversationId });
+    return { documentIds: readScopeDocumentIds(conversation?.metadataJson ?? null) };
+  }
+
+  /**
+   * Replaces the explicit knowledge scope, preserving every other metadata key.
+   *
+   * An empty list clears the override, so the conversation returns to the default range instead of
+   * silently searching nothing.
+   */
+  async setKnowledgeScope(
+    conversationId: string,
+    documentIds: string[],
+    logContext?: RequestLogContext,
+  ): Promise<ConversationKnowledgeScope> {
+    const repository = this.dataSource.getRepository(ConversationEntity);
+    const conversation = await repository.findOneBy({ id: conversationId });
+    if (!conversation) throw new NotFoundException('没有找到这个会话，它可能已经被删除。');
+
+    const unique = [...new Set(documentIds)];
+    const metadata = parseConversationMetadata(conversation.metadataJson);
+    if (unique.length === 0) {
+      delete metadata.knowledge;
+    } else {
+      metadata.knowledge = { documentIds: unique, updatedAt: new Date().toISOString() };
+    }
+    const metadataJson = Object.keys(metadata).length === 0 ? null : JSON.stringify(metadata);
+    await repository.update({ id: conversationId }, { metadataJson });
+    writeStructuredEvent(this.logger, 'log', 'conversations.knowledge_scope.updated', {
+      ...logContext,
+      conversationId,
+      documentCount: unique.length,
+    });
+    return { documentIds: unique };
   }
 
   /** Inserts an in-progress Pi message before any projected event is sent. */
@@ -1044,6 +1129,58 @@ function extractVisibleMessageText(contentJson: string): string {
   }
 
   return extractTextContent(JSON.parse(contentJson));
+}
+
+/** Reads the metadata object, ignoring anything that is not a JSON object. */
+function parseConversationMetadata(metadataJson: string | null): Record<string, unknown> {
+  if (!metadataJson) return {};
+  try {
+    const parsed: unknown = JSON.parse(metadataJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Reads `knowledge.documentIds` from metadata, keeping only well-formed ids. */
+function readScopeDocumentIds(metadataJson: string | null): string[] {
+  const metadata = parseConversationMetadata(metadataJson);
+  const knowledge = metadata.knowledge;
+  if (!knowledge || typeof knowledge !== 'object') return [];
+  const ids = (knowledge as { documentIds?: unknown }).documentIds;
+  if (!Array.isArray(ids)) return [];
+  return ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
+/**
+ * Collects injected chunk ids from stored context refs.
+ *
+ * Malformed or unrelated JSON is skipped: one bad row must not stop a turn. Older rows recorded
+ * whole documents instead of chunks; they carry no chunk id and are simply ignored.
+ */
+function collectLoadedChunkIds(messages: MessageEntity[]): string[] {
+  const refs = new Set<string>();
+  for (const message of messages) {
+    if (!message.contextRefsJson) continue;
+    try {
+      const parsed: unknown = JSON.parse(message.contextRefsJson);
+      if (!parsed || typeof parsed !== 'object') continue;
+      const knowledge = (parsed as { knowledge?: unknown }).knowledge;
+      if (!knowledge || typeof knowledge !== 'object') continue;
+      const chunks = (knowledge as { chunks?: unknown }).chunks;
+      if (!Array.isArray(chunks)) continue;
+      for (const entry of chunks) {
+        if (!entry || typeof entry !== 'object') continue;
+        const chunkId = (entry as { chunkId?: unknown }).chunkId;
+        if (typeof chunkId === 'string' && chunkId.length > 0) refs.add(chunkId);
+      }
+    } catch {
+      // Ignore rows written by an older or broken format.
+    }
+  }
+  return [...refs];
 }
 
 /** Derives a compact list title from a legacy user text-block row. */
