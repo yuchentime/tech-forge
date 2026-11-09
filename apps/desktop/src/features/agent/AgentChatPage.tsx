@@ -562,7 +562,8 @@ function AgentActivity({
   activity: ReturnType<typeof agentEventBus.getTurnSnapshots>[string] | undefined;
 }) {
   const [now, setNow] = useState(() => Date.now());
-  const [isExpanded, setIsExpanded] = useState(true);
+  // 历史活动已经是终态，挂载时直接收起；本轮运行中的活动保持展开。
+  const [isExpanded, setIsExpanded] = useState(() => activity?.phase !== 'idle');
 
   useEffect(() => {
     if (!activity || activity.phase === 'idle') return;
@@ -570,6 +571,11 @@ function AgentActivity({
     const timerId = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timerId);
   }, [activity?.phase, activity?.startedAt]);
+
+  useEffect(() => {
+    // 最终回复到达后收起工具明细，只留摘要行；用户随后手动展开不会被再次收起。
+    if (activity?.phase === 'idle') setIsExpanded(false);
+  }, [activity?.phase]);
 
   if (!activity || activity.tools.length === 0) return null;
 
