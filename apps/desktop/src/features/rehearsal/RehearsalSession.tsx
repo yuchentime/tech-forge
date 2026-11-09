@@ -15,9 +15,11 @@ export function RehearsalSession({
   answerError,
   pendingAnswer,
   onAnswer,
+  onEnd,
   onSkip,
   onRetryAnswer,
   onRetrySkip,
+  showEndAction,
 }: {
   detail: RehearsalDetail;
   isSubmitting: boolean;
@@ -25,9 +27,11 @@ export function RehearsalSession({
   answerError: string | null;
   pendingAnswer: { turnId: string; answer: string; requestId: string } | null;
   onAnswer: (answer: string) => void;
+  onEnd: () => void;
   onSkip: () => void;
   onRetryAnswer: () => void;
   onRetrySkip: () => void;
+  showEndAction: boolean;
 }) {
   const [answer, setAnswer] = useState('');
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -186,12 +190,34 @@ export function RehearsalSession({
                   submit();
                 }
               }}
-              placeholder="用你自己的话回答，尽量给出具体例子…"
+              placeholder="用你自己的话回答，尽量给出具体例子…（Ctrl + Enter 提交）"
               rows={3}
               value={answer}
             />
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
+          </>
+        ) : (
+          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
+            <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
+            {detail.status === 'evaluating' ? '正在评估你的回答…' : '学生正在思考…'}
+          </div>
+        )}
+
+        {(showEndAction || canAnswer) && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+            {showEndAction ? (
+              <button
+                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isEnding}
+                onClick={onEnd}
+                type="button"
+              >
+                {isEnding ? '处理中…' : '结束演练'}
+              </button>
+            ) : (
+              <span />
+            )}
+            {canAnswer && (
+              <div className="ml-auto flex items-center gap-6">
                 <button
                   className="text-xs font-medium text-stone-500 underline underline-offset-2 hover:text-stone-800 disabled:opacity-40"
                   disabled={busy}
@@ -200,9 +226,6 @@ export function RehearsalSession({
                 >
                   跳过此题
                 </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-stone-400">Ctrl + Enter 提交</span>
                 <button
                   className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={busy || !answer.trim()}
@@ -212,12 +235,7 @@ export function RehearsalSession({
                   {busy ? '评估中…' : '提交回答'}
                 </button>
               </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
-            <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
-            {detail.status === 'evaluating' ? '正在评估你的回答…' : '学生正在思考…'}
+            )}
           </div>
         )}
       </div>

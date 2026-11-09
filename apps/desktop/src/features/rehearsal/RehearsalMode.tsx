@@ -87,16 +87,6 @@ export function RehearsalMode({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {showEndAction && (
-            <button
-              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={state.isEnding}
-              onClick={handleEnd}
-              type="button"
-            >
-              {state.isEnding ? '处理中…' : '结束演练'}
-            </button>
-          )}
           <button
             aria-label="历史演练"
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
@@ -194,10 +184,12 @@ export function RehearsalMode({
             isEnding={state.isEnding}
             isSubmitting={state.isSubmitting}
             onAnswer={(answer) => void rehearsalStore.answer(answer)}
+            onEnd={handleEnd}
             onRetryAnswer={() => void rehearsalStore.retryAnswer()}
             onRetrySkip={() => void rehearsalStore.retrySkip()}
             onSkip={() => void rehearsalStore.skip()}
             pendingAnswer={state.pendingAnswer}
+            showEndAction={showEndAction}
           />
         ) : (
           <RehearsalStart
