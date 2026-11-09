@@ -1,4 +1,5 @@
 import {
+  ActionBarPrimitive,
   AuiIf,
   ComposerPrimitive,
   MessagePrimitive,
@@ -10,6 +11,7 @@ import {
   CaretDown,
   Check,
   CircleNotch,
+  Copy as CopyIcon,
   Database,
   FileText,
   Stack,
@@ -59,6 +61,11 @@ import {
 
 /** Loads persisted conversation history into the long-lived Agent runtime. */
 export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
+  const threadListState = useSyncExternalStore(
+    runtime.threads.subscribe,
+    runtime.threads.getState,
+    runtime.threads.getState,
+  );
   const conversationState = useSyncExternalStore(
     conversationStore.subscribe,
     conversationStore.getSnapshot,
@@ -71,8 +78,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   );
   const liveActivity = useSyncExternalStore(
     agentEventBus.subscribe,
-    agentEventBus.getSnapshot,
-    agentEventBus.getSnapshot,
+    () => agentEventBus.getSnapshotForThread(threadListState.mainThreadId),
+    () => agentEventBus.getSnapshotForThread(threadListState.mainThreadId),
   );
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const artifactTabs = useSyncExternalStore(
@@ -108,13 +115,27 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   /** Changes whenever a turn registers another file, so the list refetches after each artifact. */
   const liveArtifactToken = liveActivity.artifacts.map((file) => file.id).join('|');
 
+  /** Keeps visible composer-only stores in the active thread's stable local namespace. */
+  useEffect(() => {
+    const localThreadId = threadListState.mainThreadId;
+    composerAttachmentStore.setActiveThread(localThreadId);
+    composerCommandStore.setActiveThread(localThreadId);
+  }, [threadListState.mainThreadId]);
+
   useEffect(() => {
     void artifactListStore.load(conversationState.activeConversationId);
   }, [conversationState.activeConversationId, liveArtifactToken]);
 
   /** Fetches one history snapshot and replaces the visible local thread on success. */
   const loadConversation = useCallback(async (conversationId: string) => {
-    if (isRunning) return;
+    await runtime.threads.switchToThread(conversationId);
+    const threadRuntime = runtime.threads.getById(conversationId);
+    // A visited background thread already owns its live message repository. Reloading persisted
+    // history into it would reset the repository while its SSE adapter is still appending deltas.
+    if (threadRuntime.getState().isRunning) {
+      conversationStore.setActiveConversationId(conversationId);
+      return;
+    }
     const version = ++requestVersion.current;
     setLoadingConversationId(conversationId);
     setIsLoadingEarlierMessages(false);
@@ -179,10 +200,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
       artifactHistoryStore.setFromHistory(response.data.messages);
-      artifactTabsStore.reset();
+      artifactTabsStore.selectConversation(conversationId);
       // The history footer now owns this conversation's files.
       agentEventBus.clearArtifacts();
-      runtime.thread.reset(response.data.messages.map(toThreadMessage));
+      threadRuntime.reset(response.data.messages.map(toThreadMessage));
       setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
     } catch (error) {
@@ -201,13 +222,15 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     } finally {
       if (version === requestVersion.current) setLoadingConversationId(null);
     }
-  }, [isRunning, runtime]);
+  }, [runtime]);
 
   /** Loads and prepends the page immediately before the oldest visible message. */
   const loadEarlierMessages = useCallback(async () => {
     if (isRunning || isLoadingEarlierMessages || !hasEarlierMessages) return;
     const conversationId = conversationStore.getSnapshot().activeConversationId;
-    const currentMessages = runtime.thread.getState().messages;
+    if (!conversationId) return;
+    const threadRuntime = runtime.threads.getById(conversationId);
+    const currentMessages = threadRuntime.getState().messages;
     const beforeMessageId = currentMessages[0]?.id;
     if (!conversationId || !beforeMessageId) return;
 
@@ -255,7 +278,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
       artifactHistoryStore.mergeFromHistory(response.data.messages);
-      const latestMessages = runtime.thread.getState().messages;
+      const latestMessages = threadRuntime.getState().messages;
       const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
       const earlierThreadMessages = response.data.messages
         .map(toThreadMessage)
@@ -272,7 +295,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           scrollTop: viewport.scrollTop,
         };
       }
-      runtime.thread.reset([...earlierThreadMessages, ...latestMessages]);
+      threadRuntime.reset([...earlierThreadMessages, ...latestMessages]);
       setHasEarlierMessages(response.data.hasMore);
       setHistoryPageRevision((revision) => revision + 1);
     } catch (error) {
@@ -308,6 +331,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   /** Loads sidebar rows when the Agent page first mounts. */
   useEffect(() => {
     void conversationStore.refresh();
+    const refreshAfterChange = () => void conversationStore.refresh();
+    window.addEventListener('teachforge:conversation-summary-changed', refreshAfterChange);
+    return () => window.removeEventListener('teachforge:conversation-summary-changed', refreshAfterChange);
   }, []);
 
   /** Restores the last selected thread only after the initial list is known. */
@@ -323,13 +349,15 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
     const savedConversationId = conversationState.activeConversationId;
     if (!savedConversationId) {
-      runtime.thread.reset([]);
+      // `reset()` emits assistant-ui's initialize event even for an empty repository. On a remote
+      // draft that event calls the adapter's `initialize()` and would persist a Conversation before
+      // the teacher sends anything. The seeded draft is already empty, so leave it untouched.
       setHasEarlierMessages(false);
       return;
     }
     if (!conversationState.conversations.some(({ id }) => id === savedConversationId)) {
       conversationStore.setActiveConversationId(null);
-      runtime.thread.reset([]);
+      // See the empty-draft note above: clearing a stale selection must not materialize it remotely.
       setHasEarlierMessages(false);
       return;
     }
@@ -339,7 +367,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   /** Clears the active thread so the next prompt creates a new Conversation. */
   const startNewConversation = useCallback(() => {
-    if (isRunning) return;
+    void runtime.threads.switchToNewThread();
     requestVersion.current += 1;
     setLoadingConversationId(null);
     setIsLoadingEarlierMessages(false);
@@ -354,7 +382,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     artifactHistoryStore.clear();
     artifactTabsStore.reset();
     agentEventBus.clearArtifacts();
-    runtime.thread.reset([]);
   }, [isRunning, runtime]);
 
   /**
@@ -370,7 +397,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       setHistoryError(null);
       setHistoryErrorConversationId(null);
       try {
-        await conversationStore.deleteConversation(conversationId);
+        await runtime.threads.getItemById(conversationId).delete();
+        await conversationStore.refresh();
       } catch (error) {
         setHistoryError(describeFailure(error, '删除会话失败，请重试。'));
         return;
@@ -385,7 +413,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       composerCommandStore.reset();
       composerAttachmentStore.reset();
       sentAttachmentStore.reset();
-      runtime.thread.reset([]);
     },
     [runtime],
   );
@@ -401,11 +428,18 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     artifactList.conversationId === conversationState.activeConversationId
       ? artifactList.files
       : [];
+  const runningConversationIds = new Set(
+    threadListState.threadIds.flatMap((threadId) => {
+      const item = runtime.threads.getItemById(threadId).getState();
+      return item.isRunning && item.remoteId ? [item.remoteId] : [];
+    }),
+  );
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       <ConversationSidebar
-        isBusy={isRunning || isHistoryLoading || isInitialListLoading}
+        isBusy={false}
+        runningConversationIds={runningConversationIds}
         activeView={activeView}
         loadingConversationId={loadingConversationId}
         onNewConversation={() => {
@@ -905,15 +939,42 @@ function getToolStatusLabel(
   return '已取消';
 }
 
-/** Displays the user's message with right-aligned emphasis and its attachment chips. */
+/**
+ * Displays the user's message with right-aligned emphasis, its attachment chips,
+ * and a copy action that only appears while the message is hovered or focused.
+ */
 function UserMessage({ messageId }: { messageId: string }) {
   return (
     <MessagePrimitive.Root className="flex justify-end">
-      <div className="max-w-[82%] rounded-2xl rounded-br-md bg-stone-100 px-4 py-3 text-sm leading-6 text-stone-900">
-        <UserAttachmentChips messageId={messageId} />
-        <MessagePrimitive.Parts />
+      <div className="group flex w-fit max-w-[82%] flex-col items-end gap-1.5">
+        <div className="max-w-full rounded-2xl rounded-br-md bg-stone-100 px-4 py-3 text-sm leading-6 text-stone-900">
+          <UserAttachmentChips messageId={messageId} />
+          <MessagePrimitive.Parts />
+        </div>
+        <div className="flex items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+          <UserMessageCopyButton />
+        </div>
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+/** Copies the user's message text and shows a check mark while the copy is fresh. */
+function UserMessageCopyButton() {
+  const isCopied = useAuiState((state) => state.message.isCopied);
+
+  return (
+    <ActionBarPrimitive.Copy
+      aria-label={isCopied ? '已复制' : '复制消息'}
+      className="rounded-lg p-1.5 text-stone-500 transition hover:bg-stone-100 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 disabled:cursor-not-allowed disabled:opacity-40"
+      title={isCopied ? '已复制' : '复制'}
+    >
+      {isCopied ? (
+        <Check aria-hidden="true" className="size-4 text-emerald-700" weight="bold" />
+      ) : (
+        <CopyIcon aria-hidden="true" className="size-4" />
+      )}
+    </ActionBarPrimitive.Copy>
   );
 }
 

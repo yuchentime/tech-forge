@@ -16,7 +16,7 @@ last_verified: 2026-11-09
 ## Scope
 
 - 覆盖本地个人工作台中 Agent 会话摘要列表与选中会话历史读取。
-- 不包含会话创建、重命名、删除、摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史按固定页大小读取。
+- 不包含会话重命名、摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史按固定页大小读取。
 - 两个端点通过现有 Electron JSON bridge 调用，并受本地随机 token 和 loopback origin 检查保护；当前产品为单人 Personal Agent，没有用户或租户参数。
 - 当前没有单独的跨领域 API conventions 页面；响应遵循本项目现有 JSON bridge 的 `{ status, data }` 包装。
 
@@ -28,6 +28,15 @@ last_verified: 2026-11-09
 - 接口只读 SQLite；摘要列表完整返回，消息历史每页最多返回 30 条并提供 hasMore。
 
 ## Conversation Query API
+
+### Create an empty conversation
+
+- **方法**：`POST`
+- **路径**：`/api/conversations`
+- **功能职责**：为桌面端草稿线程首次发送前创建一个空 Conversation，使后续 stream 始终携带已确认的 UUIDv4。
+- **请求体**：无。
+- **响应**：HTTP 201，`{ "conversationId": "<uuid-v4>" }`。创建成功不表示已有消息行；标题在首条用户消息前仍为“新对话”。
+- **错误**：本地认证失败为 401，内部持久化失败为 500。
 
 ### List conversation summaries
 
@@ -262,6 +271,7 @@ HTTP 200 返回被删除的会话 ID 与本地文件清理结果。
 |---|---|---|
 | `conversationId` 不是 UUIDv4 | `400` | `ParseUUIDPipe` 在 Service 操作前拒绝该路径参数。 |
 | ID 格式正确但 Conversation 不存在 | `404` | 不会创建会话，也不触碰文件系统。 |
+| 会话正在运行、排队或已被另一删除请求占位 | `409` | 保留所有行、缓存和本地目录；停止或完成后可重试删除。 |
 | 数据库删除失败 | `500` | 事务回滚，会话与行保持原样。 |
 | 本地 token 缺失或错误 | `401` | 后端拒绝未认证的本地请求。 |
 | 请求带有 Origin header | `403` | 后端拒绝来自浏览器跨域路径的请求。 |

@@ -98,6 +98,8 @@ export interface ArtifactTabsSnapshot {
 /** Owns the read-only artifact sidebar's tab state for the active conversation. */
 class ArtifactTabsStore {
   private readonly listeners = new Set<() => void>();
+  private readonly byConversationId = new Map<string, ArtifactTabsSnapshot>();
+  private activeConversationId: string | null = null;
   private snapshot: ArtifactTabsSnapshot = {
     tabs: [],
     activeId: ALL_FILES_TAB_ID,
@@ -112,6 +114,20 @@ class ArtifactTabsStore {
 
   /** Returns the current tab state. */
   getSnapshot = (): ArtifactTabsSnapshot => this.snapshot;
+
+  /** Switches tab state without allowing tabs from one conversation to appear in another. */
+  selectConversation(conversationId: string | null): void {
+    if (this.activeConversationId === conversationId) return;
+    this.saveActive();
+    this.activeConversationId = conversationId;
+    this.snapshot =
+      (conversationId ? this.byConversationId.get(conversationId) : undefined) ?? {
+        tabs: [],
+        activeId: ALL_FILES_TAB_ID,
+        visible: false,
+      };
+    this.listeners.forEach((listener) => listener());
+  }
 
   /** Opens the file in a tab, focusing it when it is already open. */
   open(file: GeneratedFileRef): void {
@@ -187,7 +203,13 @@ class ArtifactTabsStore {
   /** Publishes one snapshot and notifies subscribers. */
   private update(next: ArtifactTabsSnapshot): void {
     this.snapshot = next;
+    this.saveActive();
     this.listeners.forEach((listener) => listener());
+  }
+
+  /** Persists the visible namespace only when it belongs to a remote conversation. */
+  private saveActive(): void {
+    if (this.activeConversationId) this.byConversationId.set(this.activeConversationId, this.snapshot);
   }
 }
 

@@ -7,6 +7,7 @@ import { MessageEntity } from './message.entity';
 import { ConversationsService } from './conversations.service';
 import { PiSessionSnapshotsService } from './pi-session-snapshots.service';
 import { ConversationsController } from './conversations.controller';
+import { ConversationRunRegistry } from './conversation-run-registry';
 
 /** Registers conversation persistence repositories for the conversation feature. */
 @Module({
@@ -16,7 +17,7 @@ import { ConversationsController } from './conversations.controller';
     ArtifactsModule,
   ],
   controllers: [ConversationsController],
-  providers: [ConversationsService, PiSessionSnapshotsService],
-  exports: [ConversationsService, PiSessionSnapshotsService],
+  providers: [ConversationsService, PiSessionSnapshotsService, ConversationRunRegistry],
+  exports: [ConversationsService, PiSessionSnapshotsService, ConversationRunRegistry],
 })
 export class ConversationsModule {}

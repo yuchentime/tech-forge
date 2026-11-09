@@ -397,6 +397,8 @@ routes:
       - docs/current/domains/conversations/api-contract.md
       - docs/changes/2026-11-09-concurrent-conversations/design.md
     optional:
+      - docs/changes/2026-11-09-concurrent-conversations/reviews/index.md
+      - docs/changes/2026-11-09-concurrent-conversations/reviews/design-review.md
       - docs/changes/2026-11-09-concurrent-conversations/brief.md
       - docs/current/domains/conversations/backend-behavior.md
       - docs/current/platform/architecture-and-code-placement.md

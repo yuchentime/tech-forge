@@ -12,14 +12,14 @@ related:
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/changes/2026-11-07-agent-flow-logging/design.md
   - docs/changes/2026-11-07-agent-flow-logging/verification.md
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 ---
 
 # Conversation 后端行为
 
 ## 写入流程
 
-`ChatController` 校验请求并将 `conversationId` 交给 `ChatService`。`ChatService` 在进程内按 ID 排队，然后调用 `ConversationsService.beginTurn()`：确认或创建 Conversation、对账遗留行、读取已有消息、按 `sequenceNo` 取最大值并加一，接着写入本轮 user 消息和 pending `assistantTurn` 标记。新 ID 由 backend 生成 UUIDv4。
+`ChatController` 校验请求并将 `conversationId` 交给 `ChatService`。`ChatService` 通过 Conversations 模块导出的单例 `ConversationRunRegistry` 在进程内按 ID 排队，然后调用 `ConversationsService.beginTurn()`：确认或创建 Conversation、对账遗留行、读取已有消息、按 `sequenceNo` 取最大值并加一，接着写入本轮 user 消息和 pending `assistantTurn` 标记。新 ID 由 backend 生成 UUIDv4。
 
 事务结束后，`ChatService` 才调用 `LlmService.stream()`。`LlmService` 注册请求级 Pi 扩展钩子：每个 assistant/toolResult 的 `message_start/update/end` 以及工具执行 `start/update/end` 都先写入 `MessageEntity`，其中 `tool_execution_end` 的最终结果也先落库；SQLite 提交后 Pi 才继续后续事件处理或启动工具。`ChatService` 在已持久化的事件到达后再投影和转发安全字段。用户行在模型调用前已写入。
 
@@ -45,11 +45,13 @@ Pi 的 `getEntries()` 是模型侧会话状态（含 compaction、model/thinking
 
 Conversation 查询接口由 `ConversationsController` 暴露，并经现有本地 token 与 loopback HTTP 边界访问：
 
+- `POST /api/conversations` 创建无消息的 UUIDv4 Conversation 并返回 `{ conversationId }`。该接口仅为首次发送前的线程初始化服务；创建不写消息、不会把空会话误作已有一轮对话。
 - `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要。标题优先使用非空 `Conversation.title`，否则使用首条 user 消息的文本（折叠空白并限制为 80 个字符），没有文本时为 `新对话`。该读取不回写标题。
 - `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。默认读取最近最多 30 条有可见文本的 `user`/`assistant` 终态消息，按 `sequenceNo ASC` 返回 `{ messages, hasMore }`。最多向后端查询 31 条可见消息以准确计算 `hasMore`，响应仍最多 30 条。
 - 可选 `beforeMessageId` 必须是目标会话中的现存 Message ID。服务定位该行的 `sequenceNo`，严格读取它之前最近一页；非法 UUID 或跨会话/不存在的游标返回 400。页间使用稳定消息 ID，不使用可能漂移的 offset。
 - 候选行按 `sequenceNo DESC` 分批读取并在后端投影为可见文本，直到获得 31 条或耗尽候选，再将最多 30 条反转为升序。查询仍只读本地 SQLite，不更改模型侧的全量历史读取。
-- 删除会话是一个事务：按 `rehearsal_turns` → `rehearsals` → `artifacts` → `conversation_documents` → `messages` → `pi_session_snapshots` → `conversations` 顺序清除（外键全部 `NO ACTION`），不存在时返回 404。事务提交后才删除 `~/.tech-forge/sessions/<conversationId>/`；删除失败记录 `conversations.delete.session_cleanup_failed` 并返回 `partial`，不回滚数据库。
+- 删除和 chat run 使用同一个 `ConversationRunRegistry`：chat 在等待前同步登记运行/排队项；delete 在任何数据库 await 前以同步 `tryAcquireDeletion` 占位。已有 run、排队项或删除占位时 delete 返回 409；delete 先占位时，后到 run 等占位释放后发现会话不存在并沿 stream 的安全错误路径结束。所有分支 finally 释放占位。
+- 删除会话是一个事务：按 `rehearsal_turns` → `rehearsals` → `artifacts` → `conversation_documents` → `messages` → `pi_session_snapshots` → `conversations` 顺序清除（外键全部 `NO ACTION`），不存在时返回 404。事务提交后才删除 `~/.tech-forge/sessions/<conversationId>/`；删除失败记录 `conversations.delete.session_cleanup_failed` 并返回 `partial`，不回滚数据库。删除占位覆盖目录清理，避免新 run 与旧目录清理重叠。
 - 消息查询的顶层内容仅输出 user/assistant 文本；每个 user 行另附其 sequence 区间内已终态 `toolExecution` 的安全摘要，以及 `contextRefsJson.attachments` 投影出的 `{attachmentId, name}`（字数与会话文件路径不下发）。工具名、状态、耗时、可选 display path 及 `grep` 的可选搜索词可见；完整参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking 和原始 `contentJson` 不进入 API 响应。无可显示文本的 assistant 行会被省略。
 - 工具执行摘要按已返回 user 行的序列区间分组，并限制在最后一个已返回 user 与其后的下一个 user 之间；工具行不计入 30 条可见消息，也不改变 `hasMore` 或游标。
 - 新的工具执行记录只持久化字符串 `args.path` 作为可选 `displayPath`，以及 `grep` 的字符串 `args.pattern` 作为可选 `displayPattern`；其他参数即使存在也不落库。旧记录没有这两个字段时仍返回工具名、终态和耗时。无法解析的工具行会被跳过并记录安全诊断，不影响文本历史。

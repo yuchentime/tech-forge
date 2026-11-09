@@ -19,6 +19,7 @@ export type SidebarView = 'chat' | 'settings' | 'knowledge';
 export function ConversationSidebar({
   state,
   isBusy,
+  runningConversationIds = new Set<string>(),
   loadingConversationId,
   onNewConversation,
   onRefresh,
@@ -29,6 +30,7 @@ export function ConversationSidebar({
 }: {
   state: ConversationStoreSnapshot;
   isBusy: boolean;
+  runningConversationIds?: ReadonlySet<string>;
   loadingConversationId: string | null;
   onNewConversation: () => void;
   onRefresh: () => void;
@@ -114,7 +116,7 @@ export function ConversationSidebar({
               <ConversationRow
                 activeConversationId={state.activeConversationId}
                 conversation={conversation}
-                disabled={isBusy}
+                isRunning={runningConversationIds.has(conversation.id)}
                 isLoading={loadingConversationId === conversation.id}
                 key={conversation.id}
                 onSelect={onSelect}
@@ -150,15 +152,15 @@ export function ConversationSidebar({
 function ConversationRow({
   activeConversationId,
   conversation,
-  disabled,
   isLoading,
+  isRunning,
   onSelect,
   onDelete,
 }: {
   activeConversationId: string | null;
   conversation: ConversationSummary;
-  disabled: boolean;
   isLoading: boolean;
+  isRunning: boolean;
   onSelect: (conversationId: string) => void;
   onDelete: (conversationId: string) => void;
 }) {
@@ -181,7 +183,7 @@ function ConversationRow({
       <button
         aria-current={isActive ? 'true' : undefined}
         className={`w-full rounded-xl px-3 py-2.5 pr-8 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? 'bg-emerald-900/10 text-stone-900' : 'text-stone-700 hover:bg-stone-200/70'}`}
-        disabled={disabled}
+        disabled={false}
         onClick={() => onSelect(conversation.id)}
         type="button"
       >
@@ -198,6 +200,9 @@ function ConversationRow({
               {isLoading && (
                 <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-emerald-800" />
               )}
+              {isRunning && !isLoading && (
+                <span aria-label="正在生成" className="size-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-emerald-800" />
+              )}
             </span>
             <time className="mt-1 block text-[11px] text-stone-500">
               {formatUpdatedAt(conversation.updatedAt)}
@@ -211,7 +216,7 @@ function ConversationRow({
         aria-haspopup="menu"
         aria-label={`会话操作：${conversation.title || '新对话'}`}
         className={`absolute right-1.5 top-2 flex size-6 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-900 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0 ${isMenuOpen ? 'bg-stone-200 text-stone-900 opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-        disabled={disabled}
+        disabled={false}
         onClick={() => setIsMenuOpen((open) => !open)}
         type="button"
       >
@@ -225,12 +230,15 @@ function ConversationRow({
           role="menu"
         >
           <button
-            className="w-full px-3 py-1.5 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+            aria-disabled={isRunning}
+            className="w-full px-3 py-1.5 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isRunning}
             onClick={() => {
               setIsMenuOpen(false);
               onDelete(conversation.id);
             }}
             role="menuitem"
+            title={isRunning ? '会话正在生成，停止或完成后才能删除' : '删除会话'}
             type="button"
           >
             删除会话

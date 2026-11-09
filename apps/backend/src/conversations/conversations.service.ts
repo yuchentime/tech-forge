@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -25,6 +26,7 @@ import {
 } from './conversation-transcript';
 import { ConversationEntity } from './conversation.entity';
 import { MessageEntity } from './message.entity';
+import { ConversationRunRegistry } from './conversation-run-registry';
 import type {
   ConversationAttachmentDto,
   ConversationGeneratedFileDto,
@@ -99,7 +101,23 @@ export class ConversationsService {
     private readonly dataSource: DataSource,
     private readonly settings: SettingsService,
     private readonly artifacts: ArtifactsService,
+    private readonly conversationRuns: ConversationRunRegistry = new ConversationRunRegistry(),
   ) {}
+
+  /** Creates an empty persisted conversation for a draft thread's first send. */
+  async createConversation(logContext?: RequestLogContext): Promise<{ conversationId: string }> {
+    const conversationId = randomUUID();
+    await this.dataSource.getRepository(ConversationEntity).save({
+      id: conversationId,
+      title: null,
+      metadataJson: null,
+    });
+    writeStructuredEvent(this.logger, 'log', 'conversations.create.completed', {
+      ...logContext,
+      conversationId,
+    });
+    return { conversationId };
+  }
 
   /** Loads lightweight sidebar summaries and derives titles from first prompts. */
   async listConversations(
@@ -771,6 +789,10 @@ export class ConversationsService {
     const startedAt = Date.now();
     const context = { ...(logContext ?? {}), conversationId };
 
+    const releaseDeletion = this.conversationRuns.tryAcquireDeletion(conversationId);
+    if (!releaseDeletion) {
+      throw new ConflictException('Conversation is busy.');
+    }
     try {
       await this.dataSource.transaction(async (manager) => {
         const existing = await manager.findOne(ConversationEntity, {
@@ -802,6 +824,13 @@ export class ConversationsService {
         ]);
         await manager.delete(ConversationEntity, { id: conversationId });
       });
+      const sessionCleanup = this.removeSessionDirectory(conversationId, context);
+      writeStructuredEvent(this.logger, 'log', 'conversations.delete.completed', {
+        ...context,
+        sessionCleanup,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return { conversationId, sessionCleanup };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       writeStructuredEvent(this.logger, 'error', 'conversations.delete.failed', {
@@ -810,15 +839,11 @@ export class ConversationsService {
         ...getSafeErrorLogFields(error),
       });
       throw error;
+    } finally {
+      // Directory cleanup is part of the deletion lifetime: releasing earlier would let a new turn
+      // recreate files while the previous conversation directory is still being removed.
+      releaseDeletion();
     }
-
-    const sessionCleanup = this.removeSessionDirectory(conversationId, context);
-    writeStructuredEvent(this.logger, 'log', 'conversations.delete.completed', {
-      ...context,
-      sessionCleanup,
-      elapsedMs: Date.now() - startedAt,
-    });
-    return { conversationId, sessionCleanup };
   }
 
   /** Removes one conversation's local session files; a failure is logged, never thrown. */

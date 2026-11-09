@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Post,
   HttpCode,
   HttpStatus,
   Logger,
@@ -31,6 +32,24 @@ export class ConversationsController {
 
   /** Injects the domain-owned query service for the conversation read API. */
   constructor(private readonly conversations: ConversationsService) {}
+
+  /** Creates an empty conversation so a draft thread has a stable remote id before streaming. */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  async createConversation(): Promise<{ conversationId: string }> {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    try {
+      return await this.conversations.createConversation({ requestId });
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'conversations.http.create.failed', {
+        requestId,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
+    }
+  }
 
   /** Returns sidebar summaries without exposing message or tool payloads. */
   @Get()

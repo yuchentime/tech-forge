@@ -22,15 +22,15 @@ Agent 页面全局只有一个 `useLocalRuntime`（`apps/desktop/src/App.tsx:10`
 
 ## Decision / Scope
 
-采用 assistant-ui 的多线程运行时：`useRemoteThreadListRuntime` + 每个线程一个 `useLocalRuntime`。已安装版本 `@assistant-ui/react@0.15.32` 的 client 模式固定开启 `backgroundThreads`，访问过的线程常驻，切走后 run 继续，每项 `isRunning` 实时可见。
+采用 assistant-ui 的多线程运行时：`useRemoteThreadListRuntime` + 每个线程一个 `useLocalRuntime`。目标是访问过的线程常驻、切走后 run 继续、每项运行态独立。仓库声明 `^0.15.32`；锁定 SDK 的后台运行、身份和刷新行为需按设计 §10.3 在实施前验证，当前不宣称已实测。
 
 | 能力 | 实现路径 |
 |---|---|
 | 会话列表/选择 | 新增 `ThreadListAdapter` 映射现有 `GET /api/conversations`；选择状态交给 `runtime.threads` |
 | 新建会话 | 后端新增 `POST /api/conversations`；`initialize` 在首次发送时调用并拿到 `remoteId` |
 | 每会话运行 | `runtimeHook` 内 `useLocalRuntime`；`run({ unstable_threadId })` 作为后端 `conversationId` |
-| 历史加载/翻页 | 线程体挂载时加载最近 30 条并 `reset`；翻页逻辑保留，按活动线程执行 |
-| 删除保护 | 后端集中会话锁并暴露 `isBusy`，运行中的会话删除返回 409；侧栏按行禁用 |
+| 历史加载/翻页 | 已有线程首次加载最近 30 条；加载/翻页禁发，响应校验实例与版本后提交 |
+| 删除保护 | 运行与删除共用注册表；删除同步占位，忙碌返回 409，覆盖事务和目录清理 |
 | 活动状态 | `AgentEventBus` 由单活动槽改为 `Map<requestId, turnId>`；页面只展示可见线程的 turn |
 
 ## Out Of Scope
@@ -54,3 +54,11 @@ Agent 页面全局只有一个 `useLocalRuntime`（`apps/desktop/src/App.tsx:10`
 - 现有回归 `test:agent-stream`、`test:conversation-history`、`test:backend-request` 通过。
 
 详细设计见 [设计文档](design.md)。
+
+## 评审后的方案约束
+
+- 草稿使用稳定 localThreadId，正式 remoteId 只用于后端；发送冻结输入快照，初始化成功后首轮失败复用 remoteId。
+- 历史加载/翻页与发送按线程互斥，迟到响应不能覆盖新状态；后台 404/删除完成不改变其他会话选择。
+- 列表摘要刷新不重建线程；标题只取后端摘要，自动标题返回空流。
+- 初始化响应丢失可能留下空会话，不自动重复 POST；明确失败保留输入。
+- 2026-11-09 方案优化后评审为 PASS_WITH_WARNINGS：功能设计缺口已修订，SDK 行为仍待验证，未进入实现。见[评审记录](reviews/design-review.md)。

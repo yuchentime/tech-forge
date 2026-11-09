@@ -16,6 +16,7 @@ import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/know
 import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
+import { ConversationRunRegistry } from '../conversations/conversation-run-registry';
 import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
 import {
   getSafeErrorLogFields,
@@ -43,7 +44,6 @@ interface ChatTurnPersistenceState {
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
-  private readonly conversationTails = new Map<string, Promise<void>>();
 
   /** Injects persistence and model services used by one streamed conversation turn. */
   constructor(
@@ -52,6 +52,7 @@ export class ChatService {
     private readonly knowledge: KnowledgeService,
     private readonly attachments: AttachmentsService,
     private readonly artifacts: ArtifactsService,
+    private readonly conversationRuns: ConversationRunRegistry = new ConversationRunRegistry(),
   ) {}
 
   /**
@@ -115,16 +116,14 @@ export class ChatService {
 
       phase = 'conversation_queue';
       const queueStartedAt = Date.now();
-      const queuedBehindCurrent = this.conversationTails.has(
-        resolvedConversationId,
-      );
+      const queuedBehindCurrent = this.conversationRuns.isBusy(resolvedConversationId);
       writeStructuredEvent(
         this.logger,
         'log',
         'chat.conversation.queue.waiting',
         { ...logContext, queuedBehindCurrent },
       );
-      releaseLock = await this.acquireConversationLock(resolvedConversationId);
+      releaseLock = await this.conversationRuns.acquire(resolvedConversationId);
       writeStructuredEvent(
         this.logger,
         'log',
@@ -739,25 +738,6 @@ export class ChatService {
     return messageId;
   }
 
-  /** Serializes history reads and sequence allocation for one conversation. */
-  private async acquireConversationLock(
-    conversationId: string,
-  ): Promise<() => void> {
-    const previous = this.conversationTails.get(conversationId);
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.conversationTails.set(conversationId, current);
-    await previous;
-
-    return () => {
-      release();
-      if (this.conversationTails.get(conversationId) === current) {
-        this.conversationTails.delete(conversationId);
-      }
-    };
-  }
 }
 
 /** Selects model and tool-result messages that belong in the durable transcript. */

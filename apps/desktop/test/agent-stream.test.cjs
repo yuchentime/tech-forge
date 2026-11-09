@@ -209,6 +209,17 @@ test('Renderer AgentEventBus retains completed tool activity until the next run'
   assert.deepEqual(bus.getSnapshot().tools, []);
 });
 
+test('Renderer AgentEventBus exposes live activity only to its source thread', () => {
+  const bus = new AgentEventBus();
+  bus.begin('turn-a', 'request-a', 'local-thread-a');
+
+  assert.equal(bus.getSnapshotForThread('local-thread-a').phase, 'working');
+  assert.equal(bus.getSnapshotForThread('local-thread-b').phase, 'idle');
+
+  bus.clear('request-a');
+  assert.equal(bus.getSnapshotForThread('local-thread-a').phase, 'idle');
+});
+
 test('Assistant adapter shows tool activity separately and streams cumulative Pi text deltas', async () => {
   const originalWindow = global.window;
   const abortController = new AbortController();

@@ -20,7 +20,7 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
-| 多会话并行 | 生成中的会话不阻塞切换/新建/发送；每会话独立 `LocalRuntime` 与历史，切走后后台生成继续；运行态按会话隔离；运行中的会话不可删除 | [简报](2026-11-09-concurrent-conversations/brief.md) · [设计](2026-11-09-concurrent-conversations/design.md) |
+| 多会话并行 | 生成中的会话不阻塞切换/新建/发送；每会话独立 `LocalRuntime` 与历史，切走后后台生成继续；运行态按会话隔离；运行中的会话不可删除 | [简报](2026-11-09-concurrent-conversations/brief.md) · [设计](2026-11-09-concurrent-conversations/design.md) · [设计评审：PASS_WITH_WARNINGS](2026-11-09-concurrent-conversations/reviews/index.md) |
 | Local Knowledge Retrieval | 本地知识库：解析、分块、词法索引、向量化与双通道检索已实现；会话编排见下一条 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
 | `/知识库` 斜杠注入 | 检索触发权归用户：命令解析、会话范围、整篇文档注入、token 预算、按版本去重与 `contextRefsJson`；删除 Agent 检索工具 | [简报](2026-11-09-knowledge-command-context/brief.md) · [验收](2026-11-09-knowledge-command-context/verification.md) |
 | 会话附件 | 发送时复制进 `sessions/<会话ID>/attachments/<附件ID>/` 并解析写 `text.md`；本轮材料拼进 user message（40k 字符上限），快照保存前还原为纯用户文本；消息只保留 `{attachmentId, name}` 用于标签；不入资料库 | [简报](2026-11-09-chat-attachments/brief.md) · [设计](2026-11-09-chat-attachments/design.md) · [验收](2026-11-09-chat-attachments/verification.md) |

@@ -23,6 +23,9 @@ export interface SentAttachment {
   name: string;
 }
 
+/** Stable empty value required by React's external-store snapshot contract. */
+const EMPTY_COMPOSER_ATTACHMENTS: ComposerAttachment[] = [];
+
 /**
  * Files picked for the message currently being written.
  *
@@ -30,12 +33,21 @@ export interface SentAttachment {
  * reference: picking a file no longer needs a round trip or a parse state.
  */
 class ComposerAttachmentStore {
-  private items: ComposerAttachment[] = [];
+  private readonly byThreadId = new Map<string, ComposerAttachment[]>();
+  private activeThreadId = 'draft';
   private nextId = 0;
   private readonly listeners = new Set<() => void>();
 
   /** Returns the current chips for `useSyncExternalStore`; the array identity is stable. */
-  getSnapshot = (): ComposerAttachment[] => this.items;
+  getSnapshot = (): ComposerAttachment[] =>
+    this.byThreadId.get(this.activeThreadId) ?? EMPTY_COMPOSER_ATTACHMENTS;
+
+  /** Selects the draft namespace rendered by the visible composer. */
+  setActiveThread(threadId: string): void {
+    if (this.activeThreadId === threadId) return;
+    this.activeThreadId = threadId;
+    this.emit();
+  }
 
   /** Subscribes one React listener; returns the unsubscribe function. */
   subscribe = (listener: () => void): (() => void) => {
@@ -46,34 +58,39 @@ class ComposerAttachmentStore {
   };
 
   /** Adds one picked file; the attachment id is minted here so the message and folder agree. */
-  add(name: string, path: string): void {
-    this.items = [
-      ...this.items,
+  add(name: string, path: string, threadId: string = this.activeThreadId): void {
+    this.byThreadId.set(threadId, [
+      ...(this.byThreadId.get(threadId) ?? []),
       { id: this.nextId++, attachmentId: crypto.randomUUID(), name, path },
-    ];
+    ]);
     this.emit();
   }
 
   /** Removes one chip without touching the picked file. */
-  remove(id: number): void {
-    this.items = this.items.filter((item) => item.id !== id);
+  remove(id: number, threadId: string = this.activeThreadId): void {
+    this.byThreadId.set(threadId, (this.byThreadId.get(threadId) ?? []).filter((item) => item.id !== id));
     this.emit();
   }
 
   /** Clears every chip after a send, a thread switch or a new conversation. */
-  reset(): void {
-    if (this.items.length === 0) return;
-    this.items = [];
+  reset(threadId: string = this.activeThreadId): void {
+    if ((this.byThreadId.get(threadId) ?? []).length === 0) return;
+    this.byThreadId.set(threadId, []);
     this.emit();
   }
 
   /** Returns the pending attachments in pick order, ready for the send request. */
-  list(): Array<{ attachmentId: string; name: string; path: string }> {
-    return this.items.map(({ attachmentId, name, path }) => ({
+  list(threadId: string = this.activeThreadId): Array<{ attachmentId: string; name: string; path: string }> {
+    return (this.byThreadId.get(threadId) ?? []).map(({ attachmentId, name, path }) => ({
       attachmentId,
       name,
       path,
     }));
+  }
+
+  /** Reads pending files for an adapter bound to one stable local thread. */
+  getForThread(threadId: string): Array<{ attachmentId: string; name: string; path: string }> {
+    return this.list(threadId);
   }
 
   /** Notifies every listener after the snapshot was replaced. */

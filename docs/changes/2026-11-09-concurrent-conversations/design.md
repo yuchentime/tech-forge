@@ -1,5 +1,6 @@
 ---
 status: draft
+version: 1.0
 layer: change
 domain: agent-runtime
 created_at: 2026-11-09
@@ -37,7 +38,7 @@ updates_current:
 |---|---|
 | 后台流写错会话 | `agent-chat-adapter.ts:76` 取全局 `activeConversationId`；`conversation` 事件还会 `setActiveConversationId`（`:90`），把视图切到后台会话 |
 | 活动状态互相覆盖 | 第二个 run 的 `begin()` 覆盖第一个的 `activeRequestId`，第一个的 `publish()` 被丢弃；第一个结束时的 `clear()` 也可能清错槽位 |
-| 迟到增量落入新线程 | `thread.reset()` 不中止 run（assistant-ui `local-thread-runtime-core.test.ts` 的 reset/import 流式用例），未结束的响应会把增量写回重置后的线程 |
+| 迟到增量落入新线程 | 在活动 run 中复用运行时并 reset 存在覆盖风险；原稿引用的 SDK 测试本次未复核，方案禁止这种交错 |
 | 附件串会话 | 全局附件草稿在 A 选择、在 B 发送 |
 | 历史恢复互相清空 | `artifactHistoryStore.setFromHistory()` 整表替换；后加载的会话会抹掉先加载会话的产物标签 |
 
@@ -72,7 +73,7 @@ updates_current:
 - 不做跨窗口、跨进程或应用重启后的后台运行恢复。
 - 不改 SSE 事件契约的语义，不新增事件类型。
 - 不改模型上下文构建、附件注入、知识库检索、产物索引。
-- 不引入并发上限之外的调度器或任务队列。
+- 不引入并发上限配置、调度器或任务队列。
 
 ## 4. 方案选择
 
@@ -83,51 +84,103 @@ updates_current:
 | C. 后端运行注册表 | 把 run 从 SSE 请求中解耦，前端按会话订阅/重连 | 可覆盖应用重启 | 牵动 Pi session 生命周期、取消、恢复协议，超出需求 | 不做 |
 | D. 仅放开 UI | 删除 `disabled` 与 `isRunning` 守卫 | 改动最小 | 串流、状态覆盖、消息丢失，见 §2.2 | 不可行 |
 
-选择 A 的关键依据（已安装 `@assistant-ui/react@0.15.32`）：
+方案 A 的 SDK 前提（待实施前核验）：仓库声明 `@assistant-ui/react: ^0.15.32`，本次 checkout 无 node_modules，原稿引用的 SDK 内部行号与测试结论不能作为本次已验证事实。功能契约先确定为：
 
-- client 模式固定传 `backgroundThreads: true`：`RemoteThreadListRuntimeThreads.ts:90`。
-- 上游对该模式的描述：访问过的线程保持挂载，切走后 run 继续，每项 `isRunning` 实时；删除/解除挂载才回收。
-- 每个线程体通过 `useLocalRuntime` 拿自己的运行时；`__internal_setGetThreadId` 把 `remoteId` 作为 `unstable_threadId` 传给适配器：`useLocalRuntime.ts:86`、`local-thread-runtime-core.ts:1530`。
-- 列表项状态明确包含「切走后仍在运行」的 `isRunning`：`bindings.ts:38-52`。
-- 新线程的 `initialize` 在首次发送时被 await，随后才启动 run：`RemoteThreadListRuntimeThreads.test.tsx`「initializes a new thread through the adapter when its composer sends」。
+- 访问过的线程保持运行；切换、摘要刷新和打开设置不卸载线程、不取消流。
+- 每线程拥有独立运行态；首次发送等待 initialize 得到 remoteId。
+- localThreadId 在草稿提升后保持不变；后端请求只能使用 remoteId。
+- 列表更新只合并摘要，不重建已存在的线程；删除失败不丢失本地线程。
+
+实施前须用锁定版本核验上述能力及选择器/事件签名。若 SDK 的 reload 会重建线程，则采用适配层摘要合并，禁止直接在 runEnd 调用破坏性 reload；若稳定线程身份或后台运行前提不成立，应回到方案评审，不静默替换架构。详见 §10.3。
 
 ## 5. 总体架构
 
-```mermaid
-flowchart TB
-  subgraph Renderer
-    APP["App.tsx<br/>useRemoteThreadListRuntime"]
-    TL["ThreadListAdapter<br/>list / initialize / delete / fetch / title"]
-    A["会话 A 线程体<br/>LocalRuntime A"]
-    B["会话 B 线程体<br/>LocalRuntime B"]
-    D["草稿线程体<br/>LocalRuntime draft"]
-    EV["AgentEventBus<br/>Map&lt;requestId, turnId&gt;"]
-    UI["AgentChatPage / ConversationSidebar<br/>只读活动线程"]
-  end
-  APP --> TL
-  APP --> A
-  APP --> B
-  APP --> D
-  TL -->|"GET/POST/DELETE /api/conversations"| API["NestJS ConversationsController"]
-  A -->|"streamChat(id=A)"| SSE_A["SSE A（后台继续）"]
-  B -->|"streamChat(id=B)"| SSE_B["SSE B"]
-  A --> EV
-  B --> EV
-  UI --> EV
-  UI -->|"switchToThread / switchToNewThread"| APP
-```
+根运行时管理列表与选择；每个线程独立持有 LocalRuntime、输入和历史状态。端到端交互见 §5.2。
 
 ### 5.1 状态归属
 
 | 状态 | 现状 | 目标归属 |
 |---|---|---|
-| 会话列表、当前选择 | `conversationStore`（全局快照 + localStorage） | `runtime.threads`（列表）+ `onThreadIdChange`（持久化） |
+| 会话列表、当前选择 | `conversationStore`（全局快照 + localStorage） | `runtime.threads`（列表）+ 活动项选择/remoteId 订阅（持久化） |
 | 消息、`isRunning`、composer 文本 | 单个 `LocalRuntime` | 每个线程体一个 `LocalRuntime` |
 | 历史加载 / 翻页 | 页面级 `loadConversation` / `loadEarlierMessages` | 线程体挂载时加载；翻页仍由页面驱动活动线程 |
 | 工具活动与耗时 | `AgentEventBus` 单活动槽 | `AgentEventBus` 按 request 映射到 turn |
 | 附件草稿、斜杠命令 | 全局单例 store | 按线程 ID 键控 |
 | 产物标签 / 产物列表 | 全局 tabs + `artifactListStore` | tabs 按会话命名空间；列表已按会话查询 |
 | 活动会话持久化 | `teachforge.agent.activeConversationId` | 同 key，值改为线程 `remoteId`；草稿存 `null` |
+
+### 5.2 End-to-End Data Interaction Flow
+
+```mermaid
+sequenceDiagram
+  participant UI as 活动视图/线程运行时
+  participant Bridge as Electron 请求/流桥接
+  participant API as ConversationsController/ChatController
+  participant Lock as ConversationRunRegistry
+  participant Domain as ConversationsService/ChatService
+  participant DB as SQLite
+  participant LLM as LlmService/Pi
+  participant FS as 会话目录
+  UI->>Bridge: 首次发送：冻结 localThreadId 的输入快照
+  Bridge->>API: POST /conversations
+  API->>Domain: createConversation
+  Domain->>DB: 插入空会话
+  API-->>UI: remoteId（保持 localThreadId）
+  UI->>Bridge: streamChat(remoteId, 本轮快照)
+  Bridge->>API: POST /chat/stream
+  API->>Lock: acquire(remoteId)
+  Lock-->>Domain: 获取本会话运行权
+  Domain->>DB: beginTurn 短事务（写 user/pending）
+  Domain->>FS: 按本会话保存附件
+  Domain->>LLM: 请求级 session 执行
+  LLM->>DB: 经领域服务持久化消息/工具/快照
+  LLM->>FS: 会话工作区工具操作
+  Domain-->>UI: 本 request 的 SSE（切到 B 不停止 A）
+  Domain->>DB: finishTurn 终态
+  Domain->>Lock: finally 释放运行权
+  UI->>Bridge: 刷新摘要，不重建线程
+  Note over UI,Lock: 停止只取消所选线程 request；后端清理完毕前仍可能返回删除 409
+  UI->>API: DELETE /conversations/:id（经 Bridge）
+  API->>Domain: deleteConversation
+  Domain->>Lock: tryAcquireDeletion（同步占位）
+  alt 已有运行/排队/删除
+    Lock-->>API: 拒绝获取
+    API-->>UI: 409，保留线程与缓存
+  else 成功占位
+    Domain->>DB: 事务删关联行与会话
+    Domain->>FS: 提交后清理目录
+    Domain->>Lock: finally 释放
+    API-->>UI: 200 complete/partial
+    UI->>UI: 清理源线程；仅仍选中源线程时切草稿
+  end
+```
+
+| 关键节点 | 责任与一致性边界 |
+|---|---|
+| 线程运行时 | localThreadId 不变；输入快照绑定轮次；历史只向同一存活实例提交 |
+| Electron | 每 request 独立端口与取消；不读取全局活动会话来重新路由事件 |
+| Controller | 认证、参数校验、HTTP/SSE 映射；不存在的会话在 stream 中沿用安全 error SSE，不伪称 HTTP 404 |
+| 注册表 | 单 backend 进程内运行与删除共用互斥；不持久化锁 |
+| 领域服务/SQLite | 会话创建与 beginTurn 分开；删除事务先子表后主表；模型调用不在事务中 |
+| LlmService/目录 | 请求级 session；副作用无法回滚；删除占位覆盖目录清理 |
+| 列表与导航 | 摘要更新和导航分开；后台结果不修改当前选择 |
+
+### 5.3 Frontend Fetching Logic
+
+| 数据 | 读取/更新责任 | 缓存、失败与迟到处理 |
+|---|---|---|
+| 摘要/title/排序 | ThreadListAdapter 读取 GET /conversations；首轮持久化确认及 runEnd 去抖刷新 | 单个在途读取；期间新触发置 dirty，完成后补一次；版本号防旧响应覆盖。失败保留已有摘要并显示重试；成功只合并元数据 |
+| 消息/hasMore | 每线程 history entry，首次最近 30 条，翻页按最早 messageId | §6.3.2 的状态/版本检查；后台允许加载但不能改导航；失败不 reset |
+| 工具/附件/产物历史 | 同一历史响应中的投影 | 与消息通过同一个提交校验后合并；不全局清空 |
+| 产物列表/预览 | 活动 remoteId 查询现有 artifacts API | 保留现有 requestVersion；tabs 更新显式携带命名空间；后台事件只标记对应会话数据过期 |
+| 恢复选择 | 启动读取 localStorage，再等待首次列表成功 | 失败不清除保存 ID；用户主动导航后，迟到恢复不得覆盖用户选择 |
+
+### 5.4 Backend Fetching Logic
+
+- 摘要的 id/createdAt/updatedAt 来自 ConversationEntity；title 保持现有实体标题或首条 user 文本派生规则。读取不写回标题，不引入缓存或逐会话远程请求。
+- 历史由 ConversationsService 复用现有有界分页查询与安全投影，messages/hasMore、工具、附件、产物字段语义不变；没有新增全量历史读接口。
+- POST 只插入 ConversationEntity 并返回应用生成的 UUIDv4；创建成功不代表首轮消息已落库。DELETE 在占位内执行原事务与目录清理，HTTP 状态不由本地列表推断。
+- 注册表是内存运行权来源，不是数据库持久状态；UI isRunning 只作交互提示，删除是否允许以后端同步占位结果为准。
 
 ## 6. 详细设计
 
@@ -149,12 +202,15 @@ POST /api/conversations
 
 把会话锁从 `ChatService` 私有字段提取为共享注册表，避免 `ConversationsController` 反向依赖 `ChatService` 造成循环依赖：
 
-- 新 `ConversationRunRegistry`（`apps/backend/src/conversations/conversation-run-registry.ts`）提供：
-  - `acquire(conversationId): Promise<release>`：同 ID 排队，不同 ID 并行（迁入现有 `conversationTails` 逻辑）。
-  - `isBusy(conversationId): boolean`：锁被持有或存在排队请求。
-- `ChatService` 改为注入并使用该注册表，删除自己的 `conversationTails`。
-- `ConversationsService.deleteConversation()` 在事务前检查 `isBusy`，命中抛 `ConflictException`（409，message：`该会话正在生成回复，请先停止后再删除。`）。
-- 竞态处理：若检查后 run 才开始，该轮因会话行已删除会在 `beginTurn` 得到 404 并正常失败；不会产生孤儿写入。
+- 新 `ConversationRunRegistry`（`apps/backend/src/conversations/conversation-run-registry.ts`）由 ConversationsModule 单例提供并导出，ChatModule 消费同一实例；不能分别注册两份。
+  - `acquire(conversationId): Promise<release>`：调用时同步登记运行/等待项，然后异步等待前驱；同 ID 串行，不同 ID 并行。
+  - `tryAcquireDeletion(conversationId): release | null`：同步检查并占位，不包含 await；已有运行、排队请求或删除占位时返回 null。删除不排在长任务之后静默执行。
+  - `isBusy(conversationId)` 仅用于诊断，不承担删除授权。
+- ChatService 持有运行权直至持久化、终态与相关收尾完成，finally 释放；取消排队请求也必须最终释放，不能泄漏尾链。
+- deleteConversation 在任何数据库 await 之前取得删除占位；失败返回 409。成功后持有至数据库事务和目录清理结束，所有异常路径 finally 释放。
+- 先运行：删除立即 409，运行/排队会话与文件保持完整。先删除：后来 run 排在删除占位后；成功删除后 beginTurn 发现不存在，沿既有安全 error SSE 结束，不重建会话。删除事务失败则后来 run 可在原会话继续。
+- 目录清理失败仍返回 `200 { sessionCleanup: 'partial' }`，会话已删除；前端移除线程并提示残留文件，不能伪装成删除失败或恢复不存在的行。
+- 停止按钮只发出取消请求；后端释放前删除仍可 409，提示稍后重试。重复删除占位期间返回 409，结束后再删返回 404。
 
 #### 6.1.3 保持不变的并发规则
 
@@ -174,7 +230,7 @@ POST /api/conversations
 | `delete` | `DELETE /api/conversations/:id` | 409 原样抛错，侧栏提示且保留该行 |
 | `fetch` | 列表查询后按 ID 匹配 | 供 `reloadMainThread` 等；若调用频繁再补单会话摘要接口 |
 | `rename` | 无操作 | 标题由后端派生，UI 不提供重命名 |
-| `generateTitle` | `GET /api/conversations` 取派生标题 | 见 §6.6；实现时二选一并验收 |
+| `generateTitle` | 无额外请求 | 空流；仅列表摘要提供标题，见 §6.6 |
 | `archive` / `unarchive` | 不提供 | 适配器省略这两项 |
 
 约束：
@@ -196,51 +252,40 @@ const runtime = useRemoteThreadListRuntime({
 });
 ```
 
-`useConversationRuntime`（新文件 `conversation-runtime.ts`）：
+`useConversationRuntime`（新文件 `conversation-runtime.ts`）的责任契约：
 
-```tsx
-const useConversationRuntime = () => {
-  const aui = useAui();
-  const runtime = useLocalRuntime(agentChatAdapter);
-  useEffect(() => {
-    const conversationId = aui.threadListItem.getState().remoteId;
-    if (!conversationId) return;
-    // 草稿被 initialize 提升为真实 ID 时，run 可能已经开始：有消息或正在运行就跳过。
-    const thread = runtime.thread.getState();
-    if (thread.isRunning || thread.messages.length > 0) return;
-    void conversationHistoryStore.load(runtime, conversationId);
-  }, [aui, runtime]);
-  return runtime;
-};
-```
-
-- `useLocalRuntime` 位于线程体作用域内，会自动把 `remoteId` 注入 `unstable_threadId`（`:86`）。
-- composer 文本状态天然随线程运行时隔离；切回线程时草稿仍在（需在验收中确认）。
-- 历史加载只在该线程体**首次挂载且为空**时执行；常驻线程体不会重复加载，也不会在运行中 `reset`。
+- 捕获稳定 `localThreadId`，创建稳定的每线程 adapter（闭包持有该 ID）；LocalRuntime 与 history entry 都属于此线程实例。
+- `remoteId` 专用于 HTTP/SSE，会话初始化后绑定到同一 localThreadId，不迁移输入草稿键、不重建 LocalRuntime。
+- 新草稿标记 `origin=draft`、historyPhase=ready；初始化成功仍不读历史。已有会话标记 `origin=persisted`，必须完成首次历史读取才允许发送。不能用 remoteId 刚出现推断需要加载历史。
+- composer 文本由每线程 runtime 保有；附件/命令由 localThreadId 保存。线程切换不清输入、不 reset；列表刷新不改变实例身份。
 
 #### 6.3.2 历史加载与翻页
 
-把 `AgentChatPage` 中的加载逻辑迁移为 `conversation-history-store.ts`（模块级 `Map<threadId, entry>`）：
+`conversation-history-store.ts` 维护 `Map<localThreadId, entry>`，entry 绑定 remoteId、实例代次、requestVersion、runEpoch、phase、hasMore 和错误。这里的字段为拟新增内部状态，不是现有 SDK API。
 
-| 能力 | 实现 |
+| 状态/动作 | 规则 |
 |---|---|
-| 首次加载 | `GET /api/conversations/:id/messages`（最近 30 条），校验 DTO 后 `runtime.thread.reset(rows.map(toThreadMessage))` |
-| 恢复附属状态 | `restoreHistoryToolActivities`、`restoreHistoryAttachments`、`artifactHistoryStore.mergeFromHistory` |
-| 翻页 | 页面用活动线程的 `remoteId` + 最早已加载消息 ID 请求前一页，合并去重后 `runtime.thread.reset([...earlier, ...current])`，并恢复滚动锚点 |
-| 错误 | 每线程记录 `{ phase, message, retryable }`，页面只渲染活动线程的错误与重试 |
-| 404 | 刷新线程列表；若该会话已不存在，切到草稿并提示 |
+| persisted 首次打开 | idle → loading → ready；失败为 error，保留重试；loading/error 禁止本线程发送 |
+| draft | 直接 ready；initialize 前后均不自动 reset 历史 |
+| 翻页 | ready 且非运行、非初始化、非删除时进入 paging；禁发、禁止重复翻页；失败回 ready 并保留旧内容及游标 |
+| 发送 | 只在 ready 且无互斥操作时接受；同步增加 runEpoch 后才能进入异步初始化/发送 |
+| 成功响应 | 校验同一实例存活、remoteId 匹配、requestVersion 最新、runEpoch 未变、非运行/初始化/删除，再无 await 地提交消息和附属状态 |
+| 过期响应 | 直接丢弃，不能写 phase/error/工具/附件/产物，也不能导航 |
+| 删除开始 | 暂停该线程发送；使在途历史版本失效。成功标记 disposed 并清缓存；失败恢复原内容，未完成的首次加载重新读取 |
 
-`isConversationHistoryPage` 等校验函数从页面移入 `conversation-store` 的替代模块，逻辑不变。
+首次响应 reset 最近 30 条；翻页将更早消息与提交时当前消息按 ID 去重合并，只有该线程仍可见时恢复滚动锚点。历史工具、附件、产物合并与消息共享同一提交校验。切换本身不使后台线程请求失效；A 的正常响应可以填充 A，但不能改变 B。
 
-为什么不用 `adapters.history`：它的 `scopeId` 在「草稿 → 真实 ID」变化时会触发运行时 `resetHistoryScope`（`local-thread-runtime-core.ts:494-514`），内部会 `cancelRun()` 并清空仓库，与首条消息的发送时序冲突。每线程一个加载器可以显式避开这一时序。
+历史 404 先标记源线程不可用并刷新摘要。只有刷新成功且确认源 ID 不存在时才清理该线程；只有当前选择仍等于源线程时切草稿。刷新失败保持错误/重试，不把网络失败当作空列表。
+
+采用显式每线程历史加载器以复用现有 DTO 与分页；不依赖尚未核验的 adapters.history scope 重置行为。上述互斥不仅禁用按钮，也在发送/分页入口执行，覆盖 Enter 和程序调用。
 
 #### 6.3.3 新建、切换与恢复
 
 - 新建：`runtime.threads.switchToNewThread()` 创建草稿；发送时 `initialize` 创建后端会话并拿到 `remoteId`。
 - 切换：`runtime.threads.switchToThread(id)`；失败写入 `threads.getState().switchError`，页面显示重试。
-- 持久化：监听 `onThreadIdChange`，仅当值非空写入 `teachforge.agent.activeConversationId`；草稿写 `null`。
-- 恢复：应用挂载后 `await runtime.threads.getLoadThreadsPromise()`，若保存的 ID 仍在列表中则 `switchToThread`；否则清空存储并停留草稿。不依赖已废弃的 `initialThreadId`。
-- 删除活动会话：`item.delete()` 后切换草稿并清理该线程的输入/历史缓存。
+- 持久化：订阅当前选择及其 remoteId 变化；保存活动项的 remoteId，草稿移除该 key。A 在后台初始化完成不覆盖 B 的选择；活动草稿提升时即使选择 ID 不变也要更新存储。
+- 恢复：启动先保存 localStorage 值，首次列表成功前暂停自动持久化；成功后恢复仍存在的 ID，否则清空。使用导航代次判断用户是否已主动选择/新建；发生过则跳过迟到恢复，持久化用户当前选择。列表失败保留保存值供重试，不覆盖成草稿。
+- 删除：请求期间禁用目标线程发送和重复删除，不阻止切换。仅后端确认成功或确认已不存在时清理源线程缓存；完成时仍选中源线程才切草稿，已切 B 则保留 B。失败保留本地项和输入；不得让 SDK 的乐观删除提前卸载线程。
 
 ### 6.4 全局状态改造
 
@@ -268,11 +313,15 @@ clearArtifacts(turnId: string): void
 
 | Store | 改造 |
 |---|---|
-| `composerAttachmentStore` | `Map<threadId, AttachmentDraft[]>`：`list/add/remove/reset` 全部带 key；发送时 adapter 用 `unstable_threadId` 取对应草稿，发送后只清该 key |
+| `composerAttachmentStore` | `Map<localThreadId, AttachmentDraft[]>`：所有操作带稳定 key；adapter 通过线程闭包取发送快照，remoteId 不用于查草稿 |
 | `composerCommandStore` | 同上，`/查询资料库` 命令按线程保存与清除 |
 | `sentAttachmentStore` | 继续按 user message ID 记录，跨线程安全（消息 ID 唯一） |
 
-线程 key 取活动线程的运行时 ID（优先 `remoteId`，草稿阶段使用线程列表项 ID）；具体选择器在实现时以类型定义为准。
+localThreadId 从草稿到正式会话保持不变，历史会话也按其本地线程项 ID 键控。发送入口冻结本轮文本、附件、命令及草稿版本；初始化期间只锁该线程的输入/重复发送，切到 B 不改变快照。已发附件按 userMessageId 保存。
+
+initialize 使用每线程 single-flight，成功记住 remoteId，首轮后续失败重试复用同一会话。POST 明确失败时保留草稿；POST 响应丢失时可能已建空会话，本轮不承诺创建请求跨网络 exactly-once，不自动重试 POST；提示用户重试可能留下可手动删除的空会话。不新增持久幂等表。
+
+只有 streamChat 成功创建本轮 request 后，按快照版本清理源 localThreadId 的草稿；初始化/桥接同步失败保留输入。流中途失败沿现有错误气泡处理，已发附件仍保留在消息标签中，不自动重发。
 
 #### 6.4.3 产物状态
 
@@ -292,17 +341,17 @@ clearArtifacts(turnId: string): void
 | 「新建课题」 | 始终可用（列表加载失败也可用）；点击切到草稿线程 |
 | 会话行 | 非运行行始终可点击；运行行同样可点击，用于查看实时输出 |
 | 运行指示 | 行尾显示小型转圈（`threads.getItemById(id).getState().isRunning`），不使用整列透明 |
-| 删除菜单 | 仅对「运行中」的行禁用，提示「生成中，先停止再删除」；其他行保持可用 |
+| 删除菜单 | 运行/初始化中禁用；删除请求期间禁止重复点击；其余行可删除，后端 409 兜底 |
 | 刷新 | 仅列表加载中禁用 |
 | 列表加载态 | 首次加载显示骨架/占位；失败显示错误 + 重试，不阻塞新建 |
 
-运行态更新依赖线程列表在 run 边界发出的通知（上游 `RemoteThreadListHookInstanceManager` 的既有测试覆盖「切走的线程仍在跟踪 run，并只在跨越运行边界时通知列表」）。
+运行态来自每线程订阅，后台线程也需通知列表；准确 SDK 订阅接口在 §10.3 核验，不能只订阅活动线程。
 
 #### 6.5.2 主区域
 
 - 标题：活动线程项的 `title`；空标题回退 `新对话`。
 - 历史加载：活动线程有自己的 `isLoading`（正文区域显示「正在加载历史消息…」），不阻塞其他会话发送。
-- 翻页按钮：仅受活动线程的 `isRunning` / 翻页请求状态影响。
+- 翻页/发送按钮与快捷键遵循 §6.3.2 的线程状态；首次加载/失败、翻页、初始化和删除期间不可发送，其他线程不受影响。
 - 发送/停止：`AuiIf state.thread.isRunning` 只反映当前线程；停止只取消当前线程的 SSE。
 - 空状态、产物入口、知识库/设置切换保持现状；打开其他视图不会卸载线程体，后台生成继续。
 
@@ -315,11 +364,11 @@ clearArtifacts(turnId: string): void
 ### 6.6 标题、刷新与排序
 
 - 标题唯一来源是后端列表的派生值；桌面端不维护第二份标题。
-- 每轮结束（adapter `finally` 或 `unstable_subscribeThreadEvents` 的 `runEnd`）触发一次去抖的 `runtime.threads.reload()`，使：
+- 每轮结束（adapter `finally` 或 `unstable_subscribeThreadEvents` 的 `runEnd`）触发一次去抖的摘要刷新（只有 §10.3 证明 reload 保留线程时才用 `runtime.threads.reload()`），使：
   - 首轮结束后侧栏标题变为派生标题；
   - 会话按 `updatedAt` 前移；
   - 后台完成的会话无需切换即可更新。
-- `rename` 为无操作；`generateTitle` 读取后端派生标题并作为单段流返回。若实现时发现自动标题流程与列表刷新冲突，退化方案是返回空流并完全依赖 `reload()`（列入开放问题）。
+- `rename` 无操作且不暴露 UI；`generateTitle` 固定返回空流，不调用模型或额外拉列表。标题只由摘要刷新更新；需验证空流不会覆盖已有标题。
 
 ### 6.7 错误处理
 
@@ -327,11 +376,12 @@ clearArtifacts(turnId: string): void
 |---|---|
 | 列表加载失败 | 侧栏错误 + 重试；新建仍可用 |
 | 历史加载失败 | 仅该线程正文显示错误与重试；其他会话不受影响 |
-| 历史 404 | 刷新列表；会话不存在则切换草稿并提示 |
-| 发送初始化失败 | 该轮发送失败，错误显示在该线程；不创建会话行 |
+| 历史 404 | 按 §6.3.2 处理源线程；只有仍选中源线程才切草稿 |
+| 发送初始化失败 | 保留源线程输入与重试；响应丢失可能留空会话，不自动再次 POST |
 | 流式错误 | 现有 assistant 错误气泡；adapter `finally` 结束该 request 的活动状态并刷新列表 |
 | 切换失败 | `switchError` 对应的行显示重试；保留当前线程 |
-| 删除 409 | 侧栏行内提示「生成中，先停止」；不删除本地项 |
+| 删除 409 | 源行提示「会话忙碌，请停止或稍后重试」；保留本地项与缓存 |
+| 删除 partial | 移除已删除线程并提示本地文件未完全清理；不恢复数据库已删除项 |
 | 应用重载 | 所有 SSE 断开，行为与现状一致；重启后恢复上次会话 ID（若仍存在） |
 
 ## 7. 契约
@@ -348,14 +398,14 @@ Electron 侧复用通用 `window.teachforge.request`，无需新增 IPC 通道�
 ### 7.2 运行时适配器
 
 - `agentChatAdapter.run` 的会话 ID 来源改为 `unstable_threadId`。
-- 删除对 `conversationStore.getSnapshot().activeConversationId` 的读取与 `conversation` 事件的 `setActiveConversationId` 回写；`conversation` 事件仍可能到达，适配器忽略（或仅做一致性断言）。
-- 发送后按 `unstable_threadId` 清理附件/命令草稿。
+- 删除对 `conversationStore.getSnapshot().activeConversationId` 的读取与 `conversation` 事件的 `setActiveConversationId` 回写；`conversation` 事件仍可能到达，适配器校验其 ID 与本轮 remoteId 一致，确认后触发摘要刷新但不修改选择。
+- `unstable_threadId` 必须与线程绑定 remoteId 一致，缺失或不一致时本地失败，禁止隐式创建第二个会话；附件/命令以闭包 localThreadId 和冻结版本读取/清理。
 
 ### 7.3 本地存储
 
 | Key | 值 | 写入时机 |
 |---|---|---|
-| `teachforge.agent.activeConversationId` | `remoteId` 或 `null` | `onThreadIdChange` |
+| `teachforge.agent.activeConversationId` | 活动 `remoteId`；草稿移除 key | 活动选择或其 remoteId 变化；启动恢复遵循 §6.3.3 |
 
 ## 8. 并发与生命周期规则
 
@@ -373,8 +423,8 @@ Electron 侧复用通用 `window.teachforge.request`，无需新增 IPC 通道�
 | 文件 | 变更 |
 |---|---|
 | `apps/backend/src/conversations/conversations.controller.ts` | 新增 `POST /conversations`；删除接口 409 透传 |
-| `apps/backend/src/conversations/conversations.service.ts` | 新增 `createConversation()`；删除前检查 `isBusy` |
-| `apps/backend/src/conversations/conversation-run-registry.ts` | 新增：会话锁/忙碌查询 |
+| `apps/backend/src/conversations/conversations.service.ts` | 新增 `createConversation()`；删除获取同步占位并 finally 释放 |
+| `apps/backend/src/conversations/conversation-run-registry.ts` | 新增：运行串行锁与同步删除占位 |
 | `apps/backend/src/chat/chat.service.ts` | 用注册表替换私有 `conversationTails`；行为与日志不变 |
 | `apps/backend/test/conversation-*.test.cjs` | 新增创建接口、运行中删除 409 的回归 |
 
@@ -412,7 +462,31 @@ Electron 侧复用通用 `window.teachforge.request`，无需新增 IPC 通道�
 | 9 | 删除最后一条会话 | 自动切草稿，输入区可用 |
 | 10 | 同会话连发 | 后端排队，UI 只锁该会话发送 |
 
-### 10.2 回归
+### 10.2 边界验收补充
+
+| # | 场景 | 必须观察到的结果 |
+|---|---|---|
+| 11 | 草稿附文件/命令后首次发送；初始化时切 B | A 内容全部发送到 A，B 草稿不变；localThreadId 不变 |
+| 12 | POST 明确失败、响应丢失、成功后首轮失败 | 明确失败保留草稿；不自动重试不确定 POST；已知 remoteId 重试复用 |
+| 13 | 删除与 acquire 双向交错；另有排队请求 | run 先到则删除 409；删除先到则 run 等待并在删除成功后安全失败 |
+| 14 | 删除事务失败/目录 partial/停止后立即删 | 释放占位；事务失败保留行；partial 移除行并提示；清理未结束可 409 |
+| 15 | 慢历史请求、翻页中 Enter、旧请求晚到 | 入口禁发；旧响应不覆盖消息/工具/附件/产物/错误状态 |
+| 16 | A 加载/删除时切 B，A 返回 404/成功 | B 选择、草稿和运行不变；只清理 A |
+| 17 | 初始列表失败重试；恢复前用户新建 | 保存 ID 不被启动草稿清掉；迟到恢复不抢用户选择 |
+| 18 | A/B 并行，A 完成触发列表刷新 | B 继续；A/B 实例、消息、草稿和翻页状态保持 |
+
+### 10.3 SDK 验证前置项
+
+实施前使用 package-lock 锁定版本建立最小运行时验证，记录实际版本、调用签名与结果；不以原稿内部源码行号代替执行证据：
+
+1. 初始化在 run 前完成；草稿提升 localThreadId 与 LocalRuntime 实例不变，后台初始化不会改当前选择。
+2. A/B 并行、切换设置、列表刷新均不取消或重建任何运行线程；每行 isRunning 独立更新。
+3. generateTitle 空流不清空摘要标题；刷新保持未初始化草稿以及已加载历史页。
+4. 删除 409/500 保留本地项和草稿；成功仅销毁源线程，当前选择按条件切换。
+5. remoteId 变化可独立于选择变化触发持久化；原稿 API 名称需按实际类型核对。
+
+### 10.4 回归
+
 
 - `npm run test:agent-stream --workspace @teachforge/desktop`
 - `npm run test:conversation-history --workspace @teachforge/desktop`
@@ -426,17 +500,18 @@ Electron 侧复用通用 `window.teachforge.request`，无需新增 IPC 通道�
 |---|---|---|
 | 并发请求数上涨 | provider 限流、CPU/内存上升 | 本轮不做上限；观察日志后再决定是否加并发闸门 |
 | 常驻线程体 | 访问会话越多，renderer 内存越高 | 单会话仅保留消息列表；后续可对空闲线程 `detach`（会丢翻页态） |
-| 草稿提升时序 | `initialize` 后线程体可能重建 | 以上游测试为准验收首轮；历史加载带「运行中/有消息则跳过」保护 |
-| 标题双写 | 自动标题与列表派生标题冲突 | 以列表派生为唯一来源；`rename` 无操作；冲突时退化 `generateTitle` 为空流 |
-| 删除竞态 | 会话刚被删除时请求仍到达 | `beginTurn` 抛 404，run 干净失败；不产生残留 |
+| 草稿提升时序 | 输入归属可能丢失 | localThreadId 固定；origin=draft 不加载历史；SDK 必须验证提升不重建线程 |
+| 标题刷新 | SDK 空流/刷新行为需验证 | 固定空流，列表为唯一来源；不得重建运行线程 |
+| 删除竞态 | run 与删除争抢同一会话 | 共享注册表确定先后顺序；后到 run 等删除释放后再查库 |
 | 页面级选择器 | `threadListItem` / `threads` 的具体选择器写法可能随版本演进 | 优先使用公开的 `runtime.threads` 订阅与 `getState()`；实现时以类型为准 |
 | 跨应用重启 | run 不恢复 | 明确非目标 |
 
-## 12. 开放问题
+## 12. 已确定决策与待验证项
 
-1. **自动标题**：`generateTitle` 回吐后端派生标题，还是返回空流并依赖 `reload()`？默认前者，实现时用一个会话验收两种表现。
-2. **删除保护位置**：是否还需要在前端做二次确认（目前删除无确认）？默认保持现状，只增加「运行中不可删」。
-3. **空闲线程回收**：是否在会话数超过阈值时 `detach` 未访问线程？默认不做，记录为后续优化。
+- 自动标题固定空流，以后端摘要为唯一来源。
+- 删除保持现有无二次确认交互；增加运行/初始化/删除中的行级保护。
+- 本轮不做空闲线程回收或并发上限配置。
+- 唯一架构前提待验证项为 §10.3 的锁定 SDK 行为；验证失败需调整适配方案并复审。
 
 ## 13. 文档同步
 
@@ -446,3 +521,18 @@ Electron 侧复用通用 `window.teachforge.request`，无需新增 IPC 通道�
 - 更新 `docs/current/domains/conversations/api-contract.md`：`POST /api/conversations`、删除 409。
 - 更新 `docs/current/domains/conversations/backend-behavior.md`：会话锁注册表与忙碌判定。
 - 在 `docs/changes/README.md` 与本目录补 `verification.md` / `worklog.md`（实施阶段产出）。
+
+## 14. Design Deviations
+
+| 日期 | 来源 | 方案修订 | 状态 |
+|---|---|---|---|
+| 2026-11-09 | CC-DR-001 | localThreadId 稳定输入键；remoteId 只用于后端；初始化 single-flight 与输入快照 | 已纳入设计，待实现 |
+| 2026-11-09 | CC-DR-002 | 删除使用同一注册表的同步占位，覆盖事务与目录清理 | 已纳入设计，待实现 |
+| 2026-11-09 | CC-DR-003/004 | 每线程历史状态、响应版本/实例校验、导航条件检查 | 已纳入设计，待实现 |
+| 2026-11-09 | CC-DR-005 | 补数据流/Fetching Logic，SDK 引用改为待核验前提 | 文档已补；SDK 验证待完成 |
+
+## 15. Version History
+
+| 版本 | 日期 | 说明 |
+|---|---|---|
+| 1.0 | 2026-11-09 | 实施前方案优化；保留首次评审问题与修订追踪，不宣称已实现 |

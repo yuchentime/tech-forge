@@ -27,8 +27,11 @@ export type AgentActivityState = Readonly<Record<string, AgentActivitySnapshot>>
 /** 将当前运行的安全 Pi 事件发布给 React 活动状态订阅者。 */
 export class AgentEventBus {
   private readonly listeners = new Set<() => void>();
-  private activeRequestId: string | null = null;
-  private activeTurnId: string | null = null;
+  private readonly activeByRequest = new Map<string, string>();
+  /** Associates a live request with its stable local thread, not its mutable selected view. */
+  private readonly threadByRequest = new Map<string, string>();
+  /** Allows the visible thread to select only its own live progress record. */
+  private readonly activeRequestByThread = new Map<string, string>();
   private lastTurnId: string | null = null;
   private snapshot: AgentActivityState = {};
 
@@ -40,8 +43,15 @@ export class AgentEventBus {
 
   /** Returns the latest activity snapshot for existing single-run consumers. */
   getSnapshot = (): AgentActivitySnapshot => {
-    const turnId = this.activeTurnId ?? this.lastTurnId;
+    const turnId = [...this.activeByRequest.values()].at(-1) ?? this.lastTurnId;
     return turnId ? this.snapshot[turnId] : EMPTY_ACTIVITY_SNAPSHOT;
+  };
+
+  /** Returns live progress for one local thread without leaking another thread's activity. */
+  getSnapshotForThread = (localThreadId: string): AgentActivitySnapshot => {
+    const requestId = this.activeRequestByThread.get(localThreadId);
+    const turnId = requestId ? this.activeByRequest.get(requestId) : undefined;
+    return turnId ? this.snapshot[turnId] ?? EMPTY_ACTIVITY_SNAPSHOT : EMPTY_ACTIVITY_SNAPSHOT;
   };
 
   /** Returns the immutable per-turn map consumed by the message list. */
@@ -65,7 +75,7 @@ export class AgentEventBus {
         ? {}
         : { durationMs: activity.durationMs }),
     }));
-    if (!this.activeRequestId) this.lastTurnId = turnId;
+    if (this.activeByRequest.size === 0) this.lastTurnId = turnId;
     // 整轮耗时未持久化；null 让历史活动隐藏运行时计时而不伪造时间。
     this.updateTurnSnapshot({
       turnId,
@@ -79,14 +89,15 @@ export class AgentEventBus {
   }
 
   /** Starts one activity record, optionally tied to its initiating user message. */
-  begin(turnIdOrRequestId: string, requestId?: string): void {
-    if (this.activeRequestId) this.clear(this.activeRequestId);
-
+  begin(turnIdOrRequestId: string, requestId?: string, localThreadId?: string): void {
     const turnId = turnIdOrRequestId;
     const runRequestId = requestId ?? turnIdOrRequestId;
     const startedAt = Date.now();
-    this.activeRequestId = runRequestId;
-    this.activeTurnId = turnId;
+    this.activeByRequest.set(runRequestId, turnId);
+    if (localThreadId) {
+      this.threadByRequest.set(runRequestId, localThreadId);
+      this.activeRequestByThread.set(localThreadId, runRequestId);
+    }
     this.lastTurnId = turnId;
     this.updateTurnSnapshot({
       turnId,
@@ -180,7 +191,7 @@ export class AgentEventBus {
 
   /** Drops the live artifact list so a reloaded conversation does not duplicate the history footer. */
   clearArtifacts(): void {
-    const turnId = this.activeTurnId ?? this.lastTurnId;
+    const turnId = [...this.activeByRequest.values()].at(-1) ?? this.lastTurnId;
     if (!turnId) return;
     const snapshot = this.snapshot[turnId];
     if (!snapshot || snapshot.artifacts.length === 0) return;
@@ -192,8 +203,12 @@ export class AgentEventBus {
     const activity = this.getActiveSnapshot(requestId);
     if (!activity) return;
 
-    this.activeRequestId = null;
-    this.activeTurnId = null;
+    const localThreadId = this.threadByRequest.get(requestId);
+    this.activeByRequest.delete(requestId);
+    this.threadByRequest.delete(requestId);
+    if (localThreadId && this.activeRequestByThread.get(localThreadId) === requestId) {
+      this.activeRequestByThread.delete(localThreadId);
+    }
     this.lastTurnId = activity.turnId;
     this.updateTurnSnapshot({
       ...activity,
@@ -208,8 +223,8 @@ export class AgentEventBus {
 
   /** Finds the current snapshot only when the request id still owns the active slot. */
   private getActiveSnapshot(requestId: string): AgentActivitySnapshot | null {
-    if (requestId !== this.activeRequestId || !this.activeTurnId) return null;
-    return this.snapshot[this.activeTurnId] ?? null;
+    const turnId = this.activeByRequest.get(requestId);
+    return turnId ? this.snapshot[turnId] ?? null : null;
   }
 
   /** Replaces a live turn snapshot only while its request still owns the active slot. */
@@ -217,7 +232,7 @@ export class AgentEventBus {
     requestId: string,
     activity: AgentActivitySnapshot,
   ): void {
-    if (requestId !== this.activeRequestId || activity.turnId !== this.activeTurnId) {
+    if (this.activeByRequest.get(requestId) !== activity.turnId) {
       return;
     }
     this.updateTurnSnapshot(activity);

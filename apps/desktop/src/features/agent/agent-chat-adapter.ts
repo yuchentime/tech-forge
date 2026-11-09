@@ -9,7 +9,6 @@ import {
   sentAttachmentStore,
 } from './attachment-store';
 import { composerCommandStore } from './composer-command-store';
-import { conversationStore } from './conversation-store';
 
 /** Extracts the newest user message because the backend runs each turn alone. */
 function getLatestUserMessage(messages: readonly ThreadMessage[]): {
@@ -30,8 +29,10 @@ function getLatestUserMessage(messages: readonly ThreadMessage[]): {
 }
 
 /** Adapts the protected desktop stream bridge to Assistant UI cumulative output. */
-export const agentChatAdapter: ChatModelAdapter = {
-  async *run({ messages, abortSignal }) {
+/** Creates a model adapter whose draft stores are permanently bound to one local thread id. */
+export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter {
+  return {
+  async *run({ messages, abortSignal, unstable_threadId }) {
     const userMessage = getLatestUserMessage(messages);
     if (!userMessage?.prompt) throw new Error('请输入文本后再发送。');
     if (abortSignal.aborted) return;
@@ -67,16 +68,17 @@ export const agentChatAdapter: ChatModelAdapter = {
 
     // The chip never enters the textarea, so the command is attached here. It is part of the stored
     // user message, which is what the backend parses and what dedupe reads back later.
-    const command = composerCommandStore.getSnapshot();
+    const command = composerCommandStore.getForThread(localThreadId);
     const prompt = command ? `${command} ${userMessage.prompt}` : userMessage.prompt;
     // Attachments are copied and parsed when the turn runs, because the conversation id does not
     // exist before this request. The tag list is recorded against the message so the sent bubble
     // shows what was attached, and then cleared.
-    const attachments = composerAttachmentStore.list();
+    const attachments = composerAttachmentStore.getForThread(localThreadId);
+    const conversationId = unstable_threadId;
     requestId = window.teachforge.streamChat(
       prompt,
       receiveEvent,
-      conversationStore.getSnapshot().activeConversationId ?? undefined,
+      conversationId,
       attachments.length > 0
         ? attachments.map(({ attachmentId, path }) => ({ attachmentId, path }))
         : undefined,
@@ -88,9 +90,10 @@ export const agentChatAdapter: ChatModelAdapter = {
         attachments.map(({ attachmentId, name }) => ({ attachmentId, name })),
       );
     }
-    composerAttachmentStore.reset();
-    composerCommandStore.reset();
-    agentEventBus.begin(messageKey, requestId);
+    composerAttachmentStore.reset(localThreadId);
+    composerCommandStore.reset(localThreadId);
+    // Progress belongs to this stable local thread even while the user views another conversation.
+    agentEventBus.begin(messageKey, requestId, localThreadId);
     abortSignal.addEventListener('abort', cancel, { once: true });
     if (abortSignal.aborted) cancel();
 
@@ -100,8 +103,11 @@ export const agentChatAdapter: ChatModelAdapter = {
         if (!event) return;
 
         if (event.type === 'conversation') {
-          conversationStore.setActiveConversationId(event.conversationId);
-          void conversationStore.refresh();
+          // A backend-confirmed id should refresh the sidebar title/list, but must never switch
+          // away from the thread the user selected while this run was in the background.
+          if (typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new Event('teachforge:conversation-summary-changed'));
+          }
           continue;
         }
 
@@ -131,8 +137,14 @@ export const agentChatAdapter: ChatModelAdapter = {
       if (!terminal) cancel();
       if (requestId) {
         agentEventBus.clear(requestId);
-        void conversationStore.refresh();
+        if (typeof window.dispatchEvent === 'function') {
+          window.dispatchEvent(new Event('teachforge:conversation-summary-changed'));
+        }
       }
     }
   },
-};
+  };
+}
+
+/** Legacy export retained for isolated component tests; production uses the per-thread factory. */
+export const agentChatAdapter = createAgentChatAdapter('legacy');
