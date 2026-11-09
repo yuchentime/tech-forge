@@ -96,7 +96,7 @@ export function RehearsalMode({
               已回答 {answeredCount}/{state.detail.progress.limit} 题
             </p>
           ) : (
-            <></>
+            <p className="text-sm font-medium text-stone-500">演练</p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -180,7 +180,6 @@ export function RehearsalMode({
             isEnding={state.isEnding}
             isStarting={state.isStarting}
             mode="live"
-            onAdjustPersona={() => rehearsalStore.openStart()}
             onContinue={() =>
               void rehearsalStore.start(state.detail?.persona ?? '')
             }

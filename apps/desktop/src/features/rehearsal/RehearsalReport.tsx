@@ -24,7 +24,6 @@ export function RehearsalReport({
   isEnding,
   isStarting,
   onContinue,
-  onAdjustPersona,
   onRetryEnd,
 }: {
   detail: RehearsalDetail;
@@ -32,7 +31,6 @@ export function RehearsalReport({
   isEnding: boolean;
   isStarting: boolean;
   onContinue: () => void;
-  onAdjustPersona?: () => void;
   onRetryEnd?: () => void;
 }) {
   const report = detail.report;
@@ -167,15 +165,6 @@ export function RehearsalReport({
       </div>
 
       <div className="mt-3 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200 pt-3">
-        {mode === 'live' && onAdjustPersona && (
-          <button
-            className="mr-auto text-xs font-medium text-stone-500 underline underline-offset-2 hover:text-stone-800"
-            onClick={onAdjustPersona}
-            type="button"
-          >
-            调整画像
-          </button>
-        )}
         <button
           className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={isStarting}

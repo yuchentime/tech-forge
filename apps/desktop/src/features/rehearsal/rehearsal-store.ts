@@ -520,11 +520,6 @@ export class RehearsalStore {
     this.update({ view: detail ? viewFor(detail) : 'start' });
   }
 
-  /** Opens the start form (used by "调整画像"). */
-  openStart(): void {
-    this.update({ view: 'start', error: null });
-  }
-
   /** Opens the current report when one exists. */
   openReport(): void {
     if (this.snapshot.detail) this.update({ view: 'report' });
