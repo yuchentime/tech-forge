@@ -22,7 +22,7 @@ routes:
       - docs/changes/2026-11-09-chat-attachments/verification.md
     history_on_demand: []
   rehearsal-mode:
-    description: "Implement Feynman-style rehearsal: a separate Rehearsal state machine with optional student profile, a 15-question total cap, at most 2 follow-ups per base question, skip/manual-end/limit reporting, a paginated per-conversation history with read-only Q&A and evaluation detail, and normal-chat digest injection"
+    description: "Implement Feynman-style rehearsal: a separate Rehearsal state machine with optional student profile, a 15-question total cap, at most 2 follow-ups per base question, skip/manual-end/limit reporting, a paginated per-conversation history with read-only Q&A and evaluation detail, and one-shot delivery of completed drill evaluations into the normal conversation as a persistent Pi custom-message entry"
     token_budget: 24000
     code_globs:
       - "apps/backend/src/rehearsals/**"
@@ -43,8 +43,11 @@ routes:
       - docs/current/domains/conversations/index.md
       - docs/current/domains/rehearsals/index.md
       - docs/changes/2026-11-09-rehearsal-mode/design.md
+      - docs/changes/2026-11-09-rehearsal-digest-delivery/design.md
     optional:
       - docs/changes/2026-11-09-rehearsal-mode/brief.md
+      - docs/changes/2026-11-09-rehearsal-digest-delivery/brief.md
+      - docs/changes/2026-11-09-rehearsal-digest-delivery/verification.md
       - docs/current/domains/rehearsals/api-contract.md
       - docs/changes/2026-11-09-rehearsal-mode/tasks.md
       - docs/changes/2026-11-09-rehearsal-mode/verification.md

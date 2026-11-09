@@ -415,6 +415,25 @@ test('the 15th question completes with a report and powers the normal-chat diges
     assert.ok(digest.refsJson);
     const refs = JSON.parse(digest.refsJson);
     assert.deepEqual(refs.rehearsals.rehearsalIds, [started.rehearsalId]);
+    assert.deepEqual(digest.rehearsalIds, [started.rehearsalId]);
+
+    // Delivery is one-shot: the digest already lives in the Pi history, so it is never rebuilt.
+    await ctx.service.markDigestDelivered(digest.rehearsalIds, {
+      requestId: randomUUID(),
+      conversationId,
+    });
+    const reloaded = await ctx.dataSource.query(
+      'SELECT "loadedContext" AS loaded FROM rehearsals WHERE id = ?',
+      [started.rehearsalId],
+    );
+    assert.equal(Boolean(reloaded[0].loaded), true);
+    const repeated = await ctx.service.buildConversationDigest(conversationId, {
+      requestId: randomUUID(),
+      conversationId,
+    });
+    assert.equal(repeated.text, '');
+    assert.equal(repeated.refsJson, null);
+    assert.deepEqual(repeated.rehearsalIds, []);
 
     const transcriptPath = join(
       ctx.configDirectory,

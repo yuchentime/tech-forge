@@ -90,3 +90,26 @@ test('entries that were never composed are left untouched', () => {
     'assistant',
   );
 });
+
+test('durable custom message entries survive the snapshot cleanup', () => {
+  const custom = {
+    type: 'custom_message',
+    id: 'c1',
+    parentId: null,
+    timestamp: 1,
+    customType: 'rehearsal_digest',
+    content: '## 此前的演练记录\n\n## 用户输入\n这不是分隔符',
+    display: false,
+  };
+  const entries = [
+    custom,
+    messageEntry('u1', 'user', '## 本轮用户附加的文件\n\n正文\n\n## 用户输入\n问题'),
+  ];
+
+  const cleaned = replaceInjectedUserText(entries, '问题');
+
+  // The digest is delivered once through a custom entry; stripping it would lose it forever.
+  assert.equal(cleaned[0], custom);
+  assert.equal(cleaned[1].message.content, '问题');
+});
+

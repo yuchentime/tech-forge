@@ -71,6 +71,14 @@ export interface LlmRequestOptions {
    */
   promptContext?: string;
   /**
+   * Durable context appended to the Pi session as its own custom message entry.
+   *
+   * Unlike `promptContext`, this survives the snapshot cleanup: Pi keeps the entry, later turns
+   * restore it, and the model reads it as a regular user message instead of the system prompt.
+   * `display: false` keeps it out of the visible transcript, so callers must send it exactly once.
+   */
+  contextMessage?: { type: string; text: string };
+  /**
    * Called after the Agent created or modified a file, with the resolved absolute path.
    *
    * The chat layer uses it to index artifacts; the LLM layer stays unaware of that store.
@@ -379,6 +387,17 @@ export class LlmService {
       // 先启动底层模型请求，它与下方消费队列的循环并行推进。
       // 请求成功或失败时都设置结束状态并唤醒循环，避免最后没有新片段时一直等待。
       phase = "provider_run";
+      // Durable context goes in as a message entry, never into the system prompt or the user text:
+      // Pi stores it in the session, so the snapshot restores it on later turns instead of the
+      // caller re-sending it every time. Appended before the usage read so logs include its tokens.
+      const contextEntry = options.contextMessage;
+      if (contextEntry && contextEntry.text.trim()) {
+        session.sessionManager.appendCustomMessageEntry(
+          contextEntry.type,
+          contextEntry.text.trim(),
+          false,
+        );
+      }
       const startingContextUsage = session.getContextUsage();
       writeStructuredEvent(this.logger, "log", "llm.provider_run.started", {
         ...logContext,

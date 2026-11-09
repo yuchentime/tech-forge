@@ -178,9 +178,14 @@ export class ChatService {
       };
 
       phase = 'rehearsal.digest';
-      let rehearsalDigest: { text: string; refsJson: string | null } = {
+      let rehearsalDigest: {
+        text: string;
+        refsJson: string | null;
+        rehearsalIds: string[];
+      } = {
         text: '',
         refsJson: null,
+        rehearsalIds: [],
       };
       try {
         rehearsalDigest = await this.rehearsals.buildConversationDigest(
@@ -194,6 +199,11 @@ export class ChatService {
             logContext,
           );
         }
+        // The digest becomes a durable Pi message entry below, so it must not be built again.
+        await this.rehearsals.markDigestDelivered(
+          rehearsalDigest.rehearsalIds,
+          logContext,
+        );
       } catch (error) {
         // A broken drill record must not block the normal conversation.
         writeStructuredEvent(
@@ -306,12 +316,9 @@ export class ChatService {
 
       // Per-turn reference material travels with the user message, never in the system prompt:
       // the system prompt must stay identical across turns for provider prefix caching, and the
-      // snapshot is cleaned of this block before it is stored.
-      const promptContext = [
-        rehearsalDigest.text,
-        attachmentContext,
-        knowledgeContext?.text,
-      ]
+      // snapshot is cleaned of this block before it is stored. The rehearsal digest is not part of
+      // it: it is appended once as a durable Pi message entry (see `contextMessage` below).
+      const promptContext = [attachmentContext, knowledgeContext?.text]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
 
@@ -330,6 +337,9 @@ export class ChatService {
         requestId,
         signal,
         promptContext: promptContext === '' ? undefined : promptContext,
+        contextMessage: rehearsalDigest.text
+          ? { type: 'rehearsal_digest', text: rehearsalDigest.text }
+          : undefined,
         // Every successful write is indexed against this turn, so the response footer and the
         // sidebar can list it without parsing tool events.
         onFileWritten: async ({ absolutePath }) => {

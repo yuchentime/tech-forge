@@ -69,10 +69,11 @@ stateDiagram-v2
 
 - 评估完成时写 `rehearsals.overallEvaluationJson` 与各 turn 的 `evaluationJson`，并写 transcript：
   `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md`。
-- 普通对话每轮由 `ChatService` 调用 `RehearsalsService.buildConversationDigest()`，把最近 3 次 completed 演练的摘要放进本轮 `promptContext`；总长度封顶 6000 字符。
+- 普通对话由 `ChatService` 调用 `RehearsalsService.buildConversationDigest()`，只取 `loadedContext = 0` 的最近 3 次 completed 演练摘要，总长度封顶 6000 字符。
+- 摘要不拼进本轮 user 文本：`LlmService.stream()` 在 `session.prompt()` 前用 `appendCustomMessageEntry(..., display: false)` 追加一条 `rehearsal_digest` custom message entry，随后 `markDigestDelivered()` 置 `loadedContext = 1`。一次投递后 `Pi` 快照继续携带，不再重复注入。
 - digest 包含主题、学生画像、逐题问题/回答摘要/评估、总体薄弱点/建议和 transcript 路径；普通 Agent 可用 `read` 读取完整记录。
-- `contextRefsJson.rehearsals` 记录本轮实际注入的 `rehearsalIds` 与字符数；`ConversationsService.mergeUserMessageContextRefs()` 与 attachments / knowledge 合并，不再整体覆盖。
-- `LlmService` 保存 Pi 快照前用 `replaceInjectedUserText()` 清除本轮和历史的注入块；它同时处理字符串与 text-block 内容，并用代码写死的注入标题 + `## 用户输入` 分隔符清理旧快照。
+- `contextRefsJson.rehearsals` 记录本次投递的 `rehearsalIds` 与字符数；`ConversationsService.mergeUserMessageContextRefs()` 与 attachments / knowledge 合并，不再整体覆盖。
+- `LlmService` 保存 Pi 快照前用 `replaceInjectedUserText()` 清除本轮和历史的附件/知识块注入；它同时处理字符串与 text-block 内容，并用代码写死的注入标题 + `## 用户输入` 分隔符清理旧快照。`custom_message` entry 不在清理范围内，因此 digest 得以留存。
 - 普通对话继续接收已完成演练的摘要上下文；演练评估报告通过演练模式中的历史记录查看，不在普通对话区域单独展示卡片。
 
 ### 历史记录
@@ -105,7 +106,8 @@ stateDiagram-v2
 
 - 报告生成失败时，历史和报告页只显示逐题数据，不伪造总体结论。
 - 零回答结束走丢弃，不产生报告；已有回答时丢弃返回 409。
-- 普通对话 digest 每轮重复注入，token 成本随最近 3 次报告长度增长；完整原文留在 transcript。
+- 普通对话 digest 只投递一次：`loadedContext = 1` 后不再重建，token 成本只发生一次；本轮若在真正追加到 session 前被取消，这批演练不会补投（at-most-once），失败与取消路径只记录日志。
+- 投递后的 digest 随 Pi 快照持久化：报告重算或演练被丢弃后，模型上下文中仍是投递时的文本，transcript 路径可能已失效；完整原文留在 transcript。
 - 开场复用父 Pi 快照时，模型可能延续普通对话语气；system prompt 已强制角色切换，但仍需真实长对话验收。
 - v1 使用 JSON 请求/响应，不做 SSE；没有跨会话演练历史、报告导出、人工重评或计划编辑。
 - 15 问总上限包含追问，基础题实际数量可能是 5–15。

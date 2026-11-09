@@ -951,16 +951,19 @@ export class RehearsalsService {
   }
 
   /**
-   * Builds the normal-chat digest for completed rehearsals.
+   * Builds the normal-chat digest for rehearsals that have not been delivered yet.
    *
    * A failure here never blocks the chat turn: the caller logs it and continues without the digest.
+   * The caller marks the returned ids as delivered once they enter the context.
    */
   async buildConversationDigest(
     conversationId: string,
     logContext: RequestLogContext,
-  ): Promise<{ text: string; refsJson: string | null }> {
+  ): Promise<{ text: string; refsJson: string | null; rehearsalIds: string[] }> {
     try {
-      const items = await this.loadDigestItems(conversationId);
+      const items = await this.loadDigestItems(conversationId, {
+        undeliveredOnly: true,
+      });
       const result = renderRehearsalDigest(items);
       for (const item of items) {
         this.ensureTranscript(item.rehearsal, item.turns);
@@ -987,14 +990,46 @@ export class RehearsalsService {
           },
         );
       }
-      return { text: result.text, refsJson };
+      return {
+        text: result.text,
+        refsJson,
+        rehearsalIds: result.rehearsalIds,
+      };
     } catch (error) {
       writeStructuredEvent(this.logger, 'warn', 'rehearsal.digest.failed', {
         ...logContext,
         conversationId,
         ...getSafeErrorLogFields(error),
       });
-      return { text: '', refsJson: null };
+      return { text: '', refsJson: null, rehearsalIds: [] };
+    }
+  }
+
+  /**
+   * Marks rehearsals whose evaluation entered the Pi context, so it is never appended twice.
+   *
+   * A failed update only logs: the worst case is one duplicated digest on the next turn.
+   */
+  async markDigestDelivered(
+    rehearsalIds: readonly string[],
+    logContext: RequestLogContext,
+  ): Promise<void> {
+    if (rehearsalIds.length === 0) return;
+    try {
+      await this.dataSource
+        .getRepository(RehearsalEntity)
+        .update({ id: In([...rehearsalIds]) }, { loadedContext: true });
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        'warn',
+        'rehearsal.digest.mark_delivered_failed',
+        {
+          ...logContext,
+          rehearsalCount: rehearsalIds.length,
+          ...getSafeErrorLogFields(error),
+        },
+      );
     }
   }
 
@@ -1312,14 +1347,25 @@ export class RehearsalsService {
     });
   }
 
-  /** Loads completed rehearsals and their turns for digest/summary generation. */
+  /**
+   * Loads completed rehearsals and their turns for digest/summary generation.
+   *
+   * `undeliveredOnly` serves the normal-chat digest: a rehearsal that already entered the Pi
+   * context is never appended again. The drill's own opening plan reads every prior batch, because
+   * its summary is prompt material, not delivered context.
+   */
   private async loadDigestItems(
     conversationId: string,
+    options: { undeliveredOnly?: boolean } = {},
   ): Promise<RehearsalDigestItem[]> {
     const rehearsals = await this.dataSource
       .getRepository(RehearsalEntity)
       .find({
-        where: { conversationId, status: 'completed' },
+        where: {
+          conversationId,
+          status: 'completed',
+          ...(options.undeliveredOnly ? { loadedContext: false } : {}),
+        },
         order: { endedAt: 'DESC', createdAt: 'DESC' },
         take: 3,
       });

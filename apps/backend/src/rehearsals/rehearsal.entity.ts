@@ -65,6 +65,15 @@ export class RehearsalEntity {
   @Column({ type: 'varchar', nullable: true })
   endReason!: string | null;
 
+  /**
+   * Whether the normal-chat digest already carried this rehearsal into the Pi context.
+   *
+   * Delivery is one-shot: the digest is appended as a custom message entry, so the model keeps
+   * seeing it from the snapshot instead of receiving it again on every turn.
+   */
+  @Column({ type: 'boolean', default: false })
+  loadedContext!: boolean;
+
   @Column({ type: 'datetime', nullable: true })
   startedAt!: Date | null;
 

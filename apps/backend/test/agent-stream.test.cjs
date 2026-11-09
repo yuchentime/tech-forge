@@ -81,7 +81,12 @@ test('ChatService delegates the prompt and request signal to the configured mode
     finishTurn: async () => undefined,
   };
   const rehearsals = {
-    buildConversationDigest: async () => ({ text: '', refsJson: null }),
+    buildConversationDigest: async () => ({
+      text: '',
+      refsJson: null,
+      rehearsalIds: [],
+    }),
+    markDigestDelivered: async () => undefined,
   };
   const service = new ChatService(
     llm,
@@ -276,4 +281,129 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
   assert.equal(abortCalled, true);
   assert.equal(unsubscribeCalled, true);
   assert.equal(disposeCalled, true);
+});
+
+test('durable context is appended as its own Pi message entry before prompting', async () => {
+  const calls = [];
+  const session = {
+    subscribe() {
+      return () => undefined;
+    },
+    prompt(prompt) {
+      calls.push(['prompt', prompt]);
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    getLastAssistantText() {
+      return '回答';
+    },
+    getContextUsage: () => undefined,
+    sessionManager: {
+      getEntries: () => [],
+      appendCustomMessageEntry(type, content, display) {
+        calls.push(['append', type, content, display]);
+        return 'entry-1';
+      },
+    },
+  };
+  const service = new LlmService(
+    {},
+    {},
+    {
+      getLlmSettings: async () => ({
+        provider: 'deepseek',
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
+      }),
+    },
+    {},
+  );
+  service.createSession = async () => session;
+
+  await collect(service.stream('问题'));
+  await collect(
+    service.stream('问题', {
+      contextMessage: {
+        type: 'rehearsal_digest',
+        text: '## 此前的演练记录\n背景',
+      },
+    }),
+  );
+
+  assert.deepEqual(calls, [
+    ['prompt', '问题'],
+    ['append', 'rehearsal_digest', '## 此前的演练记录\n背景', false],
+    ['prompt', '问题'],
+  ]);
+});
+
+test('ChatService hands the rehearsal digest over once and marks it delivered', async () => {
+  const options = [];
+  const marked = [];
+  const refs = [];
+  const llm = {
+    stream(prompt, streamOptions) {
+      options.push(streamOptions);
+      return (async function* () {})();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async (messageId, refsJson) => {
+      refs.push([messageId, JSON.parse(refsJson)]);
+    },
+    startToolExecution: async () => 'tool-row-1',
+    updateToolExecution: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({
+      text: '## 此前的演练记录\n薄弱点：MECE',
+      refsJson: '{"rehearsals":{"rehearsalIds":["rehearsal-1"],"characters":24}}',
+      rehearsalIds: ['rehearsal-1'],
+    }),
+    markDigestDelivered: async (rehearsalIds) => {
+      marked.push(...rehearsalIds);
+    },
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+  );
+
+  await collect(
+    service.stream(
+      '我哪里薄弱',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  assert.equal(options.length, 1);
+  // The digest travels as durable context, not as per-turn text that the snapshot would strip.
+  assert.deepEqual(options[0].contextMessage, {
+    type: 'rehearsal_digest',
+    text: '## 此前的演练记录\n薄弱点：MECE',
+  });
+  assert.equal(options[0].promptContext, undefined);
+  assert.deepEqual(marked, ['rehearsal-1']);
+  assert.deepEqual(refs, [
+    [
+      'user-1',
+      { rehearsals: { rehearsalIds: ['rehearsal-1'], characters: 24 } },
+    ],
+  ]);
 });
