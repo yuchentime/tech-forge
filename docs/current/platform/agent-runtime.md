@@ -33,7 +33,8 @@ last_verified: 2026-11-09
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider、SOULS.md 和 workspace；以 workspace 统一 Pi cwd，组合系统提示词并注册扩展和持久化钩子。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider、SOULS.md 和 workspace；以 workspace 统一 Pi cwd，组合系统提示词，装载 `pi-memory` 文件扩展并注册持久化钩子。 |
+| `pi-memory` 扩展 | 由 `additionalExtensionPaths` 装载的第三方 Pi 扩展：注册 `memory_write`、`memory_read`、`memory_search`、`memory_forget`、`memory_restore`、`scratchpad`、`memory_status`，并在每轮把记忆快照追加到系统提示词。记忆是纯 Markdown，默认位于 `~/.pi/agent/memory/`（`PI_MEMORY_DIR` 可覆盖），按用户而非会话隔离。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在 workspace，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
@@ -110,6 +111,10 @@ sequenceDiagram
 
 Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
 
+扩展只走两条通道：`DefaultResourceLoader.extensionFactories` 里的进程内工厂（对话持久化钩子），以及 `additionalExtensionPaths` 指定的文件扩展（`pi-memory`，路径从 `pi-memory/package.json` 解析到 `index.ts`，由 Pi 自己用 jiti 编译该 TypeScript 文件——本 backend 是 CommonJS，无法直接 import 它）。`noExtensions: true` 只关闭包发现，不关闭这两条通道。
+
+`createAgentSession({ tools })` 的列表是对**所有**已注册工具（含扩展工具）的 allowlist，因此除 `read`/`edit`/`write`/`grep` 外还列出 `memory_*` 与 `scratchpad`；漏掉会让扩展工具被静默过滤，模型完全看不到。会话创建后调用 `session.bindExtensions({})`，扩展才能收到 `session_start`：`pi-memory` 在这里探测 qmd（未安装时 `memory_search` 返回安装说明）并生成记忆快照，随后每轮由 `before_agent_start` 把快照追加到系统提示词；记忆为空时不追加任何内容。
+
 ## 持久化与恢复约定
 
 `beginTurn()` 按 `sequenceNo` 读取该对话的全部消息行，对账上次中断的轮次，然后在模型调用前保存新的 `user/completed` 行和 `assistantTurn/pending` 标记。
@@ -144,7 +149,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 Renderer 的会话摘要通过 `GET /api/conversations` 读取。选中会话时，`GET /api/conversations/:conversationId/messages` 默认返回最近最多 30 条可见 user/assistant 文本和 `hasMore`；user 行可包含其轮次的安全工具摘要。用户点击“查看更早的消息”后，Renderer 以最早已加载消息 ID 查询前一页并前置到 LocalRuntime，同时按持久 user message ID 恢复工具活动。接口不返回完整工具参数、partial/final result、toolResult 或 Pi 原始 payload。该 UI 分页不改变下一轮 Agent 请求从 SQLite 恢复完整模型历史的行为。
 
-`conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。`AgentEventBus` 独立恢复 user 行下的工具摘要；历史活动没有请求 ID，也不显示未持久化的整轮耗时。`tool-activity-label.ts` 把每个工具调用转成普通用户措辞：`read`/`write`/`edit` 为“正在/已读取、写入、编辑 + 文件名”，`grep` 为“搜索 + 搜索词 + 文件名”，只读取 `path` 与 `pattern` 两个参数。桌面回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`。
+`conversation-history.ts` 将历史 DTO 转为 LocalRuntime 消息：保留 ID、角色、文本和时间，仅 assistant 携带 `status`。存储/API 的 user 状态不能直接传给 assistant-ui，否则即使 HTTP 200，`thread.reset()` 也会抛错。`AgentEventBus` 独立恢复 user 行下的工具摘要；历史活动没有请求 ID，也不显示未持久化的整轮耗时。`tool-activity-label.ts` 把每个工具调用转成普通用户措辞：`read`/`write`/`edit` 为“正在/已读取、写入、编辑 + 文件名”，`grep` 为“搜索 + 搜索词 + 文件名”，`pi-memory` 的 `memory_*` 与 `scratchpad` 用固定动词（记录/读取/搜索/删除/恢复/检查记忆、更新便签）且不带目标；只读取 `path` 与 `pattern` 两个参数。桌面回归命令为 `npm run test:conversation-history --workspace @teachforge/desktop`。
 
 Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` 消息以带格式标记的 JSON 保存在 `contentJson`。工具执行元数据、部分输出、最终结果和终态保存在独立的 `toolExecution` 行中。`assistantTurn` 和 `toolExecution` 行不会作为模型消息发送。
 
@@ -166,6 +171,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/SOULS；知识库根（`knowledge/`）默认拒绝读取，只有当前用户请求明确点名该路径时才建立一次性读取许可；创建、编辑和建目录默认必须位于 backend 配置的 Agent workspace。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
+7. `pi-memory` 直接读写 `~/.pi/agent/memory/`（`PI_MEMORY_DIR` 可覆盖）下的记忆 Markdown；目标是扩展内的固定常量，不接受模型选择的路径，因此不经过 `workspace-file-tools.ts` 的授权检查，也不进入 SQLite、SSE 或历史接口。记忆按用户全局共享，不按会话隔离；把记忆搬进 workspace、知识库或会话目录都会破坏这条边界。
 
 ## 代码入口
 
@@ -175,6 +181,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
+- 第三方文件扩展：`pi-memory`（backend 依赖，经 `additionalExtensionPaths` 装载）；记忆目录默认 `~/.pi/agent/memory/`
 - SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`、`pi-session-snapshot.entity.ts`
 - Pi session 快照读写与恢复选择：`apps/backend/src/conversations/pi-session-snapshots.service.ts`
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`

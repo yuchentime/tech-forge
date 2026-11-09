@@ -39,6 +39,7 @@
     "fastify": "^5.12.8",
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.5.438",
+    "pi-memory": "^0.4.2",
     "pi-subagents": "^0.86.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",

@@ -7,6 +7,14 @@ const TOOL_VERBS: Readonly<Record<string, string>> = {
   write: '写入',
   edit: '编辑',
   grep: '搜索',
+  // pi-memory 扩展注册的工具；它们没有 path 参数，只借用同一套动词措辞。
+  memory_write: '记录记忆',
+  memory_read: '读取记忆',
+  memory_search: '搜索记忆',
+  memory_forget: '删除记忆',
+  memory_restore: '恢复记忆',
+  memory_status: '检查记忆',
+  scratchpad: '更新便签',
 };
 
 /** Describes one tool call as a plain-language action plus its visible target. */

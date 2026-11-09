@@ -79,10 +79,33 @@ export interface LlmStreamOptions extends LlmRequestOptions {
 
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 
+/**
+ * Pi tool names registered by pi-memory.
+ *
+ * The `tools` list passed to `createAgentSession` is an allowlist for every registered tool,
+ * extension tools included, so leaving these out silently filters them away from the model.
+ */
+const PI_MEMORY_TOOL_PATTERNS = ["memory_*", "scratchpad"];
+
 // The backend is compiled as CommonJS while Pi publishes an ESM-only entry point.
 const importPiSdk = new Function("specifier", "return import(specifier)") as (
   specifier: string,
 ) => Promise<PiSdk>;
+
+/**
+ * Resolves the installed pi-memory extension entry for the Pi resource loader.
+ *
+ * pi-memory ships untranspiled TypeScript and is ESM-only, so this CommonJS backend cannot import
+ * it directly. The Pi loader compiles extension files itself (jiti), which is how a path inside
+ * `node_modules` becomes a loaded extension.
+ */
+function resolvePiMemoryExtensionPath(): string {
+  const packageRoot = dirname(require.resolve("pi-memory/package.json"));
+  return join(packageRoot, "index.ts");
+}
+
+/** Absolute path of pi-memory's entry file, resolved once per process. */
+const PI_MEMORY_EXTENSION_PATH = resolvePiMemoryExtensionPath();
 
 /** Identifies which stored context the Pi session was rebuilt from. */
 type SessionRestoreSource = "session_snapshot" | "rebuilt_history";
@@ -558,6 +581,8 @@ export class LlmService {
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
       // already-built context block into this request.
       const customTools = [...workspaceFileTools];
+      // pi-memory is loaded as a real extension (see PI_MEMORY_EXTENSION_PATH) so it can register
+      // its tools and inject the memory snapshot into the system prompt.
       const extensionFactories: PiExtensionFactory[] = [];
       if (options.persistConversationEvent) {
         extensionFactories.push(
@@ -584,6 +609,8 @@ export class LlmService {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
+        // `noExtensions` only disables discovered packages; these explicit sources still load.
+        additionalExtensionPaths: [PI_MEMORY_EXTENSION_PATH],
         extensionFactories,
         additionalSkillPaths: [join("skills")],
         additionalPromptTemplatePaths: [join("prompts")],
@@ -642,10 +669,20 @@ export class LlmService {
         resourceLoader,
         sessionManager,
         settingsManager,
-        tools: ["read", "edit", "write", "grep"],
+        // The allowlist covers every registered tool name, so extension tools are listed too.
+        tools: ["read", "edit", "write", "grep", ...PI_MEMORY_TOOL_PATTERNS],
         excludeTools: ["bash"],
         customTools,
       });
+
+      // Extensions receive `session_start` only through this binding. pi-memory uses it to probe
+      // qmd and build the memory snapshot that later turns inject into the system prompt.
+      phase = "extension_bind";
+      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
+        ...logContext,
+        phase,
+      });
+      await session.bindExtensions({});
 
       writeStructuredEvent(this.logger, "log", "llm.session.create.completed", {
         ...logContext,
