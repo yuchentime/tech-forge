@@ -59,7 +59,7 @@ export function RehearsalHistory({
           onClick={onBack}
           type="button"
         >
-          返回当前演练
+          返回
         </button>
       </div>
 

@@ -49,10 +49,8 @@ import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
-import { RehearsalDigestCard } from '../rehearsal/RehearsalDigestCard';
 import { hasCompletedConversationRound } from '../rehearsal/rehearsal-availability';
 import { RehearsalMode } from '../rehearsal/RehearsalMode';
-import { rehearsalStore } from '../rehearsal/rehearsal-store';
 import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
@@ -437,25 +435,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   const isHistoryLoading = loadingConversationId !== null;
   const isRehearsalMode = conversationDisplayMode === 'rehearsal';
-  const openRehearsalHistory = useCallback(() => {
-    setConversationDisplayMode('rehearsal');
-    const conversationId = conversationState.activeConversationId;
-    void (async () => {
-      await rehearsalStore.loadForConversation(conversationId);
-      await rehearsalStore.openHistory();
-    })();
-  }, [conversationState.activeConversationId]);
-  const openRehearsalReport = useCallback(
-    (rehearsalId: string) => {
-      setConversationDisplayMode('rehearsal');
-      const conversationId = conversationState.activeConversationId;
-      void (async () => {
-        await rehearsalStore.loadForConversation(conversationId);
-        await rehearsalStore.openHistoryDetail(rehearsalId);
-      })();
-    },
-    [conversationState.activeConversationId],
-  );
   const isInitialListLoading =
     !hasLoadedInitialList && conversationState.listStatus !== 'error';
   const activeConversation = conversationState.conversations.find(
@@ -578,12 +557,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     )}
                   </div>
                 )}
-
-                <RehearsalDigestCard
-                  conversationId={conversationState.activeConversationId}
-                  onOpenHistory={openRehearsalHistory}
-                  onOpenReport={openRehearsalReport}
-                />
 
                 {isHistoryLoading || isInitialListLoading ? (
                   <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">

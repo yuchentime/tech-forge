@@ -20,7 +20,7 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
-| 演练模式（已实现） | 独立 Rehearsal 状态机；学生画像；15 问总限额与单题 2 次追问；跳过/手动结束/上限报告；历史演练列表与只读详情；普通对话摘要注入与独立评估卡片 | [简报](2026-11-09-rehearsal-mode/brief.md) · [设计](2026-11-09-rehearsal-mode/design.md) · [任务](2026-11-09-rehearsal-mode/tasks.md) · [验收](2026-11-09-rehearsal-mode/verification.md) · [实施记录](2026-11-09-rehearsal-mode/worklog.md) |
+| 演练模式（已实现） | 独立 Rehearsal 状态机；学生画像；15 问总限额与单题 2 次追问；跳过/手动结束/上限报告；历史演练列表与只读详情；普通对话摘要注入，报告从演练模式历史查看 | [简报](2026-11-09-rehearsal-mode/brief.md) · [设计](2026-11-09-rehearsal-mode/design.md) · [任务](2026-11-09-rehearsal-mode/tasks.md) · [验收](2026-11-09-rehearsal-mode/verification.md) · [实施记录](2026-11-09-rehearsal-mode/worklog.md) |
 | 多会话并行 | 生成中的会话不阻塞切换/新建/发送；每会话独立 `LocalRuntime` 与历史，切走后后台生成继续；运行态按会话隔离；运行中的会话不可删除 | [简报](2026-11-09-concurrent-conversations/brief.md) · [设计](2026-11-09-concurrent-conversations/design.md) · [设计评审：PASS_WITH_WARNINGS](2026-11-09-concurrent-conversations/reviews/index.md) |
 | Local Knowledge Retrieval | 本地知识库：解析、分块、词法索引、向量化与双通道检索已实现；会话编排见下一条 | [简报](2026-11-08-knowledge-retrieval/brief.md) · [设计](2026-11-08-knowledge-retrieval/design.md) · [验收](2026-11-08-knowledge-retrieval/verification.md) · [工作记录](2026-11-08-knowledge-retrieval/worklog.md) |
 | `/知识库` 斜杠注入 | 检索触发权归用户：命令解析、会话范围、整篇文档注入、token 预算、按版本去重与 `contextRefsJson`；删除 Agent 检索工具 | [简报](2026-11-09-knowledge-command-context/brief.md) · [验收](2026-11-09-knowledge-command-context/verification.md) |

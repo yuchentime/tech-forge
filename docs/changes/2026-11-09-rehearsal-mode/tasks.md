@@ -78,7 +78,7 @@ created_at: 2026-11-09
 - [ ] 后端测试 `rehearsal.test.cjs`：B1–B26，含历史列表/分页/范围/状态筛选。
 - [ ] 后端测试 `rehearsal-digest.test.cjs`：digest 注入、contextRefs、快照清洗。
 - [ ] 桌面测试 `rehearsal-mode.test.cjs`：U1–U18，含历史入口/列表/详情/分页/不打断当前演练。
-- [ ] 真实 Provider smoke：普通对话 → 演练 → 追问/跳过 → 报告 → 普通对话复习 → 新的演练。
+- [ ] 真实 Provider smoke：普通对话 → 演练 → 追问/跳过 → 报告 → 普通对话复习 → 开始新的演练。
 - [ ] 检查 SQLite：父快照未变、`messages` 无演练行、rehearsals/turns 完整、删除级联正常。
 - [ ] 更新 `docs/current/platform/agent-runtime.md`、`architecture-and-code-placement.md`、conversation 相关页面。
 - [ ] 新增或更新 decision 记录：互斥模式、digest 同步、模型不提前结束。

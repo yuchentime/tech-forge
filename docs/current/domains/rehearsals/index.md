@@ -73,7 +73,7 @@ stateDiagram-v2
 - digest 包含主题、学生画像、逐题问题/回答摘要/评估、总体薄弱点/建议和 transcript 路径；普通 Agent 可用 `read` 读取完整记录。
 - `contextRefsJson.rehearsals` 记录本轮实际注入的 `rehearsalIds` 与字符数；`ConversationsService.mergeUserMessageContextRefs()` 与 attachments / knowledge 合并，不再整体覆盖。
 - `LlmService` 保存 Pi 快照前用 `replaceInjectedUserText()` 清除本轮和历史的注入块；它同时处理字符串与 text-block 内容，并用代码写死的注入标题 + `## 用户输入` 分隔符清理旧快照。
-- 普通对话 UI 用独立「演练评估」卡片展示最近一次 completed 报告，不追加 assistant 消息。
+- 普通对话继续接收已完成演练的摘要上下文；演练评估报告通过演练模式中的历史记录查看，不在普通对话区域单独展示卡片。
 
 ### 历史记录
 
