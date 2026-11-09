@@ -15,6 +15,7 @@ last_verified: 2026-11-07
 | 责任单元 | 当前事实与入口 |
 |---|---|
 | 前后端代码放置 | [架构与代码放置指南](architecture-and-code-placement.md) |
+| 技术栈 | [当前技术栈](tech-stack.md) |
 | Agent 运行与扩展边界 | [Agent Runtime](agent-runtime.md) |
 | 本机模型与风格设置 | [本机 Agent 设置](../domains/system-settings/index.md) |
 
