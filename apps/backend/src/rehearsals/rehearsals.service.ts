@@ -5,12 +5,14 @@ import {
   GatewayTimeoutException,
   HttpException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DataSource, In, type EntityManager } from 'typeorm';
 import {
@@ -30,7 +32,9 @@ import {
   DIGEST_SUMMARY_CHARS,
   GENERATE_TIMEOUT_MS,
   MAX_FOLLOW_UPS,
+  MAX_PERSONA_LENGTH,
   MAX_TOTAL_QUESTIONS,
+  PERSONA_FILE_NAME,
   RECONCILE_STALE_MS,
 } from './rehearsal.constants';
 import {
@@ -1029,6 +1033,81 @@ export class RehearsalsService {
           rehearsalCount: rehearsalIds.length,
           ...getSafeErrorLogFields(error),
         },
+      );
+    }
+  }
+
+  /**
+   * Reads the student persona shared by every conversation's drill.
+   *
+   * It lives in `<configDir>/rehearsal-persona.txt`, not SQLite: one local preference the user edits
+   * as plain text, not per-rehearsal state. A missing file simply means "no persona yet".
+   */
+  async getPersona(): Promise<{ persona: string }> {
+    const path = join(this.settings.getConfigDirectory(), PERSONA_FILE_NAME);
+    try {
+      const text = await readFile(path, 'utf8');
+      return { persona: text.trim().slice(0, MAX_PERSONA_LENGTH) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { persona: '' };
+      }
+      writeStructuredEvent(
+        this.logger,
+        'warn',
+        'rehearsal.persona.read_failed',
+        {
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw new InternalServerErrorException(
+        '无法读取本机学生画像文件，请检查 .tech-forge 目录权限。',
+      );
+    }
+  }
+
+  /**
+   * Replaces the shared persona file through a same-directory temporary file and rename.
+   *
+   * The editor saves on blur, so a partial write must never become the stored persona.
+   */
+  async savePersona(
+    persona: string,
+    logContext: RequestLogContext,
+  ): Promise<{ persona: string }> {
+    const normalized = persona.trim();
+    if (normalized.length > MAX_PERSONA_LENGTH) {
+      throw new BadRequestException(
+        `学生画像不能超过 ${MAX_PERSONA_LENGTH} 个字符。`,
+      );
+    }
+    const path = join(this.settings.getConfigDirectory(), PERSONA_FILE_NAME);
+    const temporaryPath = `${path}.${randomUUID()}.tmp`;
+    try {
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      await writeFile(temporaryPath, normalized, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await rename(temporaryPath, path);
+      writeStructuredEvent(this.logger, 'log', 'rehearsal.persona.saved', {
+        ...logContext,
+        characters: normalized.length,
+      });
+      return { persona: normalized };
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      writeStructuredEvent(
+        this.logger,
+        'error',
+        'rehearsal.persona.save_failed',
+        {
+          ...logContext,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw new InternalServerErrorException(
+        '无法保存本机学生画像文件，请检查 .tech-forge 目录权限。',
       );
     }
   }

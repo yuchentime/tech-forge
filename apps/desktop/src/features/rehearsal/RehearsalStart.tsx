@@ -4,16 +4,20 @@ import { useEffect, useState } from 'react';
 /** Optional student profile input and the primary start action. */
 export function RehearsalStart({
   persona,
+  personaError,
   isStarting,
   error,
   disabledReason,
   onStart,
+  onSavePersona,
 }: {
   persona: string;
+  personaError: string | null;
   isStarting: boolean;
   error: string | null;
   disabledReason: string | null;
   onStart: (persona: string) => void;
+  onSavePersona: (persona: string) => void;
 }) {
   const [draft, setDraft] = useState(persona);
 
@@ -45,6 +49,9 @@ export function RehearsalStart({
             className="mt-2 min-h-24 w-full resize-y rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm leading-6 text-stone-900 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-800/10"
             id="rehearsal-persona"
             maxLength={1000}
+            onBlur={() => {
+              if (draft !== persona) onSavePersona(draft);
+            }}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="例如：初二学生，喜欢追问“为什么”，对抽象定义不敏感，需要具体例子；会质疑老师回答中跳过的步骤。"
             value={draft}
@@ -52,6 +59,11 @@ export function RehearsalStart({
           <p className="mt-1.5 text-xs text-stone-500">
             留空则使用默认的好奇学生画像。画像只影响提问视角，不改变演练规则。
           </p>
+          {personaError && (
+            <p className="mt-1.5 text-xs text-rose-700" role="alert">
+              {personaError}
+            </p>
+          )}
 
           {error && (
             <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">

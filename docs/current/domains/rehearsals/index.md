@@ -28,6 +28,7 @@ last_verified: 2026-11-09
 - 后续答题、跳过和报告调用只带 `learningSummary + plan + 已有问答 + 当前状态`，不再重复注入完整普通历史。
 - 演练 Agent 使用代码写死的 system prompt，不加载 SOULS/style preference、不加载 pi-memory、注册空工具列表；它不能写文件或执行命令。
 - 学生画像可选，最多 1000 字符；它只影响提问视角，不覆盖输出格式与规则。
+- 学生画像持久化在 `<configDir>/rehearsal-persona.txt`（默认 `~/.tech-forge/rehearsal-persona.txt`），不建表、不按会话隔离：任何会话进入演练模式都读取同一份文本，编辑器失焦时通过 `PUT /api/rehearsal-persona` 原子写回；空文件等价于"没有画像"，此时使用默认好奇学生画像。每次开始演练仍把当时的文本作为 `persona` 传给 start 接口，历史演练保留各自投递时的 `personaText`。
 
 ### 状态机
 

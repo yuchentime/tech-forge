@@ -48,6 +48,8 @@ routes:
       - docs/changes/2026-11-09-rehearsal-mode/brief.md
       - docs/changes/2026-11-09-rehearsal-digest-delivery/brief.md
       - docs/changes/2026-11-09-rehearsal-digest-delivery/verification.md
+      - docs/changes/2026-11-10-rehearsal-persona-persistence/brief.md
+      - docs/changes/2026-11-10-rehearsal-persona-persistence/verification.md
       - docs/current/domains/rehearsals/api-contract.md
       - docs/changes/2026-11-09-rehearsal-mode/tasks.md
       - docs/changes/2026-11-09-rehearsal-mode/verification.md

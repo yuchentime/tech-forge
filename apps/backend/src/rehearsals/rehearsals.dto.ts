@@ -63,3 +63,10 @@ export class ListRehearsalsQueryDto {
   @IsIn(['all', 'active', 'completed', 'failed'])
   status?: 'all' | 'active' | 'completed' | 'failed';
 }
+
+/** Saves the student persona shared by every conversation's drill. */
+export class SaveRehearsalPersonaDto {
+  @IsString()
+  @MaxLength(MAX_PERSONA_LENGTH)
+  persona!: string;
+}

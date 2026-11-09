@@ -149,6 +149,11 @@ export class SettingsService implements OnModuleInit {
     return this.knowledgeDirectory;
   }
 
+  /** Returns the local configuration root that owns app files such as the shared drill persona. */
+  getConfigDirectory(): string {
+    return this.configDirectory;
+  }
+
   /** Returns the root for per-conversation session files (attachments and future run data). */
   getSessionsDirectory(): string {
     return this.sessionsDirectory;

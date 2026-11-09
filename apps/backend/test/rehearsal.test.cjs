@@ -128,6 +128,7 @@ async function createContext() {
     conversations,
     llm,
     {
+      getConfigDirectory: () => configDirectory,
       getSessionDirectory: (conversationId) =>
         join(configDirectory, 'sessions', conversationId),
     },
@@ -750,6 +751,40 @@ test('context refs merge keeps attachments, knowledge and rehearsals together', 
     assert.ok(refs.attachments);
     assert.ok(refs.knowledge);
     assert.deepEqual(refs.rehearsals.rehearsalIds, ['r1']);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('the student persona persists in one local file shared by every conversation', async () => {
+  const ctx = await createContext();
+  try {
+    assert.deepEqual(await ctx.service.getPersona(), { persona: '' });
+
+    const saved = await ctx.service.savePersona('  初二学生，喜欢追问为什么  ', {
+      requestId: randomUUID(),
+    });
+    assert.equal(saved.persona, '初二学生，喜欢追问为什么');
+
+    const personaPath = join(ctx.configDirectory, 'rehearsal-persona.txt');
+    assert.equal(readFileSync(personaPath, 'utf8'), '初二学生，喜欢追问为什么');
+    assert.deepEqual(await ctx.service.getPersona(), {
+      persona: '初二学生，喜欢追问为什么',
+    });
+
+    // Empty text clears the file; the drill then falls back to the default student profile.
+    await ctx.service.savePersona('   ', { requestId: randomUUID() });
+    assert.equal(readFileSync(personaPath, 'utf8'), '');
+    assert.deepEqual(await ctx.service.getPersona(), { persona: '' });
+
+    await assert.rejects(
+      () =>
+        ctx.service.savePersona('字'.repeat(1001), {
+          requestId: randomUUID(),
+        }),
+      /1000/,
+    );
+    assert.equal(readFileSync(personaPath, 'utf8'), '');
   } finally {
     await ctx.close();
   }

@@ -202,8 +202,10 @@ export function RehearsalMode({
             }
             error={state.error}
             isStarting={state.isStarting}
+            onSavePersona={(persona) => void rehearsalStore.savePersona(persona)}
             onStart={(persona) => void rehearsalStore.start(persona)}
-            persona={state.detail?.persona ?? ''}
+            persona={state.persona}
+            personaError={state.personaError}
           />
         )}
       </div>

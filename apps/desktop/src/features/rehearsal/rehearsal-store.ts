@@ -5,7 +5,9 @@ import {
   endRehearsal,
   getLatestRehearsal,
   getRehearsal,
+  getRehearsalPersona,
   listRehearsals,
+  saveRehearsalPersona,
   skipRehearsal,
   startRehearsal,
   type RehearsalDetail,
@@ -34,6 +36,9 @@ export interface RehearsalSnapshot {
     requestId: string;
   } | null;
   answerError: string | null;
+  /** Student persona saved on disk; shared by every conversation's drill. */
+  persona: string;
+  personaError: string | null;
   history: RehearsalList | null;
   historyStatus: 'idle' | 'loading' | 'ready' | 'error';
   historyError: string | null;
@@ -55,6 +60,8 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   isEnding: false,
   pendingAnswer: null,
   answerError: null,
+  persona: '',
+  personaError: null,
   history: null,
   historyStatus: 'idle',
   historyError: null,
@@ -127,6 +134,14 @@ export class RehearsalStore {
       conversationId,
       status: 'loading',
     });
+    // The persona file is global, not conversation-scoped: read it on entry and let a failure
+    // degrade to the default persona instead of blocking the drill.
+    const personaLoad = getRehearsalPersona().then(
+      (result) => ({ persona: result.persona, personaError: null }),
+      (error: unknown) => ({
+        personaError: describeFailure(error, '学生画像加载失败。'),
+      }),
+    );
     try {
       const detail = await getLatestRehearsal(conversationId);
       if (this.snapshot.conversationId !== conversationId) return;
@@ -151,6 +166,7 @@ export class RehearsalStore {
         status: 'ready',
         detail,
         pendingAnswer,
+        ...(await personaLoad),
         ...(keepHistoryView
           ? {}
           : { view: detail ? viewFor(detail) : 'start' }),
@@ -159,6 +175,20 @@ export class RehearsalStore {
       this.update({
         status: 'error',
         error: describeFailure(error, '演练状态加载失败。'),
+        ...(await personaLoad),
+      });
+    }
+  }
+
+  /** Persists the shared persona; the start view calls it when the textarea loses focus. */
+  async savePersona(persona: string): Promise<void> {
+    this.update({ persona });
+    try {
+      const saved = await saveRehearsalPersona(persona);
+      this.update({ persona: saved.persona, personaError: null });
+    } catch (error) {
+      this.update({
+        personaError: describeFailure(error, '学生画像保存失败。'),
       });
     }
   }

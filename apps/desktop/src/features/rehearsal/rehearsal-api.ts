@@ -147,7 +147,7 @@ export interface RehearsalTurnResult {
 /** One JSON request through the protected desktop bridge. */
 async function request<T>(
   path: string,
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
   if (!hasDesktopBridge()) {
@@ -239,4 +239,16 @@ export function discardRehearsal(
   rehearsalId: string,
 ): Promise<{ rehearsalId: string; discarded: true }> {
   return request(`/api/rehearsals/${rehearsalId}`, 'DELETE');
+}
+
+/** Reads the student persona shared by every conversation's drill. */
+export function getRehearsalPersona(): Promise<{ persona: string }> {
+  return request('/api/rehearsal-persona', 'GET');
+}
+
+/** Saves the shared student persona; an empty string clears it. */
+export function saveRehearsalPersona(
+  persona: string,
+): Promise<{ persona: string }> {
+  return request('/api/rehearsal-persona', 'PUT', { persona });
 }

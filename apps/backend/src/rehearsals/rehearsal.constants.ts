@@ -6,6 +6,9 @@ export const MAX_ANSWER_LENGTH = 5_000;
 export const MIN_PLAN_POINTS = 3;
 export const MAX_PLAN_POINTS = 8;
 
+/** Local file that carries the student persona across conversations. */
+export const PERSONA_FILE_NAME = 'rehearsal-persona.txt';
+
 /** Model budget for one planning/decision/report call. */
 export const GENERATE_TIMEOUT_MS = 90_000;
 

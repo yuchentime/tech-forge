@@ -9,6 +9,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +20,7 @@ import {
 import {
   AnswerRehearsalDto,
   ListRehearsalsQueryDto,
+  SaveRehearsalPersonaDto,
   SkipRehearsalDto,
   StartRehearsalDto,
 } from './rehearsals.dto';
@@ -192,5 +194,36 @@ export class RehearsalsController {
       requestId,
       rehearsalId,
     });
+  }
+}
+
+/**
+ * Exposes the student persona shared by every conversation's drill.
+ *
+ * It is a single local text file, not per-rehearsal state, so these routes carry no conversation id
+ * and stay outside the `:rehearsalId` route space.
+ */
+@Controller('rehearsal-persona')
+export class RehearsalPersonaController {
+  private readonly logger = new Logger(RehearsalPersonaController.name);
+
+  /** Injects the rehearsal domain service that owns the persona file. */
+  constructor(private readonly rehearsals: RehearsalsService) {}
+
+  /** Reads the saved persona; a missing file returns an empty string. */
+  @Get()
+  get(): Promise<{ persona: string }> {
+    return this.rehearsals.getPersona();
+  }
+
+  /** Replaces the saved persona; an empty string clears it. */
+  @Put()
+  save(@Body() input: SaveRehearsalPersonaDto): Promise<{ persona: string }> {
+    const requestId = randomUUID();
+    writeStructuredEvent(this.logger, 'log', 'rehearsal.persona.save.accepted', {
+      requestId,
+      characters: input.persona.trim().length,
+    });
+    return this.rehearsals.savePersona(input.persona, { requestId });
   }
 }

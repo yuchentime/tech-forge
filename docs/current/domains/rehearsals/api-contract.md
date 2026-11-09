@@ -173,6 +173,24 @@ last_verified: 2026-11-09
 - **响应**：HTTP 200 `{ "rehearsalId": "uuid", "discarded": true }`。
 - **错误**：409 已有回答或正在处理。
 
+### Read the shared student persona
+
+- **方法**：`GET`
+- **路径**：`/api/rehearsal-persona`
+- **用途**：进入任意会话的演练模式时预填画像编辑器。
+- **行为**：读取 `<configDir>/rehearsal-persona.txt`；文件不存在或为空时返回空字符串。不按 conversation 隔离。
+- **响应**：HTTP 200 `{ "persona": "..." }`（已 trim，≤1000 字符）。
+- **错误**：500 文件不可读。
+
+### Save the shared student persona
+
+- **方法**：`PUT`
+- **路径**：`/api/rehearsal-persona`
+- **请求体**：`{ "persona": "≤1000 字符，可为空串" }`。
+- **行为**：trim 后经同目录临时文件 + rename 原子替换，权限 `0600`；空串写入空文件，表示清空画像。编辑器失焦时调用。
+- **响应**：HTTP 200 `{ "persona": "<保存后的值>" }`。
+- **错误**：400 超过 1000 字符；500 文件不可写。
+
 ## 状态与计数
 
 - `progress.asked` 包含基础题、追问和跳过；`remaining = limit - asked`。

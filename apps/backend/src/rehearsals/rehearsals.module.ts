@@ -5,6 +5,7 @@ import { LlmModule } from '../llm/llm.module';
 import { SettingsModule } from '../settings/settings.module';
 import {
   ConversationRehearsalsController,
+  RehearsalPersonaController,
   RehearsalsController,
 } from './rehearsals.controller';
 import { RehearsalRunRegistry } from './rehearsal-run-registry';
@@ -20,7 +21,11 @@ import { RehearsalsService } from './rehearsals.service';
     LlmModule,
     SettingsModule,
   ],
-  controllers: [ConversationRehearsalsController, RehearsalsController],
+  controllers: [
+    ConversationRehearsalsController,
+    RehearsalsController,
+    RehearsalPersonaController,
+  ],
   providers: [RehearsalsService, RehearsalRunRegistry],
   exports: [RehearsalsService],
 })

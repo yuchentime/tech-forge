@@ -170,6 +170,18 @@ function installBridge() {
       request: async (input) => {
         requests.push(input);
         const { method, path } = input;
+        if (method === 'GET' && path === '/api/rehearsal-persona') {
+          return {
+            status: 200,
+            data: { persona: '初二学生，喜欢追问为什么' },
+          };
+        }
+        if (method === 'PUT' && path === '/api/rehearsal-persona') {
+          return {
+            status: 200,
+            data: { persona: String(input.body?.persona ?? '').trim() },
+          };
+        }
         if (method === 'GET' && path === '/api/conversations/c1/rehearsals/latest') {
           return { status: 200, data: detail() };
         }
@@ -278,7 +290,12 @@ test('the store restores an active drill and keeps it while browsing history', a
   assert.equal(state.status, 'ready');
   assert.equal(state.view, 'session');
   assert.equal(state.detail.currentQuestion.turnId, 't1');
-  assert.equal(requests.length, 1);
+  assert.equal(state.persona, '初二学生，喜欢追问为什么');
+  assert.equal(requests.length, 2);
+  assert.deepEqual(
+    requests.map((request) => request.path).sort(),
+    ['/api/conversations/c1/rehearsals/latest', '/api/rehearsal-persona'],
+  );
 
   await store.openHistory();
   state = store.getSnapshot();
@@ -396,4 +413,36 @@ test('discarding a zero-answer rehearsal returns to the start view', async () =>
   assert.equal(state.detail, null);
   assert.equal(state.view, 'start');
   assert.equal(state.isEnding, false);
+});
+
+test('the student persona is read on entry and saved when the editor blurs', async () => {
+  const requests = installBridge();
+  const store = new RehearsalStore();
+
+  await store.loadForConversation('c1');
+  assert.equal(store.getSnapshot().persona, '初二学生，喜欢追问为什么');
+  assert.equal(store.getSnapshot().personaError, null);
+
+  await store.savePersona('  高一学生，爱较真，要求举例  ');
+  const saved = requests.at(-1);
+  assert.equal(saved.method, 'PUT');
+  assert.equal(saved.path, '/api/rehearsal-persona');
+  assert.deepEqual(saved.body, { persona: '  高一学生，爱较真，要求举例  ' });
+  assert.equal(store.getSnapshot().persona, '高一学生，爱较真，要求举例');
+  assert.equal(store.getSnapshot().personaError, null);
+});
+
+test('a failed persona save keeps the typed text and reports the error', async () => {
+  installBridge();
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+
+  global.window.teachforge.request = async () => ({
+    status: 500,
+    data: { message: '无法保存本机学生画像文件' },
+  });
+
+  await store.savePersona('新画像');
+  assert.equal(store.getSnapshot().persona, '新画像');
+  assert.match(store.getSnapshot().personaError, /无法保存本机学生画像文件/);
 });
