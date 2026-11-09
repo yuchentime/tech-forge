@@ -204,7 +204,7 @@ export function RehearsalReport({
           onClick={onContinue}
           type="button"
         >
-          {isStarting ? '正在开始…' : '继续演练'}
+          {isStarting ? '正在开始…' : '新的演练'}
         </button>
       </div>
     </div>
