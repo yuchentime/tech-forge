@@ -59,6 +59,15 @@ import {
   type ConversationToolActivity,
 } from './conversation-store';
 
+const CONVERSATION_HEADER_TITLE_LIMIT = 24;
+
+/** Keeps the visible conversation title compact while preserving the full title for its tooltip. */
+function truncateConversationTitle(title: string): string {
+  const characters = Array.from(title);
+  if (characters.length <= CONVERSATION_HEADER_TITLE_LIMIT) return title;
+  return `${characters.slice(0, CONVERSATION_HEADER_TITLE_LIMIT - 1).join('')}…`;
+}
+
 /** Loads persisted conversation history into the long-lived Agent runtime. */
 export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const threadListState = useSyncExternalStore(
@@ -93,6 +102,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     artifactListStore.getSnapshot,
   );
   const [activeView, setActiveView] = useState<SidebarView>('chat');
+  const [conversationDisplayMode, setConversationDisplayMode] =
+    useState<'conversation' | 'rehearsal'>('conversation');
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
@@ -418,11 +429,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   );
 
   const isHistoryLoading = loadingConversationId !== null;
+  const isRehearsalMode = conversationDisplayMode === 'rehearsal';
   const isInitialListLoading =
     !hasLoadedInitialList && conversationState.listStatus !== 'error';
   const activeConversation = conversationState.conversations.find(
     ({ id }) => id === conversationState.activeConversationId,
   );
+  const activeConversationTitle = activeConversation?.title?.trim() || '新对话';
   /** Files of the conversation on screen; a list loaded for another one never shows a count. */
   const conversationFiles =
     artifactList.conversationId === conversationState.activeConversationId
@@ -465,37 +478,89 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
-          <header className="flex shrink-0 items-center justify-between gap-3 pb-3">
-            <h1 className="min-w-0 truncate text-sm font-semibold text-stone-800">
-              {activeConversation?.title?.trim() || '新对话'}
-            </h1>
-            <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
-          </header>
-          {historyError && (
-            <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
-              <span className="min-w-0 flex-1">{historyError}</span>
-              {historyErrorConversationId && (
-                <button
-                  className="shrink-0 font-medium underline underline-offset-2"
-                  onClick={() => void loadConversation(historyErrorConversationId)}
-                  type="button"
+            <header className="flex shrink-0 items-center justify-between gap-3 pb-3">
+              <h1
+                aria-label={activeConversationTitle}
+                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-sm font-semibold text-stone-800"
+                title={activeConversationTitle}
+              >
+                {truncateConversationTitle(activeConversationTitle)}
+              </h1>
+              <div className="flex shrink-0 items-center gap-2">
+                {!isRehearsalMode && (
+                  <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
+                )}
+                <div
+                  aria-label="会话模式"
+                  className="inline-flex h-10 shrink-0 items-center rounded-xl bg-stone-100 p-1"
+                  role="group"
                 >
-                  重试
-                </button>
-              )}
-            </div>
-          )}
+                  <button
+                    aria-pressed={!isRehearsalMode}
+                    className={`inline-flex h-8 items-center rounded-lg px-3 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                      isRehearsalMode
+                        ? 'font-medium text-stone-500 hover:text-stone-700'
+                        : 'bg-white font-semibold text-stone-800 shadow-sm'
+                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1`}
+                    onClick={() => setConversationDisplayMode('conversation')}
+                    type="button"
+                  >
+                    普通对话
+                  </button>
+                  <button
+                    aria-pressed={isRehearsalMode}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                      isRehearsalMode
+                        ? 'bg-white font-semibold text-emerald-800 shadow-sm'
+                        : 'font-medium text-stone-500 hover:text-stone-700'
+                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1`}
+                    onClick={() => setConversationDisplayMode('rehearsal')}
+                    type="button"
+                  >
+                    {isRehearsalMode && (
+                      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                    )}
+                    演练模式
+                  </button>
+                </div>
+              </div>
+            </header>
 
-          {isHistoryLoading || isInitialListLoading ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
-              {isInitialListLoading
-                ? conversationState.listStatus === 'error'
-                  ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
-                  : '正在加载对话列表…'
-                : '正在加载历史消息…'}
-            </div>
-          ) : (
-            <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div
+                aria-hidden={isRehearsalMode}
+                className={`absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+                  isRehearsalMode
+                    ? 'pointer-events-none translate-y-1 opacity-0'
+                    : 'translate-y-0 opacity-100'
+                }`}
+                inert={isRehearsalMode}
+              >
+                {historyError && (
+                  <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+                    <span className="min-w-0 flex-1">{historyError}</span>
+                    {historyErrorConversationId && (
+                      <button
+                        className="shrink-0 font-medium underline underline-offset-2"
+                        onClick={() => void loadConversation(historyErrorConversationId)}
+                        type="button"
+                      >
+                        重试
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {isHistoryLoading || isInitialListLoading ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
+                    {isInitialListLoading
+                      ? conversationState.listStatus === 'error'
+                        ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
+                        : '正在加载对话列表…'
+                      : '正在加载历史消息…'}
+                  </div>
+                ) : (
+                  <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <ThreadPrimitive.Viewport
                 className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
                 ref={messageViewportRef}
@@ -606,10 +671,23 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 </ComposerPrimitive.Root>
               </div>
-            </ThreadPrimitive.Root>
-          )}
+                  </ThreadPrimitive.Root>
+                )}
+              </div>
+              <div
+                aria-hidden={!isRehearsalMode}
+                className={`absolute inset-0 z-10 flex items-center justify-center bg-white transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+                  isRehearsalMode
+                    ? 'translate-y-0 opacity-100'
+                    : 'pointer-events-none translate-y-1 opacity-0'
+                }`}
+                inert={!isRehearsalMode}
+              >
+                <p className="text-sm text-stone-500">这是测试页面</p>
+              </div>
+            </div>
           </div>
-          <ArtifactSidebar />
+          {!isRehearsalMode && <ArtifactSidebar />}
         </div>
       )}
       <ToastHost />
