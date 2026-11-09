@@ -1,6 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -69,5 +72,14 @@ export class ArtifactsController {
     @Param('artifactId', new ParseUUIDPipe({ version: '4' })) artifactId: string,
   ): Promise<ArtifactLocationDto> {
     return this.artifacts.getLocation(artifactId);
+  }
+
+  /** Drops one artifact index row; the file on disk is left alone. */
+  @Delete('artifacts/:artifactId')
+  @HttpCode(HttpStatus.OK)
+  remove(
+    @Param('artifactId', new ParseUUIDPipe({ version: '4' })) artifactId: string,
+  ): Promise<{ artifactId: string }> {
+    return this.artifacts.removeArtifact(artifactId);
   }
 }

@@ -63,6 +63,24 @@ class ArtifactHistoryStore {
     this.snapshot = {};
     this.listeners.forEach((listener) => listener());
   }
+
+  /** Drops one removed artifact from the per-message footers, emptying messages that lose them all. */
+  remove(artifactId: string): void {
+    let changed = false;
+    const next: Record<string, readonly GeneratedFileRef[]> = {};
+    for (const [messageId, files] of Object.entries(this.snapshot)) {
+      const kept = files.filter((file) => file.id !== artifactId);
+      if (kept.length === files.length) {
+        next[messageId] = files;
+        continue;
+      }
+      changed = true;
+      if (kept.length > 0) next[messageId] = kept;
+    }
+    if (!changed) return;
+    this.snapshot = next;
+    this.listeners.forEach((listener) => listener());
+  }
 }
 
 export const artifactHistoryStore = new ArtifactHistoryStore();
@@ -138,6 +156,22 @@ class ArtifactTabsStore {
     this.update({ tabs, activeId, visible: tabs.length > 0 });
   }
 
+  /**
+   * Drops a tab whose artifact row was deleted, keeping the panel open.
+   *
+   * Unlike `close` this never collapses the sidebar: deleting a file from the list must leave the
+   * list in place, so the panel only changes which tab it shows.
+   */
+  remove(id: string): void {
+    if (!this.snapshot.tabs.some((tab) => tab.id === id)) return;
+    const tabs = this.snapshot.tabs.filter((tab) => tab.id !== id);
+    const activeId =
+      this.snapshot.activeId === id
+        ? tabs[tabs.length - 1]?.id ?? ALL_FILES_TAB_ID
+        : this.snapshot.activeId;
+    this.update({ ...this.snapshot, tabs, activeId, visible: true });
+  }
+
   /** Collapses the sidebar and forgets every tab, used when switching conversations. */
   reset(): void {
     this.update({ tabs: [], activeId: ALL_FILES_TAB_ID, visible: false });
@@ -177,6 +211,12 @@ export interface ArtifactListSnapshot {
 class ArtifactListStore {
   private readonly listeners = new Set<() => void>();
   private requestVersion = 0;
+  /**
+   * Artifacts deleted from the sidebar, so a refetch whose query raced the delete cannot put the
+   * row back. Scoped to one conversation and only ever holds ids the server confirmed deleted;
+   * a later write to the same path registers a new id and is unaffected.
+   */
+  private readonly removedIds = new Set<string>();
   private snapshot: ArtifactListSnapshot = {
     conversationId: null,
     status: 'idle',
@@ -196,6 +236,7 @@ class ArtifactListStore {
   /** Loads one conversation's files; a late response never overwrites a newer selection. */
   async load(conversationId: string | null): Promise<void> {
     const version = ++this.requestVersion;
+    if (this.snapshot.conversationId !== conversationId) this.removedIds.clear();
     if (!conversationId || !hasDesktopBridge()) {
       this.update({ conversationId, status: 'idle', files: [], error: null });
       return;
@@ -213,13 +254,29 @@ class ArtifactListStore {
         this.update({ conversationId, status: 'error', files: [], error: '文件列表加载失败。' });
         return;
       }
-      this.update({ conversationId, status: 'ready', files: response.data, error: null });
+      const files = response.data.filter((file) => !this.removedIds.has(file.id));
+      this.update({ conversationId, status: 'ready', files, error: null });
       // Open tabs keep their identity across refreshes, so their missing flags stay current.
-      artifactTabsStore.syncAll(response.data);
+      artifactTabsStore.syncAll(files);
     } catch {
       if (version !== this.requestVersion) return;
       this.update({ conversationId, status: 'error', files: [], error: '文件列表加载失败。' });
     }
+  }
+
+  /**
+   * Drops one removed artifact from the list so the sidebar and the header badge agree.
+   *
+   * The id is remembered for the conversation: a list refetch started before the delete committed
+   * would otherwise show the row again until the next refresh.
+   */
+  remove(artifactId: string): void {
+    this.removedIds.add(artifactId);
+    if (!this.snapshot.files.some((file) => file.id === artifactId)) return;
+    this.update({
+      ...this.snapshot,
+      files: this.snapshot.files.filter((file) => file.id !== artifactId),
+    });
   }
 
   /** Publishes one snapshot and notifies subscribers. */

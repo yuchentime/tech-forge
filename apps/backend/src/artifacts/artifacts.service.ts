@@ -166,6 +166,28 @@ export class ArtifactsService {
     return grouped;
   }
 
+  /**
+   * Removes one artifact index row.
+   *
+   * Only the index record goes away; the file on disk is never touched, because the index is a
+   * record of what the conversation produced, not an owner of the user's files. Deleting a row of
+   * a file that still exists only drops it from the sidebar; a later write to the same path
+   * registers a fresh row.
+   */
+  async removeArtifact(artifactId: string): Promise<{ artifactId: string }> {
+    const row = await this.getRow(artifactId);
+    const absolutePath = this.resolveAbsolutePathQuietly(row);
+    await this.artifacts.delete({ id: row.id });
+    writeStructuredEvent(this.logger, 'log', 'artifacts.delete.completed', {
+      conversationId: row.conversationId,
+      artifactId: row.id,
+      pathKind: row.pathKind,
+      contentFormat: row.contentFormat,
+      fileExists: absolutePath !== undefined && isExistingFile(absolutePath),
+    });
+    return { artifactId: row.id };
+  }
+
   /** Reads the preview text of one artifact, capped and NUL-sniffed. */
   async readContent(artifactId: string): Promise<ArtifactContentDto> {
     const row = await this.getRow(artifactId);

@@ -1,8 +1,10 @@
-import { useCallback } from 'react';
-import { FilePlus, FileText, Files, FolderOpen, X } from '@phosphor-icons/react';
+import { useCallback, useState } from 'react';
+import { FilePlus, FileText, Files, FolderOpen, Trash, X } from '@phosphor-icons/react';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   ALL_FILES_TAB_ID,
+  artifactHistoryStore,
+  artifactListStore,
   artifactTabsStore,
   type GeneratedFileRef,
 } from './artifact-store';
@@ -55,7 +57,45 @@ export function openArtifactTab(file: GeneratedFileRef): void {
   artifactTabsStore.open(file);
 }
 
-/** Renders one clickable file row: open preview, or reveal its directory. */
+/**
+ * Deletes one artifact index row and drops it from every local view.
+ *
+ * The row is the conversation's record of a produced file, not the file itself: the copy on disk
+ * is never removed, so a file that still exists only loses its sidebar entry and a later write to
+ * the same path registers a fresh row.
+ */
+export async function deleteArtifact(artifactId: string): Promise<boolean> {
+  if (!hasDesktopBridge()) {
+    showToast('浏览器预览无法删除文件记录。');
+    return false;
+  }
+  try {
+    const response = await window.teachforge.request<{ artifactId: string }>({
+      method: 'DELETE',
+      path: `/api/artifacts/${encodeURIComponent(artifactId)}`,
+    });
+    if (response.status !== 200) {
+      showToast('删除失败，请重试');
+      return false;
+    }
+    artifactListStore.remove(artifactId);
+    // Tabs and footers read their own snapshots, so a deleted row must leave all three.
+    artifactTabsStore.remove(artifactId);
+    artifactHistoryStore.remove(artifactId);
+    return true;
+  } catch {
+    showToast('删除失败，请重试');
+    return false;
+  }
+}
+
+/**
+ * Renders one clickable file row.
+ *
+ * A file present on disk opens its preview and reveals its directory; a file the user deleted
+ * outside the app is struck through and its trailing action becomes "remove the record", since
+ * there is no directory left to open.
+ */
 export function ArtifactFileRow({
   file,
   active,
@@ -63,12 +103,24 @@ export function ArtifactFileRow({
   file: GeneratedFileRef;
   active?: boolean;
 }) {
+  const [deleting, setDeleting] = useState(false);
   const handleReveal = useCallback(
     (event: React.MouseEvent) => {
       event.stopPropagation();
       void revealArtifact(file.id);
     },
     [file.id],
+  );
+  const handleDelete = useCallback(
+    async (event: React.MouseEvent) => {
+      event.stopPropagation();
+      if (deleting) return;
+      setDeleting(true);
+      const removed = await deleteArtifact(file.id);
+      // The row unmounts on success; a failed request must leave the button usable.
+      if (!removed) setDeleting(false);
+    },
+    [deleting, file.id],
   );
 
   return (
@@ -83,20 +135,40 @@ export function ArtifactFileRow({
         title={file.fileName}
         type="button"
       >
-        <FileText aria-hidden="true" className="size-4 shrink-0 text-stone-500" />
-        <span className={`min-w-0 flex-1 truncate ${file.missing ? 'text-stone-400' : ''}`}>
+        <FileText
+          aria-hidden="true"
+          className={`size-4 shrink-0 ${file.missing ? 'text-stone-400' : 'text-stone-500'}`}
+        />
+        <span
+          className={`min-w-0 flex-1 truncate ${
+            file.missing ? 'text-stone-400 line-through' : ''
+          }`}
+        >
           {file.fileName}
         </span>
       </button>
-      <button
-        aria-label="打开文件目录"
-        className="flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
-        onClick={handleReveal}
-        title="打开文件目录"
-        type="button"
-      >
-        <FolderOpen aria-hidden="true" className="size-4" />
-      </button>
+      {file.missing ? (
+        <button
+          aria-label={`移除 ${file.fileName} 的文件记录`}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-700/30 disabled:opacity-50"
+          disabled={deleting}
+          onClick={(event) => void handleDelete(event)}
+          title="移除记录"
+          type="button"
+        >
+          <Trash aria-hidden="true" className="size-4" />
+        </button>
+      ) : (
+        <button
+          aria-label="打开文件目录"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+          onClick={handleReveal}
+          title="打开文件目录"
+          type="button"
+        >
+          <FolderOpen aria-hidden="true" className="size-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -171,7 +243,7 @@ export function ArtifactFileChips({ files }: { files: readonly GeneratedFileRef[
               <span
                 className={`min-w-0 truncate ${
                   file.missing
-                    ? ''
+                    ? 'line-through'
                     : 'underline decoration-stone-300 decoration-1 underline-offset-2 group-hover:decoration-stone-600'
                 }`}
               >

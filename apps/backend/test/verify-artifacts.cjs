@@ -1,16 +1,19 @@
 /**
  * Verifies the artifact index end to end against a throwaway data directory.
  *
- * Phase A boots the Nest application in-process and exercises the capture and read paths of
- * ArtifactsService. Phase B starts the real HTTP entry point and checks the routes the desktop
- * sidebar calls, including the per-turn filter and the location payload.
+ * Phase A boots the Nest application in-process and exercises the capture, read and delete paths
+ * of ArtifactsService. Phase B starts the real HTTP entry point and checks the routes the desktop
+ * sidebar calls, including the per-turn filter, the location payload and record deletion.
  */
 const assert = require('node:assert/strict');
-const { mkdirSync, mkdtempSync, rmSync, writeFileSync, unlinkSync } = require('node:fs');
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+
+/** Isolated build output, so a running dev backend that locks `dist` does not block the check. */
+const buildDirectory = join(__dirname, '..', process.env.BACKEND_TEST_BUILD_DIR ?? '.test-dist');
 
 const configDirectory = mkdtempSync(join(tmpdir(), 'tf-artifacts-config-'));
 const dataDirectory = mkdtempSync(join(tmpdir(), 'tf-artifacts-data-'));
@@ -24,10 +27,10 @@ process.env.TEACHFORGE_PORT = '0';
 async function phaseA() {
   const { NestFactory } = require('@nestjs/core');
   const { DataSource } = require('typeorm');
-  const { AppModule } = require('../dist/app.module');
-  const { ArtifactsService } = require('../dist/artifacts/artifacts.service');
-  const { SettingsService } = require('../dist/settings/settings.service');
-  const { ConversationEntity } = require('../dist/conversations/conversation.entity');
+  const { AppModule } = require(join(buildDirectory, 'app.module'));
+  const { ArtifactsService } = require(join(buildDirectory, 'artifacts/artifacts.service'));
+  const { SettingsService } = require(join(buildDirectory, 'settings/settings.service'));
+  const { ConversationEntity } = require(join(buildDirectory, 'conversations/conversation.entity'));
 
   // No HTTP adapter is needed here: only the injected services are exercised.
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
@@ -105,14 +108,39 @@ async function phaseA() {
   const byTurn = await artifacts.listByUserMessageIds(conversationId, []);
   assert.equal(byTurn.size, 0);
 
+  // Deleting a row drops the index record only; the file on disk keeps its content.
+  const disposableFile = join(workspace, '临时草稿.txt');
+  writeFileSync(disposableFile, '临时内容', 'utf8');
+  const disposable = await artifacts.registerArtifact({
+    conversationId,
+    userMessageId: null,
+    absolutePath: disposableFile,
+  });
+  assert.equal((await artifacts.listArtifacts(conversationId)).length, 3);
+
+  const deleted = await artifacts.removeArtifact(disposable.id);
+  assert.equal(deleted.artifactId, disposable.id);
+  const afterDelete = await artifacts.listArtifacts(conversationId);
+  assert.equal(
+    afterDelete.some((item) => item.id === disposable.id),
+    false,
+    'the deleted row is gone',
+  );
+  assert.equal(readFileSync(disposableFile, 'utf8'), '临时内容', 'the file itself survives');
+  await assert.rejects(
+    () => artifacts.removeArtifact(disposable.id),
+    /Artifact not found/,
+    'deleting the same row twice reports a missing artifact',
+  );
+
   rmSync(externalDirectory, { recursive: true, force: true });
   await app.close();
-  return { conversationId, sessionArtifactId: sessionArtifact.id };
+  return { conversationId, sessionArtifactId: sessionArtifact.id, externalArtifactId: externalArtifact.id };
 }
 
 /** Starts the real entry point and queries the artifact routes over HTTP. */
-async function phaseB({ conversationId, sessionArtifactId }) {
-  const child = spawn(process.execPath, ['dist/main.js'], {
+async function phaseB({ conversationId, sessionArtifactId, externalArtifactId }) {
+  const child = spawn(process.execPath, [join(buildDirectory, 'main.js')], {
     cwd: join(__dirname, '..'),
     env: { ...process.env, TEACHFORGE_PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -140,7 +168,7 @@ async function phaseB({ conversationId, sessionArtifactId }) {
     });
     assert.equal(listResponse.status, 200);
     const listed = await listResponse.json();
-    assert.equal(listed.length, 2, 'HTTP list should return both artifacts');
+    assert.equal(listed.length, 2, 'HTTP list should return both remaining artifacts');
 
     const contentResponse = await fetch(`${base}/artifacts/${sessionArtifactId}/content`, {
       headers,
@@ -160,6 +188,28 @@ async function phaseB({ conversationId, sessionArtifactId }) {
       headers,
     });
     assert.equal(missingResponse.status, 404, 'unknown artifacts return 404');
+
+    // The delete route the sidebar's trash button calls: 200, row gone, file untouched.
+    const deleteResponse = await fetch(`${base}/artifacts/${externalArtifactId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    assert.equal(deleteResponse.status, 200);
+    assert.deepEqual(await deleteResponse.json(), { artifactId: externalArtifactId });
+
+    const afterDeleteResponse = await fetch(
+      `${base}/conversations/${conversationId}/artifacts`,
+      { headers },
+    );
+    const afterDelete = await afterDeleteResponse.json();
+    assert.equal(afterDelete.length, 1, 'the deleted row no longer appears in the list');
+    assert.equal(afterDelete[0].id, sessionArtifactId);
+
+    const repeatedDelete = await fetch(`${base}/artifacts/${externalArtifactId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    assert.equal(repeatedDelete.status, 404, 'deleting a gone artifact returns 404');
   } finally {
     // Wait for the child to release the SQLite files before the temporary directories go away.
     await new Promise((resolve) => {

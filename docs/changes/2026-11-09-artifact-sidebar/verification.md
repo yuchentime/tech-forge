@@ -269,3 +269,38 @@ LR 是唯一能装进 400-900 px 侧栏的树形布局，因此规则据此改�
 
 - 未做自动刷新：模型改写后仍需用户点一次刷新按钮，或关闭再打开该标签。
 - 未在真实 Electron 窗口复测（构建产物 + 打桩桥）；运行中的 dev 应用使用 Vite 源码热更新，React 侧改动无需重启 backend。
+
+## 缺失文件记录删除（2026-11-09）
+
+### 决策
+
+| 选择 | 结论 | 理由 |
+|---|---|---|
+| 删除范围 | 只删 `artifacts` 行 | 索引记录的是"本会话产出了什么"，不拥有磁盘文件；删文件是不可撤销的用户数据操作，用户已在资源管理器里删过 |
+| 入口范围 | 只有 `missing` 行换成垃圾桶 | 文件还在时"打开目录"才是有效动作；删记录会让仍在的文件从列表消失，不该是常规入口 |
+| 交互 | 点击即删，不弹确认 | 只丢一条索引记录，文件不受影响，误删可由下次写入重建；代价与确认弹窗不匹配 |
+| 本地状态 | 直接改三份快照，不重取列表 | 侧边栏行、顶栏徽标、响应底部卡片读三份独立快照，改完立即一致；重取会闪一次 loading |
+| 面板 | `artifactTabsStore.remove()` 不收起面板 | 复用 `close()` 会在标签清空时收边栏，等于删一行就关掉用户正在看的列表 |
+
+### 改动
+
+- `apps/backend/src/artifacts/artifacts.service.ts`：新增 `removeArtifact()`，按 id 查行、删行，日志 `artifacts.delete.completed` 记录 `fileExists`（删后该文件是否还在磁盘）。
+- `apps/backend/src/artifacts/artifacts.controller.ts`：新增 `DELETE /api/artifacts/:artifactId`（`ParseUUIDPipe`，200 + `{ artifactId }`）。
+- `apps/desktop/src/features/agent/artifact-store.ts`：`ArtifactListStore.remove()`、`ArtifactTabsStore.remove()`、`ArtifactHistoryStore.remove()`（只让文件从该消息卡片消失，卡片空了就不渲染）。
+- `apps/desktop/src/features/agent/ArtifactSidebarParts.tsx`：新增 `deleteArtifact()`；`missing` 行加 `line-through`、图标置灰，右侧按钮换成 `Trash`（`disabled` 到请求返回）；响应底部卡片的 `missing` 行同样加删除线。
+- `apps/backend/test/verify-artifacts.cjs`：增加服务层与 HTTP 两层删除校验；改为读取 `BACKEND_TEST_BUILD_DIR`（默认 `.test-dist`），避免 dev backend 锁住 `dist` 时无法验证。
+- `apps/backend/package.json`：`verify:artifacts` 改用 `tsc --project tsconfig.build.json --outDir .test-dist`，与其它 verify 脚本一致。
+
+### 验证
+
+- `npm run verify:artifacts`（后端）：临时目录中登记 3 行 → 删 1 行后列表少 1、该行 404、**文件内容仍可读出**、重复删除抛 `Artifact not found`；真实 HTTP 入口 `DELETE /api/artifacts/:id` 返回 200 与 `{ artifactId }`，列表从 2 变 1，再次删除返回 404。
+- `npx tsc --noEmit -p apps/desktop/tsconfig.app.json`：通过。
+- 构建产物 + 打桩桥（Chromium，`window.teachforge` 在页面脚本前注入，桩里 2 个文件其一带 `missing`）：
+  - "本会话文件"列表里 `消息队列-核心知识点.mmd` 的 `text-decoration-line` 为 `line-through`、颜色为 muted，右侧按钮 `aria-label="移除 消息队列-核心知识点.mmd 的文件记录"`（`title="移除记录"`）；`消息队列-基本理解.md` 无删除线、右侧仍是 `打开文件目录`。
+  - 点垃圾桶后发出且只发出一次 `DELETE /api/artifacts/2222…`，该行从 DOM 消失，侧边栏保持打开（`关闭文件侧边栏` 按钮仍在），顶栏徽标由 `查看本会话生成的 2 个文件` 变为 `收起本会话生成的 1 个文件`。
+  - 竞态防护：桩里让 `GET …/artifacts` 即使删除后仍返回该行（模拟早于删除提交的列表请求），删除后点"刷新"（列表请求第 3 次返回两行），该行仍不出现、徽标仍为 1 —— `removedIds` 过滤生效。
+
+### 未覆盖
+
+- 未在真实 Electron 窗口复测；且运行中的 dev backend 仍是旧 `dist`，需重启 `npm run dev`（会重新 `build:backend`）后 `DELETE` 路由才生效。
+- 未覆盖删除失败分支的界面验证（代码路径为 toast + 按钮恢复可点）。
