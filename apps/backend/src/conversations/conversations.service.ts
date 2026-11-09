@@ -392,6 +392,9 @@ export class ConversationsService {
         ...(execution.displayPath === undefined
           ? {}
           : { path: execution.displayPath }),
+        ...(execution.displayPattern === undefined
+          ? {}
+          : { pattern: execution.displayPattern }),
         ...(typeof execution.durationMs === 'number' &&
         Number.isFinite(execution.durationMs) &&
         execution.durationMs >= 0

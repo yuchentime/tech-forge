@@ -31,6 +31,7 @@ import { ConversationSidebar, type SidebarView } from './ConversationSidebar';
 import { SlashCommandMenu, useSlashCommandMenu } from './SlashCommandMenu';
 import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
+import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
@@ -536,6 +537,7 @@ function isConversationToolActivity(
     typeof activity.toolCallId === 'string' &&
     typeof activity.toolName === 'string' &&
     (activity.path === undefined || typeof activity.path === 'string') &&
+    (activity.pattern === undefined || typeof activity.pattern === 'string') &&
     (activity.status === 'completed' || activity.status === 'failed') &&
     (activity.durationMs === undefined ||
       (typeof activity.durationMs === 'number' &&
@@ -611,46 +613,32 @@ function AgentActivity({
   );
 }
 
-/** Presents one tool action with a safe path chip and an accessible lifecycle status. */
+/** Presents one tool action with plain-language wording, target and lifecycle status. */
 function ToolActivityRow({
   tool,
 }: {
   tool: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number];
 }) {
-  const filePath = getToolPath(tool.args);
+  const description = describeToolActivity(tool.toolName, tool.status, tool.args);
 
   return (
     <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-stone-200/65 px-3 py-2 text-sm text-stone-800">
       <ToolStatusIcon status={tool.status} />
-      <span className="shrink-0">{getToolAction(tool.toolName)}</span>
-      {filePath && (
+      <span className="shrink-0">{description.action}</span>
+      {description.pattern && (
+        <code className="min-w-0 break-all font-mono text-[0.9em] text-stone-700">
+          "{description.pattern}"
+        </code>
+      )}
+      {description.fileName && (
         <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-100 px-2 py-0.5">
           <FileText aria-hidden="true" className="size-4 shrink-0 text-stone-600" />
-          <code className="min-w-0 break-all font-mono text-[0.9em]">{filePath}</code>
+          <code className="min-w-0 break-all font-mono text-[0.9em]">{description.fileName}</code>
         </span>
       )}
       <span className="sr-only">{getToolStatusLabel(tool.status)}</span>
     </div>
   );
-}
-
-/** Maps known file tools to concise Chinese action labels. */
-function getToolAction(toolName: string): string {
-  if (toolName === 'read') return '读取';
-  if (toolName === 'write') return '写入';
-  if (toolName === 'edit') return '编辑';
-  return `调用 ${toolName}`;
-}
-
-/** Returns only a string path and never exposes any other tool argument. */
-function getToolPath(args: unknown): string {
-  return typeof args === 'object' &&
-    args !== null &&
-    !Array.isArray(args) &&
-    'path' in args &&
-    typeof args.path === 'string'
-    ? args.path
-    : '';
 }
 
 /** Formats total request time with short units suited to the activity header. */

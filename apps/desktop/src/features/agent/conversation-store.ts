@@ -23,6 +23,8 @@ export interface ConversationToolActivity {
   toolCallId: string;
   toolName: string;
   path?: string;
+  /** Safe grep pattern used by the activity label. */
+  pattern?: string;
   status: 'completed' | 'failed';
   durationMs?: number;
 }

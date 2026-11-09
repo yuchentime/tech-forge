@@ -185,6 +185,7 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 | `toolCallId` | `String` | 是 | 对应 Pi 工具调用 ID |
 | `toolName` | `String` | 是 | 工具名 |
 | `path` | `String` | 否 | 仅当新持久记录含字符串 `args.path` 时返回 |
+| `pattern` | `String` | 否 | 仅当工具为 `grep` 且新持久记录含字符串 `args.pattern` 时返回；供历史行显示搜索词 |
 | `status` | `String` | 是 | `completed` 或 `failed`；中断执行按失败展示 |
 | `durationMs` | `Number` | 否 | 工具自身耗时（毫秒） |
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
 import { ConversationsService } from '../conversations/conversations.service';
+import { getToolDisplayFields } from '../conversations/conversation-transcript';
 import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
 import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
@@ -454,14 +455,19 @@ export class ChatService {
         state.lastMessageProgressLoggedAt = 0;
         return;
       case 'tool_execution_start': {
-        const displayPath = getToolDisplayPath(event.args);
-        // 历史 UI 只需要路径标签；不把其他工具参数持久化到工具记录。
+        const display = getToolDisplayFields(event.toolName, event.args);
+        // 历史 UI 只展示动作、搜索词和路径；不把其他工具参数持久化到工具记录。
         const messageId = await this.conversations.startToolExecution(
           conversationId,
           {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            ...(displayPath === undefined ? {} : { displayPath }),
+            ...(display.displayPath === undefined
+              ? {}
+              : { displayPath: display.displayPath }),
+            ...(display.displayPattern === undefined
+              ? {}
+              : { displayPattern: display.displayPattern }),
             ...(event.parentToolCallId
               ? { parentToolCallId: event.parentToolCallId }
               : {}),
@@ -675,18 +681,4 @@ function getPiMessageMetrics(
 function getSafeStringLength(value: unknown): number | undefined {
   if (typeof value === 'string') return Array.from(value).length;
   return undefined;
-}
-
-/** Keeps only a string path from tool arguments for later safe history display. */
-function getToolDisplayPath(args: unknown): string | undefined {
-  if (
-    typeof args !== 'object' ||
-    args === null ||
-    Array.isArray(args)
-  ) {
-    return undefined;
-  }
-
-  const path = (args as Record<string, unknown>).path;
-  return typeof path === 'string' ? path : undefined;
 }

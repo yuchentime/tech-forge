@@ -49,9 +49,9 @@ Conversation 查询接口由 `ConversationsController` 暴露，并经现有本�
 - `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。默认读取最近最多 30 条有可见文本的 `user`/`assistant` 终态消息，按 `sequenceNo ASC` 返回 `{ messages, hasMore }`。最多向后端查询 31 条可见消息以准确计算 `hasMore`，响应仍最多 30 条。
 - 可选 `beforeMessageId` 必须是目标会话中的现存 Message ID。服务定位该行的 `sequenceNo`，严格读取它之前最近一页；非法 UUID 或跨会话/不存在的游标返回 400。页间使用稳定消息 ID，不使用可能漂移的 offset。
 - 候选行按 `sequenceNo DESC` 分批读取并在后端投影为可见文本，直到获得 31 条或耗尽候选，再将最多 30 条反转为升序。查询仍只读本地 SQLite，不更改模型侧的全量历史读取。
-- 消息查询的顶层内容仅输出 user/assistant 文本；每个 user 行另附其 sequence 区间内已终态 `toolExecution` 的安全摘要。工具名、状态、耗时及可选 display path 可见；完整参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking 和原始 `contentJson` 不进入 API 响应。无可显示文本的 assistant 行会被省略。
+- 消息查询的顶层内容仅输出 user/assistant 文本；每个 user 行另附其 sequence 区间内已终态 `toolExecution` 的安全摘要。工具名、状态、耗时、可选 display path 及 `grep` 的可选搜索词可见；完整参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking 和原始 `contentJson` 不进入 API 响应。无可显示文本的 assistant 行会被省略。
 - 工具执行摘要按已返回 user 行的序列区间分组，并限制在最后一个已返回 user 与其后的下一个 user 之间；工具行不计入 30 条可见消息，也不改变 `hasMore` 或游标。
-- 新的工具执行记录只持久化字符串 `args.path` 作为可选 `displayPath`；旧记录没有该字段时仍返回工具名、终态和耗时。无法解析的工具行会被跳过并记录安全诊断，不影响文本历史。
+- 新的工具执行记录只持久化字符串 `args.path` 作为可选 `displayPath`，以及 `grep` 的字符串 `args.pattern` 作为可选 `displayPattern`；其他参数即使存在也不落库。旧记录没有这两个字段时仍返回工具名、终态和耗时。无法解析的工具行会被跳过并记录安全诊断，不影响文本历史。
 - 会话列表仍完整返回；消息历史固定分页。空列表返回 `[]`，无可见历史时返回 `messages: []` 且 `hasMore: false`。
 
 ## 诊断日志

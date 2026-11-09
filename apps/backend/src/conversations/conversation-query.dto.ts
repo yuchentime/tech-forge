@@ -23,6 +23,8 @@ export interface ConversationToolActivityDto {
   toolCallId: string;
   toolName: string;
   path?: string;
+  /** Safe grep pattern, present only for knowledge/file searches. */
+  pattern?: string;
   status: 'completed' | 'failed';
   durationMs?: number;
 }

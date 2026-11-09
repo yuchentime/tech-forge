@@ -46,6 +46,25 @@ test('an empty history remains a valid empty runtime repository', async () => {
   assert.deepEqual(ExportedMessageRepository.fromArray([].map(toThreadMessage)).messages, []);
 });
 
+test('history restores a grep pattern next to its target path', () => {
+  const bus = new AgentEventBus();
+  bus.restoreHistoryActivity('persisted-user-message-id', [
+    {
+      toolCallId: 'call-grep',
+      toolName: 'grep',
+      path: 'E:/knowledge/学生手册.docx',
+      pattern: '抄袭|剽窃',
+      status: 'completed',
+      durationMs: 12,
+    },
+  ]);
+
+  assert.deepEqual(
+    bus.getTurnSnapshots()['persisted-user-message-id'].tools[0].args,
+    { path: 'E:/knowledge/学生手册.docx', pattern: '抄袭|剽窃' },
+  );
+});
+
 test('history tool activity restores an idle snapshot by persisted user message ID', () => {
   const bus = new AgentEventBus();
   bus.restoreHistoryActivity('persisted-user-message-id', [
