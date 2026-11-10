@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ConversationsModule } from '../conversations/conversations.module';
-import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { DocumentsModule } from '../documents/documents.module';
 import { LlmModule } from '../llm/llm.module';
 import { RehearsalsModule } from '../rehearsals/rehearsals.module';
 import { ChatController } from './chat.controller';
@@ -13,7 +13,7 @@ import { ChatService } from './chat.service';
     AttachmentsModule,
     ArtifactsModule,
     ConversationsModule,
-    KnowledgeModule,
+    DocumentsModule,
     LlmModule,
     RehearsalsModule,
   ],

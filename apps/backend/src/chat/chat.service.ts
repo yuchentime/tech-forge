@@ -12,7 +12,7 @@ import {
   type ChatAttachmentInput,
   type StoredAttachments,
 } from '../attachments/attachments.service';
-import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
+import { KnowledgeDirectoryService } from '../documents/knowledge-directory.service';
 import { LlmService } from '../llm/llm.service';
 import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
 import { parseTurnCommand } from './turn-command';
@@ -51,7 +51,7 @@ export class ChatService {
   constructor(
     private readonly llm: LlmService,
     private readonly conversations: ConversationsService,
-    private readonly knowledge: KnowledgeService,
+    private readonly directory: KnowledgeDirectoryService,
     private readonly attachments: AttachmentsService,
     private readonly artifacts: ArtifactsService,
     private readonly rehearsals: RehearsalsService,
@@ -287,29 +287,10 @@ export class ChatService {
           .join('\n\n');
       }
 
-      let knowledgeContext: KnowledgeContextResult | undefined;
+      let directoryContext: { text: string; revision: string } | undefined;
       if (forceKnowledge) {
         phase = 'knowledge.context';
-        // Scope is conversation state, not model judgement: an explicit selection restricts the
-        // search, and an empty one keeps the default range.
-        const scope = await this.conversations.getKnowledgeScope(resolvedConversationId);
-        knowledgeContext = await this.knowledge.buildContext({
-          conversationId: resolvedConversationId,
-          query: userPrompt,
-          loadedChunkIds: turn.loadedChunkIds,
-          explicitDocumentIds: scope.documentIds,
-          logContext,
-          signal,
-        });
-        // Recorded before the model runs so a failed or cancelled turn still reflects what was sent.
-        const refsJson = this.knowledge.toContextRefsJson(knowledgeContext, userPrompt);
-        if (refsJson) {
-          await this.conversations.mergeUserMessageContextRefs(
-            turn.userMessageId,
-            refsJson,
-            logContext,
-          );
-        }
+        directoryContext = await this.directory.loadForAgent();
         if (signal.aborted) {
           assistantStatus = 'cancelled';
           writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
@@ -325,7 +306,7 @@ export class ChatService {
       // the system prompt must stay identical across turns for provider prefix caching, and the
       // snapshot is cleaned of this block before it is stored. The rehearsal digest is not part of
       // it: it is appended once as a durable Pi message entry (see `contextMessage` below).
-      const promptContext = [attachmentContext, knowledgeContext?.text]
+      const promptContext = [attachmentContext]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
 
@@ -334,9 +315,9 @@ export class ChatService {
       writeStructuredEvent(this.logger, 'log', 'chat.llm.stream.started', {
         ...logContext,
         historyMessageCount: turn.history.length,
-        knowledgeOutcome: knowledgeContext?.outcome,
-        injectedDocumentCount: knowledgeContext?.refs.length ?? 0,
-        injectedTokens: knowledgeContext?.stats.injectedTokens ?? 0,
+        knowledgeOutcome: directoryContext ? 'directory_loaded' : undefined,
+        injectedDocumentCount: 0,
+        injectedTokens: 0,
         researchCommand: turnCommand.research,
         rehearsalDigestCharacters: rehearsalDigest.text.length,
         promptContextCharacters: promptContext.length,
@@ -347,9 +328,14 @@ export class ChatService {
         // The skill body is expanded into the model prompt; `userPrompt` stays the stored text.
         skillName: turnCommand.research ? DEEP_RESEARCH_SKILL_NAME : undefined,
         promptContext: promptContext === '' ? undefined : promptContext,
-        contextMessage: rehearsalDigest.text
-          ? { type: 'rehearsal_digest', text: rehearsalDigest.text }
-          : undefined,
+        contextMessages: [
+          ...(rehearsalDigest.text ? [{ type: 'rehearsal_digest', text: rehearsalDigest.text }] : []),
+          ...(directoryContext ? [{
+            type: 'knowledge_index',
+            text: this.directory.renderLoadedContext(directoryContext),
+            details: { revision: directoryContext.revision },
+          }] : []),
+        ],
         // Every successful write is indexed against this turn, so the response footer and the
         // sidebar can list it without parsing tool events.
         onFileWritten: async ({ absolutePath }) => {

@@ -11,6 +11,7 @@ import { DocumentVersionEntity } from './document-version.entity';
 import { DocumentCatalogIndexService, DocumentCatalogService } from './document-catalog.service';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
+import { KnowledgeDirectoryService } from './knowledge-directory.service';
 
 /**
  * Registers document repositories plus the parser, embedding and settings capabilities the domain
@@ -31,7 +32,7 @@ import { DocumentsService } from './documents.service';
     LlmModule,
   ],
   controllers: [DocumentsController],
-  providers: [DocumentsService, DocumentCatalogService, DocumentCatalogIndexService],
-  exports: [DocumentsService],
+  providers: [DocumentsService, DocumentCatalogService, DocumentCatalogIndexService, KnowledgeDirectoryService],
+  exports: [DocumentsService, KnowledgeDirectoryService],
 })
 export class DocumentsModule {}

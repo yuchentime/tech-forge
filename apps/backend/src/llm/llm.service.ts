@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type {
   AgentSession as PiAgentSession,
@@ -82,6 +83,8 @@ export interface LlmRequestOptions {
    * `display: false` keeps it out of the visible transcript, so callers must send it exactly once.
    */
   contextMessage?: { type: string; text: string };
+  /** Ordered durable entries, kept outside the system prompt and visible user text. */
+  contextMessages?: Array<{ type: string; text: string; details?: unknown }>;
   /**
    * Called after the Agent created or modified a file, with the resolved absolute path.
    *
@@ -443,12 +446,17 @@ export class LlmService {
       // Durable context goes in as a message entry, never into the system prompt or the user text:
       // Pi stores it in the session, so the snapshot restores it on later turns instead of the
       // caller re-sending it every time. Appended before the usage read so logs include its tokens.
-      const contextEntry = options.contextMessage;
-      if (contextEntry && contextEntry.text.trim()) {
+      const contextEntries: Array<{ type: string; text: string; details?: unknown }> = [
+        ...(options.contextMessage ? [{ ...options.contextMessage, details: undefined }] : []),
+        ...(options.contextMessages ?? []),
+      ];
+      for (const contextEntry of contextEntries) {
+        if (!contextEntry.text.trim()) continue;
         session.sessionManager.appendCustomMessageEntry(
           contextEntry.type,
           contextEntry.text.trim(),
           false,
+          contextEntry.details,
         );
       }
       const startingContextUsage = session.getContextUsage();
@@ -967,6 +975,8 @@ export class LlmService {
         "edit",
         "write",
         "grep",
+        "find",
+        "ls",
         ...PI_MEMORY_TOOL_PATTERNS,
       ];
       let customSystemPrompt: string;
@@ -994,6 +1004,7 @@ export class LlmService {
       // Bundled skill templates are copied into the config root once. The user can then inspect,
       // edit or replace them without depending on the backend install directory.
       await this.ensureInstalledSkills();
+      const agentsPolicy = await readFile(this.settings.getAgentsFilePath(), "utf8");
 
       const resourceLoader = new sdk.DefaultResourceLoader({
         cwd,
@@ -1003,6 +1014,10 @@ export class LlmService {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
+        // Context discovery stays disabled: only this protected, audited policy is loaded.
+        agentsFilesOverride: () => ({
+          agentsFiles: [{ path: this.settings.getAgentsFilePath(), content: agentsPolicy }],
+        }),
         // `noExtensions` only disables discovered packages; these explicit sources still load.
         additionalExtensionPaths: loadMemory ? [PI_MEMORY_EXTENSION_PATH] : [],
         extensionFactories,
