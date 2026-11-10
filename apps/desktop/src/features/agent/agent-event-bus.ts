@@ -32,6 +32,8 @@ export class AgentEventBus {
   private readonly threadByRequest = new Map<string, string>();
   /** Allows the visible thread to select only its own live progress record. */
   private readonly activeRequestByThread = new Map<string, string>();
+  /** Keeps each thread's finished turn so its artifact footer survives the stream ending. */
+  private readonly lastTurnByThread = new Map<string, string>();
   private lastTurnId: string | null = null;
   private snapshot: AgentActivityState = {};
 
@@ -50,7 +52,11 @@ export class AgentEventBus {
   /** Returns live progress for one local thread without leaking another thread's activity. */
   getSnapshotForThread = (localThreadId: string): AgentActivitySnapshot => {
     const requestId = this.activeRequestByThread.get(localThreadId);
-    const turnId = requestId ? this.activeByRequest.get(requestId) : undefined;
+    // After `done`, the request is cleared but the turn snapshot keeps the files it produced.
+    // Falling back to it is what keeps the finished response's artifact footer on screen.
+    const turnId =
+      (requestId ? this.activeByRequest.get(requestId) : undefined) ??
+      this.lastTurnByThread.get(localThreadId);
     return turnId ? this.snapshot[turnId] ?? EMPTY_ACTIVITY_SNAPSHOT : EMPTY_ACTIVITY_SNAPSHOT;
   };
 
@@ -97,6 +103,7 @@ export class AgentEventBus {
     if (localThreadId) {
       this.threadByRequest.set(runRequestId, localThreadId);
       this.activeRequestByThread.set(localThreadId, runRequestId);
+      this.lastTurnByThread.set(localThreadId, turnId);
     }
     this.lastTurnId = turnId;
     this.updateTurnSnapshot({
@@ -189,9 +196,14 @@ export class AgentEventBus {
     }
   }
 
-  /** Drops the live artifact list so a reloaded conversation does not duplicate the history footer. */
-  clearArtifacts(): void {
-    const turnId = [...this.activeByRequest.values()].at(-1) ?? this.lastTurnId;
+  /**
+   * Drops a finished turn's live artifact list so a reloaded conversation does not duplicate the
+   * history footer. Passing a thread id targets that thread; otherwise the latest turn is used.
+   */
+  clearArtifacts(localThreadId?: string): void {
+    const turnId = localThreadId
+      ? this.lastTurnByThread.get(localThreadId)
+      : [...this.activeByRequest.values()].at(-1) ?? this.lastTurnId;
     if (!turnId) return;
     const snapshot = this.snapshot[turnId];
     if (!snapshot || snapshot.artifacts.length === 0) return;

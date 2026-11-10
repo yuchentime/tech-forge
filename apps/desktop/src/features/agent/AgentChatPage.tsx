@@ -219,7 +219,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       artifactHistoryStore.setFromHistory(response.data.messages);
       artifactTabsStore.selectConversation(conversationId);
       // The history footer now owns this conversation's files.
-      agentEventBus.clearArtifacts();
+      agentEventBus.clearArtifacts(conversationId);
       threadRuntime.reset(response.data.messages.map(toThreadMessage));
       setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);

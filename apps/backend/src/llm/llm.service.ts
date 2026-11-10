@@ -95,6 +95,27 @@ export interface LlmStreamOptions extends LlmRequestOptions {
 }
 
 /**
+ * Raised when the provider stopped on its output-token limit.
+ *
+ * DeepSeek counts reasoning tokens against that limit, so a reasoning model can spend the whole
+ * budget before emitting visible text. Callers must report a truncated answer instead of
+ * treating the empty text as a broken provider response.
+ */
+export class LlmResponseTruncatedError extends Error {
+  constructor() {
+    super("Provider stopped at the output token limit before returning assistant text.");
+    this.name = "LlmResponseTruncatedError";
+  }
+}
+
+/** Classifies the latest assistant message once a Pi run has settled. */
+type AssistantCompletion =
+  | { kind: "text"; text: string }
+  | { kind: "truncated" }
+  | { kind: "cancelled" }
+  | { kind: "empty" };
+
+/**
  * Options for one non-streamed generation.
  *
  * Rehearsal planning, answer decisions and reports are JSON calls, not chat turns. They may read a
@@ -462,7 +483,22 @@ export class LlmService {
         throw runError;
       }
 
-      const responseText = this.readAssistantText(session);
+      const completion = classifyAssistantCompletion(
+        session.messages,
+        session.getLastAssistantText(),
+      );
+      if (completion.kind === "cancelled") {
+        outcome = "cancelled";
+        writeStructuredEvent(this.logger, "warn", "llm.stream.cancelled", {
+          ...logContext,
+          phase,
+          eventCounts: Object.fromEntries(eventCounts),
+          elapsedMs: Date.now() - startedAt,
+          reason: "assistant_run_aborted",
+        });
+        return;
+      }
+      const responseText = this.readAssistantText(completion);
       outcome = "completed";
       const finishedContextUsage = session.getContextUsage();
       writeStructuredEvent(this.logger, "log", "llm.stream.completed", {
@@ -673,10 +709,14 @@ export class LlmService {
           throw new Error("LLM generation cancelled.");
         }
 
-        const text = session.getLastAssistantText();
-        if (!text?.trim()) {
-          throw new Error("Pi SDK completed without returning assistant text.");
+        const completion = classifyAssistantCompletion(
+          session.messages,
+          session.getLastAssistantText(),
+        );
+        if (completion.kind === "cancelled") {
+          throw new Error("LLM generation cancelled.");
         }
+        const text = this.readAssistantText(completion);
         outcome = "completed";
         writeStructuredEvent(this.logger, "log", "llm.generate.completed", {
           ...logContext,
@@ -1157,14 +1197,40 @@ export class LlmService {
     return this.piSdkPromise;
   }
 
-  /** Reads the latest assistant text and rejects empty provider completions. */
-  private readAssistantText(session: PiAgentSession): string {
-    const text = session.getLastAssistantText();
-    if (!text?.trim()) {
+  /** Turns a settled completion into text, naming truncation and legitimately empty runs. */
+  private readAssistantText(
+    completion: Exclude<AssistantCompletion, { kind: "cancelled" }>,
+  ): string {
+    if (completion.kind === "truncated") {
+      throw new LlmResponseTruncatedError();
+    }
+    if (completion.kind === "empty") {
       throw new Error("Pi SDK completed without returning assistant text.");
     }
-    return text;
+    return completion.text;
   }
+}
+
+/**
+ * Classifies the latest assistant message by its terminal stop reason before reading its text.
+ *
+ * Pi's own `getLastAssistantText()` skips only aborted messages with zero blocks, so a reasoning
+ * model that stopped on `length` or `aborted` after a thinking block looks like an empty
+ * completion. Reading the stop reason first keeps truncation and cancellation distinguishable.
+ */
+function classifyAssistantCompletion(
+  messages: PiAgentSession["messages"],
+  text: string | undefined,
+): AssistantCompletion {
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (lastAssistant?.role === "assistant") {
+    if (lastAssistant.stopReason === "aborted") return { kind: "cancelled" };
+    if (lastAssistant.stopReason === "length") return { kind: "truncated" };
+  }
+  if (!text?.trim()) return { kind: "empty" };
+  return { kind: "text", text };
 }
 
 /** Identifies one Pi message independently of SQLite row and Pi entry IDs. */

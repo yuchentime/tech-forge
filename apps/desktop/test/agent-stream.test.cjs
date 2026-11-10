@@ -220,6 +220,43 @@ test('Renderer AgentEventBus exposes live activity only to its source thread', (
   assert.equal(bus.getSnapshotForThread('local-thread-a').phase, 'idle');
 });
 
+test('Renderer AgentEventBus keeps finished artifacts under their thread until history loads', () => {
+  const bus = new AgentEventBus();
+  bus.begin('turn-a', 'request-a', 'local-thread-a');
+  bus.publish('request-a', {
+    type: 'artifact',
+    artifact: {
+      id: 'artifact-1',
+      fileName: '逻辑思考知识地图.svg',
+      contentFormat: 'svg',
+      byteSize: 11183,
+      createdAt: '2026-11-10T07:22:45.450Z',
+      updatedAt: '2026-11-10T07:22:45.450Z',
+      userMessageId: 'user-1',
+      missing: false,
+      external: false,
+    },
+  });
+  bus.publish('request-a', { type: 'done', finishReason: 'stop' });
+
+  const finished = bus.getSnapshotForThread('local-thread-a');
+  assert.equal(finished.phase, 'idle');
+  assert.deepEqual(finished.artifacts, [
+    {
+      id: 'artifact-1',
+      fileName: '逻辑思考知识地图.svg',
+      contentFormat: 'svg',
+      missing: false,
+      external: false,
+    },
+  ]);
+  assert.deepEqual(bus.getSnapshotForThread('local-thread-b').artifacts, []);
+
+  // Loading the persisted history replaces the live footer with the history one.
+  bus.clearArtifacts('local-thread-a');
+  assert.deepEqual(bus.getSnapshotForThread('local-thread-a').artifacts, []);
+});
+
 test('Assistant adapter shows tool activity separately and streams cumulative Pi text deltas', async () => {
   const originalWindow = global.window;
   const abortController = new AbortController();

@@ -93,6 +93,8 @@ export class ChatService {
       toolProgress: new Map(),
     };
     let assistantStatus: 'completed' | 'failed' | 'cancelled' = 'failed';
+    // A Pi-internal abort ends the stream without a client abort signal; the turn is still cancelled.
+    let assistantMessageAborted = false;
     const eventCounts = new Map<string, number>();
     // Files this turn created or rewrote, in write order, emitted after the run settles.
     const turnArtifacts: ArtifactSummaryDto[] = [];
@@ -380,6 +382,13 @@ export class ChatService {
             eventType: piEvent.type,
           });
         }
+        if (
+          piEvent.type === 'message_end' &&
+          piEvent.message.role === 'assistant' &&
+          piEvent.message.stopReason === 'aborted'
+        ) {
+          assistantMessageAborted = true;
+        }
         const event = projectChatSessionEvent(piEvent);
         if (event) yield event;
       }
@@ -400,7 +409,8 @@ export class ChatService {
         });
       }
 
-      assistantStatus = signal.aborted ? 'cancelled' : 'completed';
+      assistantStatus =
+        signal.aborted || assistantMessageAborted ? 'cancelled' : 'completed';
       writeStructuredEvent(
         this.logger,
         assistantStatus === 'completed' ? 'log' : 'warn',
@@ -584,14 +594,7 @@ export class ChatService {
           const elapsedMs = state.activePiMessageStartedAt
             ? Date.now() - state.activePiMessageStartedAt
             : undefined;
-          const status =
-            event.message.role !== 'assistant'
-              ? 'completed'
-              : event.message.stopReason === 'error'
-                ? 'failed'
-                : event.message.stopReason === 'aborted'
-                  ? 'cancelled'
-                  : 'completed';
+          const status = getPiMessageStatus(event.message);
           await this.conversations.updatePiMessage(
             conversationId,
             messageId,
@@ -827,6 +830,23 @@ function getPiMessageMetrics(
 function getSafeStringLength(value: unknown): number | undefined {
   if (typeof value === 'string') return Array.from(value).length;
   return undefined;
+}
+
+/**
+ * Maps a settled Pi message to the status the transcript stores.
+ *
+ * `length` means the provider hit its output-token limit, so the row must not look completed:
+ * a truncated answer otherwise appears finished in history while its turn is marked failed.
+ */
+export function getPiMessageStatus(
+  message: SessionMessageEntry['message'],
+): 'completed' | 'failed' | 'cancelled' {
+  if (message.role !== 'assistant') return 'completed';
+  if (message.stopReason === 'error' || message.stopReason === 'length') {
+    return 'failed';
+  }
+  if (message.stopReason === 'aborted') return 'cancelled';
+  return 'completed';
 }
 
 /**

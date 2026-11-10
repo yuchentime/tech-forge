@@ -2,10 +2,16 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { plainToInstance } = require('class-transformer');
 const { validate } = require('class-validator');
-const { ChatService } = require('../dist/chat/chat.service.js');
+const {
+  ChatService,
+  getPiMessageStatus,
+} = require('../dist/chat/chat.service.js');
 const { ChatPromptDto } = require('../dist/chat/dto/chat-prompt.dto.js');
 const { encodeChatSseEvent } = require('../dist/chat/chat-sse.js');
-const { LlmService } = require('../dist/llm/llm.service.js');
+const {
+  LlmService,
+  LlmResponseTruncatedError,
+} = require('../dist/llm/llm.service.js');
 
 /** Collects every value from an async generator for one local test assertion. */
 async function collect(generator) {
@@ -192,6 +198,7 @@ test('LlmService queues Pi session events in subscription order', async () => {
       return Promise.resolve();
     },
     dispose() {},
+    messages: [],
     getLastAssistantText() {
       return '回答';
     },
@@ -250,6 +257,7 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
     dispose() {
       disposeCalled = true;
     },
+    messages: [],
     getLastAssistantText() {
       return '部分回答';
     },
@@ -297,6 +305,7 @@ test('durable context is appended as its own Pi message entry before prompting',
       return Promise.resolve();
     },
     dispose() {},
+    messages: [],
     getLastAssistantText() {
       return '回答';
     },
@@ -407,3 +416,172 @@ test('ChatService hands the rehearsal digest over once and marks it delivered', 
     ],
   ]);
 });
+
+test('an output-limit stop is reported as truncation, not as an empty completion', async () => {
+  let listener;
+  const session = {
+    subscribe(callback) {
+      listener = callback;
+      return () => undefined;
+    },
+    prompt() {
+      listener({ type: 'message_end', message: thinkingOnlyMessage('length') });
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    messages: [thinkingOnlyMessage('length')],
+    getLastAssistantText() {
+      return undefined;
+    },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
+  };
+  const service = createLlmService();
+  service.createSession = async () => session;
+
+  await assert.rejects(collect(service.stream('画一张逻辑思考知识地图')), (error) => {
+    assert.ok(error instanceof LlmResponseTruncatedError);
+    return true;
+  });
+});
+
+test('an aborted thinking-only turn does not break the next turn', async () => {
+  let abortedListener;
+  const abortedSession = {
+    subscribe(callback) {
+      abortedListener = callback;
+      return () => undefined;
+    },
+    prompt() {
+      abortedListener({ type: 'message_end', message: thinkingOnlyMessage('aborted') });
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    messages: [thinkingOnlyMessage('aborted')],
+    getLastAssistantText() {
+      return undefined;
+    },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
+  };
+  const answeredSession = {
+    subscribe() {
+      return () => undefined;
+    },
+    prompt() {
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    messages: [{ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '回答' }] }],
+    getLastAssistantText() {
+      return '回答';
+    },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
+  };
+  const sessions = [abortedSession, answeredSession];
+  const service = createLlmService();
+  service.createSession = async () => sessions.shift();
+
+  assert.deepEqual(await collect(service.stream('确认')), [
+    { type: 'message_end', message: thinkingOnlyMessage('aborted') },
+  ]);
+  assert.deepEqual(await collect(service.stream('A')), []);
+});
+
+test('ChatService stores an aborted assistant row as a cancelled turn', async () => {
+  const statuses = [];
+  const finishes = [];
+  const llm = {
+    stream(_prompt, options) {
+      return (async function* () {
+        const messageEnd = { type: 'message_end', message: thinkingOnlyMessage('aborted') };
+        await options.persistConversationEvent(messageEnd);
+        yield messageEnd;
+      })();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    startPiMessage: async () => 'message-1',
+    updatePiMessage: async (_conversationId, _messageId, _message, status) => {
+      statuses.push(status);
+    },
+    startToolExecution: async () => 'tool-row-1',
+    updateToolExecution: async () => undefined,
+    finishTurn: async (_conversationId, _turnId, status) => {
+      finishes.push(status);
+    },
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({ text: '', refsJson: null, rehearsalIds: [] }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+  );
+
+  await collect(
+    service.stream(
+      '确认',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  assert.deepEqual(statuses, ['cancelled']);
+  assert.deepEqual(finishes, ['cancelled']);
+});
+
+test('truncated assistant rows are stored as failed', () => {
+  assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'length' }), 'failed');
+  assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'aborted' }), 'cancelled');
+  assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'stop' }), 'completed');
+  assert.equal(getPiMessageStatus({ role: 'toolResult' }), 'completed');
+});
+
+/** Builds the thinking-only assistant message that reasoning models emit on abort or truncation. */
+function thinkingOnlyMessage(stopReason) {
+  return {
+    role: 'assistant',
+    stopReason,
+    content: [{ type: 'thinking', thinking: '规划 SVG 布局' }],
+  };
+}
+
+/** Builds an LlmService whose Pi session creation is replaced per test. */
+function createLlmService() {
+  return new LlmService(
+    {},
+    {},
+    {
+      getLlmSettings: async () => ({
+        provider: 'deepseek',
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
+      }),
+    },
+    {},
+  );
+}

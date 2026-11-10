@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import type { ServerResponse } from 'node:http';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
+import { LlmResponseTruncatedError } from '../llm/llm.service';
 import { ChatPromptDto } from './dto/chat-prompt.dto';
 import { ChatService } from './chat.service';
 import { encodeChatSseEvent } from './chat-sse';
@@ -212,6 +213,9 @@ function writeSseFrame(
 function getSafeErrorMessage(error: unknown): string {
   if (error instanceof NotFoundException) {
     return '对话不存在，请重新开始。';
+  }
+  if (error instanceof LlmResponseTruncatedError) {
+    return '模型输出达到长度上限，本次回答被截断。请重试，或把问题拆小后再发送。';
   }
   if (error instanceof Error && error.message.includes('DEEPSEEK_API_KEY')) {
     return '未配置 DeepSeek API 密钥，请配置后重启应用。';

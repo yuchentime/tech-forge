@@ -90,6 +90,7 @@ test('history tool activity restores an idle snapshot by persisted user message 
         durationMs: 42,
       },
     ],
+    artifacts: [],
     startedAt: 0,
     elapsedMs: null,
   });
