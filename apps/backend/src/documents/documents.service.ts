@@ -26,6 +26,7 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { DataSource, In, Repository, type EntityManager } from 'typeorm';
 import { DocumentParserService } from '../platform/document-parser/document-parser.service';
+import { resolveTeachForgeDataDirectory } from '../platform/local-paths';
 import { EmbeddingService } from '../embedding/embedding.service';
 import { SettingsService } from '../settings/settings.service';
 import {
@@ -156,7 +157,7 @@ export class DocumentsService implements OnModuleInit {
     private readonly settings: SettingsService,
     @Optional() @Inject(DOCUMENTS_STORAGE_ROOT) storageRoot?: string,
   ) {
-    this.storageRoot = storageRoot ?? resolveDefaultStorageRoot();
+    this.storageRoot = storageRoot ?? resolveTeachForgeDataDirectory();
   }
 
   /**
@@ -863,11 +864,6 @@ export class DocumentsService implements OnModuleInit {
   ): Promise<void> {
     await this.versions.update(documentVersionId, { processingStatus: status });
   }
-}
-
-/** Resolves the managed storage root used when no explicit root is injected. */
-function resolveDefaultStorageRoot(): string {
-  return process.env.TEACHFORGE_DATA_DIR ?? join(process.cwd(), '.data');
 }
 
 /** Maps a media type from the file extension for the persisted version row. */

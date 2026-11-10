@@ -36,7 +36,7 @@ npm run build
 npm run start:desktop
 ```
 
-后端数据库默认位于 `apps/backend/.data/teachforge.db`；桌面模式使用 Electron 的应用数据目录。设置 `TEACHFORGE_DATA_DIR` 可覆盖桌面模式的数据目录。数据库结构通过 TypeORM Migration 管理，生产配置关闭 `synchronize`。
+后端数据库默认位于用户主目录 `~/.tech-forge/teachforge.db`（Windows 为 `C:\Users\<user>\.tech-forge\teachforge.db`），与 `config.toml`、知识库副本同一根目录；桌面模式默认使用同一目录。设置 `TEACHFORGE_DATA_DIR` 可覆盖数据目录。未设置该变量且新位置还没有数据库时，backend 首次启动会把旧 Electron `userData` 下的 `teachforge.db`（连同 WAL/SHM）与 `documents/` 一次性迁移到该位置，旧数据不会被覆盖也不会丢失。数据库结构通过 TypeORM Migration 管理，生产配置关闭 `synchronize`。
 
 ## API
 

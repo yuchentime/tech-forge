@@ -7,11 +7,20 @@ import {
 } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { AppModule } from './app.module';
+import { migrateLegacyDataDirectory } from './platform/local-paths';
 
 const READY_PREFIX = 'TEACHFORGE_BACKEND_READY=';
 let nestApp: NestFastifyApplication | undefined;
 
 async function bootstrap(): Promise<void> {
+  // Must run before any provider opens the database: older builds kept it under Electron userData.
+  const migratedDataDirectory = migrateLegacyDataDirectory(
+    process.env.TEACHFORGE_LEGACY_DATA_DIR,
+  );
+  if (migratedDataDirectory) {
+    process.stdout.write(`TEACHFORGE_DATA_MIGRATED=${migratedDataDirectory}\n`);
+  }
+
   const token = process.env.TEACHFORGE_AUTH_TOKEN;
   if (!token) {
     throw new Error('TEACHFORGE_AUTH_TOKEN must be set before starting the backend.');

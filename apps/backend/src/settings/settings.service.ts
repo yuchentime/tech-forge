@@ -5,7 +5,6 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   lstat,
@@ -20,6 +19,7 @@ import {
   DEEPSEEK_MODEL_ID,
   DEEPSEEK_PROVIDER_ID,
 } from '../llm/adapters/llm-adapter';
+import { resolveTeachForgeConfigDirectory } from '../platform/local-paths';
 import type { SaveSettingsInput } from './settings.dto';
 
 type ProviderId = 'deepseek' | 'custom';
@@ -79,7 +79,7 @@ export class SettingsService implements OnModuleInit {
    * Per-user configuration root; `TEACHFORGE_CONFIG_DIR` relocates it (portable installs and
    * isolated integration tests), otherwise it is `<home>/.tech-forge`.
    */
-  private readonly configDirectory = process.env.TEACHFORGE_CONFIG_DIR ?? join(homedir(), '.tech-forge');
+  private readonly configDirectory = resolveTeachForgeConfigDirectory();
   private readonly configPath = join(this.configDirectory, CONFIG_FILE_NAME);
   private readonly soulsPath = join(this.configDirectory, SOULS_FILE_NAME);
   /** Separates Agent-created files from the app-owned config and style files. */

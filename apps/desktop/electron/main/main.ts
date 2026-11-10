@@ -158,11 +158,17 @@ function startBackend(): Promise<void> {
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      TEACHFORGE_DATA_DIR: app.getPath('userData'),
       TEACHFORGE_HOST: '127.0.0.1',
       TEACHFORGE_PORT: '0',
       TEACHFORGE_AUTH_TOKEN: backendToken,
     };
+    // Without an explicit override the backend owns the default `~/.tech-forge` root; Electron's own
+    // `userData` is only reported so a database left there by an older build is moved on first start.
+    if (configuredDataDirectory) {
+      env.TEACHFORGE_DATA_DIR = configuredDataDirectory;
+    } else {
+      env.TEACHFORGE_LEGACY_DATA_DIR = app.getPath('userData');
+    }
     if (app.isPackaged) {
       env.NODE_PATH = path.join(app.getAppPath(), 'node_modules');
     }

@@ -69,6 +69,7 @@ DeepSeek 当前固定端点与两类 Adapter 的详细映射以现有 Provider �
 
 - 功能设计文档描述 DeepSeek 和自定义兼容端点通过 DEEPSEEK_API_KEY、CUSTOM_LLM_BASE_URL、CUSTOM_LLM_API_KEY、CUSTOM_LLM_MODEL 等环境变量配置。此草案将安装后用户设置改为 config.toml + 操作系统安全存储；环境变量是否继续作为开发环境覆盖项尚未决定。
 - 功能设计文档建议 Electron 将 app.getPath('userData') 传给后端作为应用数据目录；当前 database.options.ts 使用 TEACHFORGE_DATA_DIR，未提供时回退到当前工作目录下的 .data。最新用户要求明确 SQLite 主库也属于工作空间；实现时应由工作空间配置确定数据库目录，替代前述 userData/.data 目标。
+- 2026-11-10 用户要求 SQLite 数据库文件默认放在用户主目录 `~/.tech-forge/`。当前实现已按此回落（配置根与数据根同为 `~/.tech-forge`，`TEACHFORGE_DATA_DIR` 可覆盖）。Electron 不再传入 `app.getPath('userData')`，而是以 `TEACHFORGE_LEGACY_DATA_DIR` 报告旧目录；backend 在目标还没有数据库时一次性迁移旧 `teachforge.db`（含 WAL/SHM）与 `documents/`。这与「由工作空间配置确定数据库目录」的草案目标仍不一致：数据目录不随 `workspace.root` 变化，该草案项尚未实现。
 - API Key 使用操作系统安全存储已在功能设计文档中提出；本草案沿用该安全要求。
 
 ## 7. 待决定事项
