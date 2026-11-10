@@ -14,21 +14,18 @@ type DetailStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 const STATUS_PRESENTATION: Record<
   KnowledgeFactMasteryLevel,
-  { label: string; cardClass: string; badgeClass: string }
+  { label: string; badgeClass: string }
 > = {
   needs_improvement: {
     label: '建议加强',
-    cardClass: 'border-orange-200 bg-orange-50/20',
     badgeClass: 'bg-orange-100 text-orange-800',
   },
   basic: {
     label: '基本掌握',
-    cardClass: 'border-violet-200 bg-violet-50/20',
     badgeClass: 'bg-violet-100 text-violet-800',
   },
   proficient: {
     label: '熟练掌握',
-    cardClass: 'border-emerald-200 bg-emerald-50/20',
     badgeClass: 'bg-emerald-100 text-emerald-800',
   },
 };
@@ -36,7 +33,6 @@ const STATUS_PRESENTATION: Record<
 /** Published facts may carry no overall level when evidence is insufficient. */
 const INSUFFICIENT_PRESENTATION = {
   label: '证据不足',
-  cardClass: 'border-stone-200 bg-stone-50/60',
   badgeClass: 'bg-stone-100 text-stone-700',
 };
 
@@ -157,7 +153,13 @@ export function KnowledgeProfilePage({
             ) : listStatus === 'error' ? null : cards.length === 0 ? (
               <p className="py-12 text-center text-sm text-stone-500">还没有可展示的知识掌握卡片。</p>
             ) : (
-              <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+              <div
+                className="grid items-stretch gap-4 lg:gap-5"
+                style={{
+                  // Keep empty tracks so a short row does not stretch its cards across the full width.
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 22rem), 1fr))',
+                }}
+              >
                 {cards.map((card) => (
                   <KnowledgeCardItem
                     card={card}
@@ -199,21 +201,21 @@ function KnowledgeCardItem({
   const presentation = getStatusPresentation(card.masteryLevel);
 
   return (
-    <article className={`rounded-2xl border p-5 ${presentation.cardClass}`}>
+    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-stone-200 bg-white p-4 sm:p-5">
       <span
         className={`inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${presentation.badgeClass}`}
       >
         {presentation.label}
       </span>
 
-      <h2 className="mt-4 break-words text-lg font-semibold tracking-tight text-stone-900">
+      <h2 className="mt-3 break-words text-base font-semibold leading-6 tracking-tight text-stone-900">
         {card.conversationTitle}
       </h2>
 
       <ul aria-label="知识标签" className="mt-3 flex flex-wrap gap-2">
         {card.tags.map((tag) => (
           <li
-            className="rounded-full bg-violet-100/80 px-3 py-1 text-sm text-violet-900"
+            className="rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-sm text-violet-800"
             key={`${card.conversationId}-${tag}`}
           >
             {tag}
@@ -221,24 +223,23 @@ function KnowledgeCardItem({
         ))}
       </ul>
 
-      <section aria-label="评估摘要" className="mt-5">
+      <section aria-label="评估摘要" className="mt-4">
         <h3 className="text-sm font-medium text-stone-700">评估摘要</h3>
-        <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-900">
+        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-800">
           {card.summary}
         </p>
       </section>
 
-      <button
-        className="mt-3 inline-flex min-h-8 items-center text-sm font-medium text-violet-700 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
-        onClick={() => onSelectDetails(card.conversationId)}
-        type="button"
-      >
-        查看详情 →
-      </button>
-
-      <footer className="mt-5 border-t border-stone-300/70 pt-3">
+      <footer className="mt-auto flex items-center justify-between gap-3 border-t border-stone-200 pt-4">
         <button
-          className="inline-flex min-h-9 items-center text-sm font-semibold text-violet-700 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
+          className="inline-flex min-h-9 items-center rounded-lg px-2 text-sm font-medium text-violet-700 hover:bg-violet-50 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
+          onClick={() => onSelectDetails(card.conversationId)}
+          type="button"
+        >
+          查看详情 →
+        </button>
+        <button
+          className="inline-flex min-h-9 items-center rounded-full bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/40 focus-visible:ring-offset-2"
           onClick={() => onSelectConversation(card.conversationId)}
           type="button"
         >
