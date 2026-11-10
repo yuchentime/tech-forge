@@ -131,6 +131,7 @@ export function ConversationSidebar({
               <ConversationRow
                 activeConversationId={state.activeConversationId}
                 conversation={conversation}
+                isChatView={activeView === 'chat'}
                 isRunning={runningConversationIds.has(conversation.id)}
                 isLoading={loadingConversationId === conversation.id}
                 key={conversation.id}
@@ -167,6 +168,7 @@ export function ConversationSidebar({
 function ConversationRow({
   activeConversationId,
   conversation,
+  isChatView,
   isLoading,
   isRunning,
   onSelect,
@@ -174,12 +176,14 @@ function ConversationRow({
 }: {
   activeConversationId: string | null;
   conversation: ConversationSummary;
+  isChatView: boolean;
   isLoading: boolean;
   isRunning: boolean;
   onSelect: (conversationId: string) => void;
   onDelete: (conversationId: string) => void;
 }) {
-  const isActive = activeConversationId === conversation.id;
+  // Only the chat view shows a conversation; other views must not keep a row highlighted.
+  const isActive = isChatView && activeConversationId === conversation.id;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
