@@ -47,7 +47,7 @@ last_verified: 2026-11-09
   - `rehearsalId`、`conversationId`、`status`、`topic`、`persona`、`plan`、`progress`、`currentQuestion`、`turns`、`report`、`endReason`、`startedAt`、`endedAt`、`createdAt`。
   - 首次成功时 `status = awaiting_answer`，`currentQuestion` 是第一条基础题。
   - 同一 `startRequestId` 重放返回已有状态；失败且无 turn 的旧行会原地重试规划。
-- **错误**：400 画像超长；404 conversation 不存在；409 已有进行中演练或普通对话仍有 pending turn；422 没有足够普通历史/模型输出非法；502 Provider 失败；504 模型超时。
+- **错误**：400 画像超长；404 conversation 不存在；409 已有进行中演练或普通对话仍有 pending turn；422 没有足够普通历史/模型输出非法（3 次尝试后仍非法）；502 Provider 失败；504 超时（供应方暂不可用）。
 
 ### Get latest rehearsal
 

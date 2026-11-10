@@ -373,9 +373,15 @@ export class RehearsalStore {
         historyError: null,
       });
     } catch (error) {
+      // A failed report keeps every per-question record. Land on the report view so its
+      // 「重试结束」action is visible instead of leaving the user on a banner alone.
+      const failed = await getRehearsal(detail.rehearsalId).catch(() => null);
       this.update({
         isEnding: false,
-        error: describeFailure(error, '结束演练失败，请重试。'),
+        error: describeFailure(error, '结束演练失败。'),
+        ...(failed?.status === 'failed'
+          ? { detail: failed, view: 'report' as const }
+          : {}),
       });
     }
   }

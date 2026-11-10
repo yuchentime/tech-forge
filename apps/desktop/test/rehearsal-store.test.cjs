@@ -446,3 +446,37 @@ test('a failed persona save keeps the typed text and reports the error', async (
   assert.equal(store.getSnapshot().persona, '新画像');
   assert.match(store.getSnapshot().personaError, /无法保存本机学生画像文件/);
 });
+
+test('a failed report lands on the report view so the retry action stays visible', async () => {
+  installBridge();
+  const baseRequest = global.window.teachforge.request;
+  global.window.teachforge.request = async (input) => {
+    if (input.method === 'POST' && input.path === '/api/rehearsals/r1/end') {
+      return {
+        status: 504,
+        data: {
+          message:
+            '模型服务连续 3 次超时，总体报告没有生成。逐题记录已保留，点「重试结束」可以重新生成报告。如果一直失败，请到设置里确认模型服务和网络是否可用。',
+        },
+      };
+    }
+    if (input.method === 'GET' && input.path === '/api/rehearsals/r1') {
+      return {
+        status: 200,
+        data: { ...updatedDetail, status: 'failed', endReason: 'failed' },
+      };
+    }
+    return baseRequest(input);
+  };
+
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+  await store.end();
+
+  const state = store.getSnapshot();
+  assert.equal(state.view, 'report');
+  assert.equal(state.isEnding, false);
+  assert.equal(state.detail.status, 'failed');
+  assert.match(state.error, /重试结束/);
+  assert.match(state.error, /设置/);
+});

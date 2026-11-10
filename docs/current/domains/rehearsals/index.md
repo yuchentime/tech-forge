@@ -95,10 +95,13 @@ stateDiagram-v2
 
 ## 失败与恢复
 
-- 模型 JSON 非法时重试一次；仍失败返回 422，保留答案供重试。
+- 模型 JSON 非法时最多尝试 3 次（含首次），重试 prompt 在原始 prompt 后追加本次解析错误，要求模型只输出合法 JSON；仍非法返回 422，保留答案供重试。
+- 模型调用本身失败（超时、网络等）不在本服务重试：重试由 Pi SDK 处理，本服务只记录诊断日志并映射为 504/502/409。
+- 面向用户的错误只给「发生了什么 + 下一步按钮」，并按 `label` 定制：`answer` 提示回答已保存、点「重试评估」；`skip` 提示点「重试」；`report` 提示点「重试结束」；`plan` 提示再点「开始演练」。provider 原始文本与模型原始输出只进日志。
+- 面向开发者的日志：`rehearsal.model.call_failed` 记录 `label`、`attempt`、`timedOut`、截断的 `errorMessage` 与错误类型/堆栈；`rehearsal.model.json_invalid` 额外记录 `outputLength`、截断的 `outputPreview` 与 `parseError`。
 - 回答评估失败：turn 转 `failed`，rehearsal 回 `awaiting_answer`；同一 `answerRequestId` 可重试。
 - 跳过生成失败：turn 保持 `skipped`，rehearsal 保持 `preparing_next`；同一 `turnId` 可重试。
-- 报告失败：rehearsal 转 `failed`，保留逐题数据；重试 `end`。
+- 报告失败：rehearsal 转 `failed`，保留逐题数据；桌面端直接进入报告视图并显示「重试结束」，重试 `end`。
 - 进程中断后，读取时 reconciliation 无活跃 run 的行：`evaluating`/`preparing_next` 立即回 `awaiting_answer`，`reporting` 立即转 `failed`；`preparing` 等 120 秒后转 `failed`，避免误伤仍在进行的开场规划。
 - 回答在提交时已写入 `rehearsal_turns.answer`；重启后 `latest` 会恢复题面与历史问答。若上次评估未完成，桌面端显示已保存回答与「重试评估」，用同一回答 + 新请求键继续，不重复创建 turn。
 - 每个 Rehearsal 在进程内串行；`end` 会 abort 进行中的模型调用并等待其退出，迟到结果不写入。

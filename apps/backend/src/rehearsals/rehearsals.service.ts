@@ -20,8 +20,13 @@ import {
   type ConversationHistoryMessage,
   type RestorableConversationHistory,
 } from '../conversations/conversations.service';
-import { LlmService, type LlmConversationContext } from '../llm/llm.service';
 import {
+  LlmService,
+  type LlmConversationContext,
+  type LlmGenerateOptions,
+} from '../llm/llm.service';
+import {
+  clipLogText,
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
@@ -32,6 +37,7 @@ import {
   DIGEST_SUMMARY_CHARS,
   GENERATE_TIMEOUT_MS,
   MAX_FOLLOW_UPS,
+  MAX_GENERATE_ATTEMPTS,
   MAX_PERSONA_LENGTH,
   MAX_TOTAL_QUESTIONS,
   PERSONA_FILE_NAME,
@@ -142,6 +148,37 @@ function buildEvidenceFreeReport(plan: RehearsalPlan | null): RehearsalReport {
 /** Maps a stored status to the UI's active bucket. */
 function isActiveStatus(status: string): boolean {
   return (ACTIVE_REHEARSAL_STATUSES as readonly string[]).includes(status);
+}
+
+/** User-facing name and the exact next step for each structured model call. */
+const MODEL_STEP_COPY: Record<string, { name: string; next: string }> = {
+  plan: { name: '演练计划', next: '请再点一次「开始演练」。' },
+  answer: {
+    name: '评估结果',
+    next: '你的回答已经保存，点「重试评估」即可继续。',
+  },
+  skip: { name: '下一道题', next: '点「重试」可以重新生成下一道题。' },
+  report: {
+    name: '总体报告',
+    next: '逐题记录已保留，点「重试结束」可以重新生成报告。',
+  },
+};
+
+/**
+ * Builds the user-facing explanation when every attempt returned unparseable model output.
+ *
+ * The user gets the consequence plus the exact button to press; the provider's technical text and
+ * the raw output stay in the structured log, never in the HTTP response.
+ */
+function describeInvalidModelOutput(label: string): string {
+  const step = MODEL_STEP_COPY[label] ?? {
+    name: '演练内容',
+    next: '请稍后重试。',
+  };
+  return (
+    `模型连续 ${MAX_GENERATE_ATTEMPTS} 次没有返回可解析的内容，${step.name}没有生成。` +
+    `${step.next}如果仍然失败，可以到设置里换一个模型再试。`
+  );
 }
 
 /** Converts a Date/null into the ISO shape used by the API. */
@@ -1219,7 +1256,14 @@ export class RehearsalsService {
     return this.getById(rehearsal.id, logContext);
   }
 
-  /** Calls the model, parses JSON and retries once with a repair instruction. */
+  /**
+   * Calls the model for one structured result, repairing invalid JSON up to
+   * `MAX_GENERATE_ATTEMPTS` times.
+   *
+   * Only a structural failure is retried here: Pi's SDK already handles transport retries, so a
+   * provider failure goes straight back to the caller's error mapping. A cancelled call is never
+   * retried because the caller already ended the drill.
+   */
   private async generateValidated<T>(
     prompt: string,
     parse: (value: unknown) => T,
@@ -1232,9 +1276,9 @@ export class RehearsalsService {
       signal?: AbortSignal;
     },
   ): Promise<T> {
-    const baseOptions = {
+    const callOptions: LlmGenerateOptions = {
       systemPromptAppend: options.systemPromptAppend,
-      tools: [] as readonly string[],
+      tools: [],
       loadMemory: false,
       timeoutMs: GENERATE_TIMEOUT_MS,
       requestId: options.requestId,
@@ -1243,38 +1287,93 @@ export class RehearsalsService {
         ? { conversation: options.conversation }
         : {}),
     };
-    const first = await this.llm.generate(prompt, baseOptions);
+    return this.generateValidatedAttempt(
+      prompt,
+      prompt,
+      parse,
+      callOptions,
+      options,
+      1,
+    );
+  }
+
+  /**
+   * Runs one model attempt of `generateValidated` and recurses with the repaired prompt while the
+   * output stays unparseable.
+   *
+   * `basePrompt` stays untouched so a repair instruction never stacks across attempts;
+   * `attemptPrompt` is what this attempt actually sends.
+   */
+  private async generateValidatedAttempt<T>(
+    basePrompt: string,
+    attemptPrompt: string,
+    parse: (value: unknown) => T,
+    callOptions: LlmGenerateOptions,
+    options: {
+      logContext: RequestLogContext;
+      label: string;
+      signal?: AbortSignal;
+    },
+    attempt: number,
+  ): Promise<T> {
+    let text: string;
     try {
-      return parse(parseJsonObject(first));
+      text = await this.llm.generate(attemptPrompt, callOptions);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Transport retries belong to the Pi SDK; record the diagnostic detail and let the caller
+      // map the failure to the user-facing status.
       writeStructuredEvent(
         this.logger,
-        'warn',
-        'rehearsal.model.json_invalid',
+        message.includes('cancelled') || options.signal?.aborted
+          ? 'warn'
+          : 'error',
+        'rehearsal.model.call_failed',
         {
           ...options.logContext,
           label: options.label,
+          attempt,
+          timedOut: message.includes('timed out'),
+          errorMessage: clipLogText(message, 500),
           ...getSafeErrorLogFields(error),
         },
       );
+      throw error;
     }
 
-    const repairPrompt = `${prompt}\n\n上一轮输出不是合法 JSON 或字段不完整。请只输出符合要求的 JSON 对象。`;
-    const second = await this.llm.generate(repairPrompt, baseOptions);
     try {
-      return parse(parseJsonObject(second));
+      return parse(parseJsonObject(text));
     } catch (error) {
+      const exhausted = attempt >= MAX_GENERATE_ATTEMPTS;
+      const parseError = error instanceof Error ? error.message : String(error);
       writeStructuredEvent(
         this.logger,
-        'error',
+        exhausted ? 'error' : 'warn',
         'rehearsal.model.json_invalid',
         {
           ...options.logContext,
           label: options.label,
+          attempt,
+          outputLength: Array.from(text).length,
+          outputPreview: clipLogText(text, 500),
+          parseError: clipLogText(parseError, 500),
           ...getSafeErrorLogFields(error),
         },
       );
-      throw new UnprocessableEntityException('演练生成结果不完整，请重试。');
+      if (exhausted) {
+        throw new UnprocessableEntityException(
+          describeInvalidModelOutput(options.label),
+        );
+      }
+      return this.generateValidatedAttempt(
+        basePrompt,
+        `${basePrompt}\n\n上一次输出无法解析：${parseError}。` +
+          '请只输出符合要求的 JSON 对象，不要附加解释或额外字段。',
+        parse,
+        callOptions,
+        options,
+        attempt + 1,
+      );
     }
   }
 
@@ -1785,16 +1884,27 @@ export class RehearsalsService {
     );
   }
 
-  /** Maps model/provider failures to stable HTTP errors without leaking provider text. */
+  /**
+   * Maps non-structured failures to stable HTTP errors with a next step.
+   *
+   * Model calls already raise their own tailored exceptions; this only handles a cancelled drill
+   * and unexpected transport errors, and never forwards provider text to the user.
+   */
   private mapModelError(error: unknown): HttpException {
     if (error instanceof HttpException) return error;
     const message = error instanceof Error ? error.message : '';
     if (message.includes('timed out')) {
-      return new GatewayTimeoutException('演练生成超时，请重试。');
+      return new GatewayTimeoutException(
+        '模型服务长时间没有响应，本次生成没有完成。请稍后重试；如果一直失败，请到设置里确认模型服务和网络是否可用。',
+      );
     }
     if (message.includes('cancelled')) {
-      return new ConflictException('演练已结束或已取消。');
+      return new ConflictException(
+        '这次演练已经结束或已被取消，模型结果不会再写入。请回到会话；需要的话重新开始一次演练。',
+      );
     }
-    return new BadGatewayException('模型服务暂不可用，请重试。');
+    return new BadGatewayException(
+      '模型服务暂时不可用，本次生成没有完成。请稍后重试；如果一直失败，请到设置里确认模型服务和网络是否可用。',
+    );
   }
 }

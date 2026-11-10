@@ -789,3 +789,144 @@ test('the student persona persists in one local file shared by every conversatio
     await ctx.close();
   }
 });
+
+test('a malformed plan is retried with the parse error attached and never stacked', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  const prompts = [];
+  try {
+    ctx.llm.generate = async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) return '这里不是 JSON';
+      if (prompts.length === 2) return JSON.stringify({ topic: '金字塔原理' });
+      return JSON.stringify(PLAN);
+    };
+    const detail = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    assert.equal(detail.currentQuestion.text, PLAN.firstQuestion);
+    assert.equal(prompts.length, 3);
+    assert.ok(prompts[2].startsWith(prompts[0]));
+    assert.equal(prompts[2].split('上一次输出无法解析').length - 1, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('three malformed plan answers end as 422 instead of inventing a plan', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  let calls = 0;
+  try {
+    ctx.llm.generate = async () => {
+      calls += 1;
+      return 'not json';
+    };
+    await assert.rejects(
+      () =>
+        ctx.service.start(
+          conversationId,
+          { startRequestId: randomUUID() },
+          { requestId: randomUUID(), conversationId },
+        ),
+      (error) => {
+        assert.equal(error.getStatus(), 422);
+        assert.match(error.message, /连续 3 次没有返回可解析的内容/);
+        assert.match(error.message, /「开始演练」/);
+        return true;
+      },
+    );
+    assert.equal(calls, 3);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a timeout is not retried at the rehearsal level', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  let calls = 0;
+  try {
+    ctx.llm.generate = async () => {
+      calls += 1;
+      throw new Error('LLM generation timed out.');
+    };
+    await assert.rejects(
+      () =>
+        ctx.service.start(
+          conversationId,
+          { startRequestId: randomUUID() },
+          { requestId: randomUUID(), conversationId },
+        ),
+      (error) => {
+        assert.equal(error.getStatus(), 504);
+        assert.match(error.message, /模型服务长时间没有响应/);
+        assert.match(error.message, /设置/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a provider failure ends as 502 with a next step and no raw provider text', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  let calls = 0;
+  try {
+    ctx.llm.generate = async () => {
+      calls += 1;
+      throw new Error('fetch failed: ECONNRESET upstream-abc');
+    };
+    await assert.rejects(
+      () =>
+        ctx.service.start(
+          conversationId,
+          { startRequestId: randomUUID() },
+          { requestId: randomUUID(), conversationId },
+        ),
+      (error) => {
+        assert.equal(error.getStatus(), 502);
+        assert.match(error.message, /模型服务暂时不可用/);
+        assert.match(error.message, /设置/);
+        assert.doesNotMatch(error.message, /ECONNRESET/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a cancelled model call is never retried', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  let calls = 0;
+  try {
+    ctx.llm.generate = async () => {
+      calls += 1;
+      throw new Error('LLM generation cancelled.');
+    };
+    await assert.rejects(
+      () =>
+        ctx.service.start(
+          conversationId,
+          { startRequestId: randomUUID() },
+          { requestId: randomUUID(), conversationId },
+        ),
+      (error) => {
+        assert.equal(error.getStatus(), 409);
+        assert.match(error.message, /已经结束或已被取消/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    await ctx.close();
+  }
+});
