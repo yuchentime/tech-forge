@@ -126,6 +126,10 @@ async function createContext() {
   const dataSource = app.get(DataSource);
   const conversations = app.get(ConversationsService);
   const llm = createFakeLlm();
+  const knowledgeFacts = {
+    markPending: async () => undefined,
+    wake: () => undefined,
+  };
   const service = new RehearsalsService(
     dataSource,
     conversations,
@@ -137,6 +141,7 @@ async function createContext() {
     },
     new RehearsalRunRegistry(),
     new RehearsalPreparingRegistry(),
+    knowledgeFacts,
   );
 
   return {
@@ -363,6 +368,59 @@ test('follow-up depth is capped and skip creates a new base question', async () 
     assert.equal(skipped.assessment, null);
     assert.equal(skipped.progress.asked, 5);
     assert.equal(skipped.progress.skipped, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a covered plan finishes early instead of filling the question cap', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    const started = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    const first = currentTurn(started);
+    ctx.llm.enqueueDecision({
+      assessment: {
+        level: 'correct',
+        issues: [],
+        evidence: ['回答完整覆盖了结论先行'],
+        missingPoints: [],
+      },
+      planUpdates: [{ id: 'kp1', status: 'covered' }],
+      action: 'finish',
+    });
+
+    const result = await ctx.service.answer(
+      started.rehearsalId,
+      {
+        turnId: first.turnId,
+        answer: '结论先行就是先把最终结论说出来，再展开理由。',
+        answerRequestId: randomUUID(),
+      },
+      { requestId: randomUUID(), rehearsalId: started.rehearsalId },
+    );
+
+    assert.equal(result.completed, true);
+    assert.equal(result.question, null);
+    assert.equal(result.action, null);
+    assert.ok(result.report);
+    assert.equal(result.progress.asked, 1);
+
+    const detail = await ctx.service.getById(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    assert.equal(detail.status, 'completed');
+    assert.equal(detail.endReason, 'coverage');
+    assert.equal(detail.turns.length, 1);
+    assert.equal(detail.turns[0].status, 'evaluated');
+    assert.ok(
+      ctx.llm.calls.some((prompt) => prompt.includes('计划中的知识点已覆盖')),
+    );
   } finally {
     await ctx.close();
   }

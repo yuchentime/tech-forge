@@ -23,6 +23,7 @@ version: 3.0
 ## Scope Anchor
 
 - Original ask: Implement the approved simple session-card design, define a mock API schema in `RehearsalsController`, show complete assessment summaries with on-demand details, and keep a separate conversation entry point. Follow-ups selected reuse of `{ conversationId, fact }` for the existing cards API, then requested a separate detail page with a top-left return action.
+- Follow-up after v3: the facts collection API now exists and intentionally omits large knowledge-point details, so the renderer uses that light list and calls the single-conversation GET only after opening a detail page. This updates the integration boundary without changing the facts API implementation.
 - Design goals in scope: Preserve the current mock route and `{items}` envelope; reuse the conversation-fact item schema; join titles in the renderer; map fact mastery and assessment timestamps to the grid; move long details into a separate view with a top-level back button; retain the card list position and existing conversation navigation.
 - Design items outside ask: Persistent aggregate data, time decay, Markdown rendering, evaluation generation, and database changes.
 

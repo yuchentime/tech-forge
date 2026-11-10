@@ -94,7 +94,7 @@ export function RehearsalMode({
             </button>
           ) : state.view === 'session' && state.detail ? (
             <p className="text-sm font-medium text-stone-700">
-              已回答 {answeredCount}/{state.detail.progress.limit} 题
+              已回答 {answeredCount} 题（最多 {state.detail.progress.limit} 题）
             </p>
           ) : (
             <p className="text-sm font-medium text-stone-500">演练</p>
@@ -196,6 +196,7 @@ export function RehearsalMode({
             answerError={state.answerError}
             detail={state.detail}
             isEnding={state.isEnding}
+            isEvaluatingAnswer={state.isEvaluatingAnswer}
             isSubmitting={state.isSubmitting}
             onAnswer={(answer) => void rehearsalStore.answer(answer)}
             onEnd={handleEnd}

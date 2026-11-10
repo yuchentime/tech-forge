@@ -16,7 +16,7 @@ created_at: 2026-11-10
 ## Tasks
 
 1. [x] Add knowledge card response types.
-2. [x] Add the GET mock route to `RehearsalsController` with mastery-status sorting.
+2. [x] Add the initial mock route to `RehearsalsController`; the page now consumes the facts collection API.
 3. [x] Add a typed desktop API client and the two-column card page.
 4. [x] Add the sidebar entry and route conversation jumps through the existing handler.
 5. [x] Update current knowledge-profile docs and manifest routing.
@@ -25,6 +25,7 @@ created_at: 2026-11-10
 8. [x] Validate nested fact payloads and map them to the existing card presentation.
 9. [x] Update v2 acceptance criteria, design review and current API documentation.
 10. [x] Move long fact details into a separate page with a top-left back action and preserve the list position.
+11. [x] Load the lightweight facts collection for cards and fetch one conversation's full fact only after opening details.
 
 ## Verification Commands
 

@@ -3,7 +3,7 @@ status: implemented
 layer: change
 domain: knowledge-profile
 created_at: 2026-11-10
-version: 3.0
+version: 5.0
 landed_in: working tree (uncommitted)
 updates_current:
   - docs/current/domains/knowledge-profile/index.md
@@ -22,45 +22,43 @@ updates_current:
 
 ## Problem
 
-当前应用没有知识掌握页面或跨会话评估 API。新的视觉稿以会话卡片为浏览单元；各会话的主题可以交叉，因此不建立严格领域树。后端真实聚合数据尚未实现，本次通过 mock API 固定前后端契约并让页面可交互；列表项复用会话事实 API 的响应结构。
+当前应用需要把会话知识事实展示为易读的卡片；各会话的主题可以交叉，因此不建立严格领域树。事实列表和单会话详情 API 已提供，Renderer 应使用轻量列表数据，并延迟加载较大的知识点详情。
 
 ## Goals
 
 - 新增桌面端「知识掌握」视图和简洁双列卡片布局。
-- 在后端定义可替换的卡片响应 schema 与 mock API；每个列表项复用 `{ conversationId, fact }` 会话事实响应结构。
+- 使用现有 facts 列表 API 填充卡片，并在用户打开详情时调用单会话 facts API。
 - 卡片完整显示评估摘要；详情在独立页面查看。
 - 通过单独的「进入会话」入口回到对应会话。
-- 按掌握状态排序，同组按知识点最近有效考察时间倒序。
+- 按掌握状态排序，同组按轻量列表已有的更新时间倒序。
 
 ## Non-Goals
 
-- 不生成或持久化真实跨会话评估。
+- 不从卡片页面重新生成或持久化知识事实；事实由其所属 API 与服务维护。
 - 不改现有演练状态机、报告格式、对话历史 API 或数据表。
 - 不把会话主题归并成稳定知识领域。
 - 不实现 Markdown 解析、证据溯源、分数、图表或复杂筛选。
-- 不构造没有真实会话 ID 的 mock 样例；列表为空时不展示虚假跳转入口。
 
 ## Must-Not-Break Existing Behavior
 
 - 资料库视图仍由左侧栏入口打开，不与「知识掌握」混用。
 - 设置视图和会话列表、会话历史恢复、并行运行状态保持现状。
-- 现有 `/api/rehearsals/:rehearsalId` 和会话级演练路由不被 mock 静态路由遮蔽。
+- 现有 `/api/rehearsals/:rehearsalId` 和会话级演练路由保持可用。
 - 进入卡片关联会话时复用现有 `loadConversation`，不创建新会话或替换现有会话历史。
 
 ## Current Behavior
 
-- `ConversationSidebar` 只提供会话、资料库和设置视图。
-- `RehearsalsController` 暴露单次演练详情与操作，没有知识卡片 API。
-- 演练历史 API 仅按当前 conversation 查询；知识掌握页面尚未实现。
+- `ConversationKnowledgeFactsController` 提供轻量集合读取和单会话完整事实读取。
+- 知识掌握页面以会话卡片显示摘要；知识点详情在单独页面查看。
 
 ## Proposed Behavior
 
 ### API
 
-- `GET /api/rehearsals/knowledge-cards` 保留 `{ items: ... }` 列表外壳，`items[]` 每项为 `{ conversationId, fact }`，字段严格复用 `docs/changes/2026-11-10-conversation-knowledge-facts/api-schema.json` 中的单会话响应 schema。
-- mock fact 在 `RehearsalsController` 定义，并按真实会话 ID 绑定；会话标题由 Renderer 按 ID 与现有会话摘要合并。没有会话时返回空列表，不伪造导航 ID。每个真实会话对应一项；当前 mock 提供完整、已发布的 fact。
-- 卡片等级映射为「建议加强 / 基本掌握 / 熟练掌握」；排序为 `needs_improvement` → `basic` → `proficient`，同组按知识点 `lastAssessedAt` 最大值倒序。不使用 `generatedAt`，不做时间衰减。
-- 当前列表仍是只读 mock API；本次不修改事实表、事实生成 worker 或单会话 facts 路由。
+- 页面通过 `GET /api/knowledge-facts` 读取 `{ items }` 轻量集合；每项包含 `conversationId`、摘要、标签、总体等级和时间/生成状态，不包含 `knowledgePointDetails`。
+- 点击「查看详情」后切换到单独详情页面，并调用 `GET /api/conversations/:conversationId/knowledge-facts` 读取完整事实；详情请求不在列表初始化或排序时触发。
+- 会话标题由 Renderer 按 ID 与现有会话摘要合并。列表只呈现已成功发布且摘要非空、总体等级非空的事实。
+- 掌握状态映射为「建议加强 / 基本掌握 / 熟练掌握」；排序为 `needs_improvement` → `basic` → `proficient`，同组按轻量列表已有的 `updatedAt` 倒序。不为排序读取详情，不做时间衰减。
 
 ### UI
 
@@ -82,7 +80,7 @@ updates_current:
 
 ## Business Flow
 
-用户打开「知识掌握」，读取 mock fact 列表；Renderer 按 `conversationId` 关联已有会话摘要。摘要始终可见；点击详情入口切换到独立详情页面，页顶按钮返回列表；用户也可从卡片进入真实会话。
+用户打开「知识掌握」，读取轻量 fact 列表；Renderer 按 `conversationId` 关联已有会话摘要。摘要始终可见；点击详情入口切换到独立详情页面并按会话读取详情，页顶按钮返回列表；用户也可从卡片进入真实会话。
 
 ## End-to-End Data Interaction Flow
 
@@ -91,16 +89,19 @@ sequenceDiagram
     participant User as 用户
     participant UI as KnowledgeProfilePage
     participant Bridge as Electron JSON Bridge
-    participant API as RehearsalsController
+    participant API as ConversationKnowledgeFactsController
     participant Chat as AgentChatPage / ConversationStore
 
     User->>UI: 打开知识掌握
-    UI->>Bridge: GET /api/rehearsals/knowledge-cards
+    UI->>Bridge: GET /api/knowledge-facts
     Bridge->>API: 转发本机 JSON 请求
-    API-->>Bridge: mock {conversationId, fact} 列表 + 排序
-    Bridge-->>UI: KnowledgeCardsView
+    API-->>Bridge: 不含详情字段的 fact 列表
+    Bridge-->>UI: KnowledgeFactsListView
     User->>UI: 查看详情
-    UI-->>User: 独立详情页面
+    UI->>Bridge: GET /api/conversations/:conversationId/knowledge-facts
+    Bridge->>API: 按会话读取完整 fact
+    API-->>Bridge: 含 knowledgePointDetails 的 fact
+    Bridge-->>UI: 单会话详情
     User->>UI: 点击「← 返回」
     UI-->>User: 返回原卡片列表位置
     User->>UI: 进入会话
@@ -110,52 +111,52 @@ sequenceDiagram
 
 | 关键节点 | 输入 | 节点职责 | 输出 / 状态变化 | 关键边界 |
 |---|---|---|---|---|
-| KnowledgeProfilePage | 视图进入、会话摘要和 fact 列表 | 按 conversationId 补标题、映射展示状态、切换列表/详情视图及发出会话选择 | 卡片列表或单会话详情 | Renderer 只经桌面 bridge 请求 API |
-| RehearsalsController | GET | 返回复用事实 schema 的 mock 列表并排序 | `KnowledgeCardsView` | 不写 SQLite、不运行事实生成 |
+| KnowledgeProfilePage | 视图进入、会话摘要和轻量 fact 列表 | 按 conversationId 补标题、映射展示状态；打开详情后再请求完整 fact | 卡片列表或单会话详情 | Renderer 只经桌面 bridge 请求 API |
+| ConversationKnowledgeFactsController | 集合 GET / 单会话 GET | 列表省略 knowledge-point details，详情按 conversationId 返回完整 fact | 轻量集合 / 单会话详情 | 只读，不由页面触发生成 |
 | AgentChatPage | `conversationId` | 切回 chat 并调用现有会话恢复 | 当前会话切换 | 空 ID 时不可进入 |
 
 ## Data And API Impact
 
-- 不修改实体、数据库 schema 或迁移。
-- 后端列表 item 复用 `ConversationKnowledgeFactsView` 类型；Renderer 为卡片派生展示字段，不要求 API 单独返回 `conversationTitle` 或卡片派生状态。
-- 路由放在 `@Controller('rehearsals')` 下；静态 `knowledge-cards` 路由需先于 `:rehearsalId` 声明，避免被动态参数捕获。
+- 本次不修改实体、数据库 schema、迁移或 facts API。
+- 列表使用 `ConversationKnowledgeFactListItem`；详情使用 `ConversationKnowledgeFactsView`。Renderer 不要求 API 单独返回 `conversationTitle` 或卡片派生状态。
 
 ## Frontend Fetching Logic
 
-- 进入页面时通过 `window.teachforge.request` 请求 GET API；Renderer 使用 `conversationId` 与现有会话摘要合并标题。
-- 错误时保留当前卡片并显示可操作错误文案；不通过浏览器直接请求 NestJS。
+- 进入页面时通过 `window.teachforge.request` 请求 `GET /api/knowledge-facts`，并按 `conversationId` 与现有会话摘要合并标题。
+- 点击「查看详情」后，请求 `GET /api/conversations/:conversationId/knowledge-facts`；只有打开详情页时才传输完整知识点内容。
+- 列表失败可重试；详情失败时留在详情页提供重试，页顶返回仍可回到原列表位置。不通过浏览器直接请求 NestJS。
 
 ## Frontend Behavior
 
-- 卡片摘要完整显示且不折叠；点击「查看详情」进入独立详情页面，页顶「← 返回」回到卡片列表并保留原滚动位置。详情由知识点名称、掌握程度、说明和变化文本组成，不渲染 Markdown。
-- Renderer 仅渲染 `fact !== null`、`generatedAt !== null`、摘要非空且总体 `masteryLevel` 非空的条目；总体等级为空不新增第四种 UI 状态。`knowledgePointDetails` 为空数组时隐藏详情入口。
+- 卡片摘要完整显示且不折叠；点击「查看详情」进入独立详情页面并发起单会话 GET，页顶「← 返回」回到卡片列表并保留原滚动位置。详情由知识点名称、掌握程度、说明和变化文本组成，不渲染 Markdown。
+- Renderer 渲染 `generatedAt !== null`、摘要非空且标签非空的已发布条目；总体 `masteryLevel=null` 时显示第四种状态「证据不足」，不能把“已发布但整体证据不足”误判为没有记录。列表不含 knowledgePointDetails，所以每个有效卡片都显示详情入口；详情为空时显示空详情文案。
 - 点击「进入会话」调用 AgentChatPage 传入的会话选择回调。
 - 显示的卡片都关联真实 conversation ID；标题从 `ConversationSummary` 按 ID 查找，缺失时显示「未命名会话」。
-- `needs_improvement` 映射为「建议加强」，`basic` 映射为「基本掌握」，`proficient` 映射为「熟练掌握」。
+- `needs_improvement` 映射为「建议加强」，`null` 映射为「证据不足」，`basic` 映射为「基本掌握」，`proficient` 映射为「熟练掌握」。
 
 ## Backend Fetching Logic
 
-- GET 读取 controller 中的固定 mock fact，并按真实会话 ID 关联；mock 内容不根据会话内容或演练报告计算。
-- 每次 GET 按等级排序：`needs_improvement` → `basic` → `proficient`，同组按知识点中最新非空 `lastAssessedAt` 倒序；`generatedAt` 只表示事实发布时间，不作为考察时间。
-- 没有会话时返回 `{ items: [] }`；不返回不符合 UUID 契约的示例 ID。mock item 的 `fact` 字段完整符合事实 API schema。
+- facts 服务的列表 API 只查询小字段；`knowledgePointDetails` 保留在持久化行中并由单会话 GET 按需读取。
+- 页面列表排序不使用详情字段：先按等级（建议加强 → 证据不足 → 基本掌握 → 熟练掌握），再按 `updatedAt` 倒序；API 集合本身按 `updatedAt DESC, conversationId ASC` 返回。
 
 ## Backend Behavior
 
-- mock endpoint 不声称是实际演练结论；替换为真实数据前需保留同一字段契约或进行显式 schema 版本调整。
+- Renderer 消费已提供的事实查询契约；卡片展示不触发生成、不写事实数据。
 
 ## Error Handling
 
 - Renderer bridge 不可用时显示桌面端使用提示。
-- GET 非 2xx 或 schema 不匹配时显示重试提示，不清空已加载卡片。
+- 列表 GET 非 2xx 或 schema 不匹配时显示重试提示，不清空已加载卡片。
+- 详情 GET 非 2xx 或 schema 不匹配时在详情页显示重试提示；返回列表时使迟到请求失效，避免旧响应改变视图状态。
 - 空 `conversationId` 禁用导航入口，不发送历史读取请求。
 
 ## Risks
 
-- mock mastery 与真实会话内容不匹配会误导用户；当前页面需作为原型/演示数据使用。
+- 列表摘要与详情可能在后台重新生成期间更新；详情页以按需 GET 返回的当前事实为准。
 
 ## Verification
 
-- 代码走查 API 字段、静态路由顺序和排序顺序。
+- 代码走查列表响应不包含详情字段，打开详情才发起单会话 GET，并检查加载/失败/重试和返回行为。
 - 前端构建/类型检查和桌面端视觉交互检查列入计划，但本次是否执行由用户要求决定。
 
 ## Design Deviations
@@ -165,7 +166,7 @@ sequenceDiagram
 
 ## Version History
 
-<!-- 后续交付后的开发者反馈从 v4.0 开始记录。 -->
+<!-- 后续交付后的开发者反馈从 v5.0 开始记录。 -->
 
 ### v1.0 — 2026-11-10（历史基线）
 
@@ -187,6 +188,20 @@ sequenceDiagram
 - 改动内容：详情从卡片内展开改为独立详情视图；列表保留挂载状态以恢复原滚动位置。
 - 影响范围：知识掌握页面的详情交互与返回行为；API schema、摘要、卡片排序及会话入口保持既有契约。
 - 处理状态：已按反馈实施，产品构建和视觉验收未执行。
+
+### v5.0 — 2026-11-10
+
+- 触发：用户反馈 `conversation_knowledge_facts` 已有记录，但知识掌握页看不到。
+- 根因：事实已发布且摘要/标签完整，但整体 `masteryLevel` 为 null（证据不足）；Renderer 的过滤条件把 null 等级当作未发布。
+- 改动内容：保留 null 等级卡片，新增「证据不足」视觉状态；排序加入该状态；移除“总体等级为空不新增状态”的旧约束。
+- 影响范围：知识掌握卡片过滤、排序与状态展示；列表/详情 API 和事实持久化不变。
+
+### v4.0 — 2026-11-10
+
+- 触发：开发者说明 facts 列表已提供，但为性能考虑不返回详情字段；点击详情需要单独 GET。
+- 改动内容：知识掌握列表改为 `GET /api/knowledge-facts`，详情打开后按会话请求 `GET /api/conversations/:conversationId/knowledge-facts`；增加详情加载、重试和迟到请求失效处理。
+- 影响范围：前端 API 客户端、卡片列表与详情页、当前 API 契约；事实列表不预加载知识点详情。
+- 处理状态：已按反馈实施，测试、构建和视觉验收未执行。
 
 ## Current Doc Updates
 

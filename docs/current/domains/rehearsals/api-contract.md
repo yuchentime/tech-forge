@@ -6,17 +6,20 @@ canonical_for:
   - rehearsal-api-contract
 related:
   - docs/current/domains/rehearsals/index.md
+  - docs/current/domains/knowledge-profile/api-contract.md
   - docs/current/domains/conversations/api-contract.md
   - docs/current/platform/agent-runtime.md
   - docs/changes/2026-11-09-rehearsal-mode/design.md
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 ---
 
 # 演练 API 契约
 
 ## Scope
 
-- 覆盖演练开始、状态读取、回答、跳过、结束与历史列表。
+- 覆盖演练开始、状态读取、回答、跳过、结束、历史列表及会话知识掌握事实只读查询。
+- 知识掌握的 mock 卡片读取路由定义在同一 controller 下，但归知识掌握域所有，契约见[知识掌握接口](../knowledge-profile/api-contract.md)。
+- 会话知识事实的生成规则、持久化和失败恢复见[演练模式](index.md#会话知识掌握事实)；本文件只定义 HTTP 契约。
 - 所有接口通过现有 Electron JSON bridge 调用，受本地 token 与 loopback origin 检查保护；不接受账号、身份或租户参数。
 - v1 使用 JSON 请求/响应，不使用 SSE。
 - 字段使用 camelCase；时间使用 ISO 8601；ID 使用 UUIDv4。
@@ -151,7 +154,8 @@ last_verified: 2026-11-09
 }
 ```
 
-- 完成时 `completed=true`、`question=null`、`report` 非空。
+- 完成时 `completed=true`、`question=null`、`report` 非空。模型判断计划知识点已覆盖时提前完成，`endReason='coverage'`；达到 15 次上限时为 `limit`。
+- 模型动作可为 `follow_up` / `next_question` / `finish`，但 `finish` 只用于提前结束，不会作为响应中的下一动作返回；完成响应的 `action=null`。
 - `(rehearsalId, answerRequestId)` 唯一；重放返回首次结果。`turnId` 必须是当前可回答 turn。
 - 进程重启后，若 turn 已是 `answer_saved`/`failed` 且保留了回答，客户端可用同一回答和新 `answerRequestId` 重新提交；后端会采纳新请求键并继续评估，不重复创建 turn。
 - **错误**：400 空回答或超长；404；409 状态/题目已变化或并发；422 模型输出非法；502 Provider 失败；504 超时。
@@ -184,6 +188,93 @@ last_verified: 2026-11-09
 - **响应**：HTTP 200 `{ "rehearsalId": "uuid", "discarded": true }`。
 - **错误**：409 已有回答或正在处理。
 
+### List conversation knowledge facts
+
+- **方法**：`GET`
+- **路径**：`/api/knowledge-facts`
+- **请求体 / 查询参数**：无；不返回分页。
+- **行为**：只读 SQLite，返回全部事实行，按 `updatedAt DESC, conversationId ASC` 排序；不触发生成、不修复状态、不设置缓存。
+- **性能边界**：列表项**不读取、不返回** `knowledgePointDetails`；需要知识点详情时使用单会话接口。
+- **响应**：HTTP 200：
+
+```json
+{
+  "items": [
+    {
+      "conversationId": "11111111-1111-4111-8111-111111111111",
+      "summary": "已能解释牛顿第二定律，复杂情境尚待验证。",
+      "tags": ["力学"],
+      "masteryLevel": "basic",
+      "generationStatus": "completed",
+      "lastError": null,
+      "generatedAt": "2026-11-10T08:00:00.000Z",
+      "createdAt": "2026-11-10T08:00:00.000Z",
+      "updatedAt": "2026-11-10T09:00:00.000Z"
+    }
+  ]
+}
+```
+
+- 无记录返回 `{ "items": [] }`。
+- 每项字段可空性与单会话 `fact` 相同：`generatedAt=null` 时 `summary`、`tags`、`masteryLevel` 均为 `null`；`failed` 时 `lastError` 非空，其他状态为 `null`。
+- 时间为 UTC ISO 8601。列表项没有 `knowledgePointDetails` 字段，因此不能用它判断是否有已发布内容；使用 `generatedAt`。
+- **错误**：401 本机 token 缺失或错误；403 任意 Origin（优先于 token）；500 读取失败或持久化 JSON 损坏，不泄露原始 JSON/SQL。
+
+### Get conversation knowledge facts
+
+- **方法**：`GET`
+- **路径**：`/api/conversations/:conversationId/knowledge-facts`
+- **请求体 / 查询参数**：无。
+- **行为**：只读 SQLite，不触发生成、不修复任务状态、不重算事实、不设置缓存。会话与事实从同一读取视图确认；生成失败不改变 HTTP 200，只通过 `generationStatus`/`lastError` 表达。
+- **响应**：HTTP 200：
+
+```json
+{
+  "conversationId": "11111111-1111-4111-8111-111111111111",
+  "fact": {
+    "summary": "已能解释牛顿第二定律，复杂情境尚待验证。",
+    "knowledgePointDetails": [
+      {
+        "name": "牛顿第二定律",
+        "masteryLevel": "basic",
+        "evidenceStatus": "sufficient",
+        "details": "已能解释概念，复杂情境尚未验证。",
+        "changeDescription": "本次为首次有效评估，尚无纵向比较。",
+        "lastAssessedAt": "2026-11-10T07:50:00.000Z",
+        "evidenceRefs": [
+          {
+            "rehearsalId": "22222222-2222-4222-8222-222222222222",
+            "pointId": "point-1"
+          }
+        ]
+      }
+    ],
+    "tags": ["力学"],
+    "masteryLevel": "basic",
+    "generationStatus": "completed",
+    "lastError": null,
+    "generatedAt": "2026-11-10T08:00:00.000Z",
+    "createdAt": "2026-11-10T08:00:00.000Z",
+    "updatedAt": "2026-11-10T09:00:00.000Z"
+  }
+}
+```
+
+- 会话存在但从未登记事实时返回 `{ "conversationId": "...", "fact": null }`，不返回 404。
+- 首次尚未成功时 `summary`、`knowledgePointDetails`、`tags`、`masteryLevel` 均为 `null`，`generatedAt=null`；`generationStatus` 为 `pending` / `running` / `failed`。旧事实存在时更新中或更新失败返回完整上次成功内容，不拼入本次半成品。
+- 成功发布后 `summary` 非空且 ≤200 Unicode code points；`knowledgePointDetails` 为数组（允许 `[]`）；`tags` 为 0–8 个去重非空字符串；`masteryLevel` 为 `proficient` / `basic` / `needs_improvement` 或 `null`；`generatedAt` 为最近成功时间。
+- `knowledgePointDetails[]` 字段固定为 `name`、`masteryLevel`、`evidenceStatus`、`details`、`changeDescription`、`lastAssessedAt`、`evidenceRefs`。`evidenceStatus=insufficient` 时等级与 `lastAssessedAt` 为 `null`；`sufficient` 时二者非空；`conflicting` 允许为空。`evidenceRefs` 去重，`rehearsalId` 为 UUID，`pointId` 非空，且引用必须来自本次评估或旧事实原样携带并在同会话真实存在。
+- 时间为 UTC ISO 8601；`generatedAt=null` 表示尚无已发布事实，消费者不能把 `generationStatus` 当作内容是否存在。`lastError` 仅在 `failed` 时非空且 ≤500 字符，其他状态为 `null`。
+- 生成失败仍返回 HTTP 200；不是 502/504。
+- **错误**：
+  - 400：`conversationId` 非 UUIDv4，`message` 为校验信息。
+  - 401：本机 token 缺失或错误，`{ "statusCode": 401, "message": "Unauthorized." }`。
+  - 403：任意 Origin 请求头，优先于 token 校验，`{ "statusCode": 403, "message": "Origin is not allowed." }`。
+  - 404：会话不存在，返回安全提示，不返回 `fact: null`。
+  - 500：读取失败或持久化 JSON 损坏；返回通用信息，不泄露原始 JSON/SQL。
+
+机器可读响应契约见变更中的 [`api-schema.json`](../../../changes/2026-11-10-conversation-knowledge-facts/api-schema.json)。
+
 ### Read the shared student persona
 
 - **方法**：`GET`
@@ -204,9 +295,9 @@ last_verified: 2026-11-09
 
 ## 状态与计数
 
-- `progress.asked` 包含基础题、追问和跳过；`remaining = limit - asked`。
+- `progress.asked` 包含基础题、追问和跳过；`remaining = limit - asked` 是距离上限的余量，不是必须完成的题数。
 - `progress.currentFollowUpDepth` 只反映当前可回答/评估中的 turn；列表摘要固定为 0。
-- `endReason`：`manual`、`limit`、`failed`。
+- `endReason`：`manual`（用户手动结束）、`coverage`（计划知识点已覆盖，模型提前结束）、`limit`（达到 15 次提问上限）、`failed`（报告失败）。
 - `turns[].status`：`awaiting_answer`、`answer_saved`、`evaluated`、`skipped`、`unanswered`、`failed`。
 
 ## 重启与恢复

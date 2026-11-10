@@ -137,7 +137,15 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
    * Rehearsal uses it to name what the preparing screen is waiting on; chat never passes it.
    * The callback is diagnostic only and must not influence the call.
    */
-  onPhase?: (phase: 'session' | 'provider') => void;
+  onPhase?: (phase: "session" | "provider") => void;
+  /**
+   * Builds the final user prompt after the provider/model for this call has been resolved.
+   *
+   * The callback receives the same context window used by the created session, so callers can
+   * budget the prompt against the actual model instead of reading settings a second time. Throwing
+   * fails the call before the provider runs. Existing string-only callers keep passing `prompt`.
+   */
+  buildPrompt?: (context: { contextWindow: number | null }) => string;
 }
 
 /** Controls how one Pi session is assembled without changing business-level request options. */
@@ -145,6 +153,8 @@ interface PiSessionBuildOptions {
   systemPromptAppend?: string;
   tools?: readonly string[];
   loadMemory?: boolean;
+  /** Publishes the resolved model's context window to the caller that builds the prompt. */
+  onModelResolved?: (contextWindow: number | null) => void;
 }
 
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -652,10 +662,14 @@ export class LlmService {
         ...options,
         ...getSelectedModelIds(modelSettings),
       };
+      let resolvedContextWindow: number | null = null;
       session = await this.createSession(resolved, modelSettings, undefined, {
         systemPromptAppend: options.systemPromptAppend,
         tools: options.tools,
         loadMemory: options.loadMemory,
+        onModelResolved: (contextWindow) => {
+          resolvedContextWindow = contextWindow;
+        },
       });
       const activeSession = session;
       unsubscribeSessionEvents = activeSession.subscribe((event) =>
@@ -696,7 +710,9 @@ export class LlmService {
         if (options.signal?.aborted) abortSession();
         phase = "provider_run";
         reportPhase("provider");
-        const modelPrompt = composeModelPrompt(prompt, options.promptContext);
+        const modelPrompt = options.buildPrompt
+          ? options.buildPrompt({ contextWindow: resolvedContextWindow })
+          : composeModelPrompt(prompt, options.promptContext);
         const run = session.prompt(modelPrompt, { expandPromptTemplates: false });
         // The abort race may settle first; keep the provider promise from becoming unhandled.
         void run.catch(() => undefined);
@@ -843,6 +859,9 @@ export class LlmService {
           "A configured Pi model is required to restore conversation history.",
         );
       }
+      // Hand the already-resolved window to the caller's prompt builder. Reading settings again
+      // there could observe a different model than the session actually uses.
+      buildOptions.onModelResolved?.(model?.contextWindow ?? null);
 
       const agentDir = sdk.getAgentDir();
       phase = "workspace_tool_load";

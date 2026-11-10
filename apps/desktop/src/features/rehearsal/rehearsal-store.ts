@@ -35,6 +35,8 @@ export interface RehearsalSnapshot {
   /** True for the brief window where the bar fills to 100% before the view swaps. */
   preparingComplete: boolean;
   isSubmitting: boolean;
+  /** True only while an answer evaluation is in flight; skip/report submits leave it false. */
+  isEvaluatingAnswer: boolean;
   isEnding: boolean;
   pendingAnswer: {
     turnId: string;
@@ -65,6 +67,7 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   preparing: null,
   preparingComplete: false,
   isSubmitting: false,
+  isEvaluatingAnswer: false,
   isEnding: false,
   pendingAnswer: null,
   answerError: null,
@@ -314,6 +317,7 @@ export class RehearsalStore {
         : requestId();
     this.update({
       isSubmitting: true,
+      isEvaluatingAnswer: true,
       answerError: null,
       pendingAnswer: {
         turnId: question.turnId,
@@ -333,6 +337,7 @@ export class RehearsalStore {
         result.completed || refreshed.status === 'completed';
       this.update({
         isSubmitting: false,
+        isEvaluatingAnswer: false,
         detail: refreshed,
         view: completed ? 'report' : 'session',
         pendingAnswer: null,
@@ -346,6 +351,7 @@ export class RehearsalStore {
     } catch (error) {
       this.update({
         isSubmitting: false,
+        isEvaluatingAnswer: false,
         answerError: describeFailure(error, '回答评估失败，请重试。'),
       });
     }

@@ -40,7 +40,7 @@ export function renderTranscriptMarkdown(
     `- 时间：${formatDate(rehearsal.createdAt)}`,
     `- 学生画像：${rehearsal.personaText?.trim() || '默认好奇学生画像'}`,
     `- 结束方式：${formatEndReason(rehearsal.endReason)}`,
-    `- 提问进度：${rehearsal.askedQuestionCount}/${MAX_TOTAL_QUESTIONS}，跳过 ${rehearsal.skippedCount} 题`,
+    `- 提问次数：${rehearsal.askedQuestionCount}（最多 ${MAX_TOTAL_QUESTIONS}），跳过 ${rehearsal.skippedCount} 题`,
     '',
     '## 总体评估',
     report?.summary || '本次未生成总体评估。',
@@ -244,6 +244,7 @@ function formatDate(value: Date | string | null): string {
 
 function formatEndReason(value: string | null): string {
   if (value === 'limit') return '达到 15 次提问上限';
+  if (value === 'coverage') return '计划知识点已覆盖，提前结束';
   if (value === 'manual') return '用户手动结束';
   return value ?? '未结束';
 }

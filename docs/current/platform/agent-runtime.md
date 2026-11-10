@@ -187,6 +187,8 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - 每题动作只有 `follow_up` / `next_question`；第 15 问（含跳过）由后端转 `reporting`，模型不能提前结束。
 - 报告完成写 `rehearsals.overallEvaluationJson` 和 `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md`。普通对话下一轮由 `ChatService` 调 `buildConversationDigest()`，把最近 3 次摘要放进 `promptContext`；`contextRefsJson.rehearsals` 记录实际注入的 id。
 - `generate()` 不注册 `persistConversationEvent`，因此不会触发 `ConversationsService` 的消息持久化钩子。
+- `generate()` 支持可选的 `buildPrompt({contextWindow})`：在 provider/model 解析完成后、调用 `session.prompt()` 前用同一次解析的实际窗口构造最终输入。不传该回调时保持原有字符串 prompt 行为。会话知识事实使用该入口做预算截断，避免读取两次配置导致模型漂移。
+- 会话知识事实使用同一 `generate()` 边界但独立 AbortSignal、`tools: []`、`loadMemory: false`、固定 system prompt，不传父 conversation；后台 worker 不写普通消息、Pi 快照或 SOULS。行为见[演练模式](../domains/rehearsals/index.md#会话知识掌握事实)。
 
 详细状态机与 API 见[演练模式](../domains/rehearsals/index.md)。
 

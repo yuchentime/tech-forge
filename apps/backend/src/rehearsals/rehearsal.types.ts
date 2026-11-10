@@ -21,8 +21,15 @@ export type RehearsalTurnStatus =
   | 'failed';
 
 export type RehearsalTurnKind = 'base' | 'follow_up';
-export type RehearsalEndReason = 'manual' | 'limit' | 'failed';
+export type RehearsalEndReason =
+  | 'manual'
+  | 'limit'
+  | 'coverage'
+  | 'failed';
+/** Next step returned to the UI; a finished drill has no next step. */
 export type RehearsalAction = 'follow_up' | 'next_question';
+/** Model-chosen continuation: finish means the covered content is sufficient. */
+export type RehearsalDecisionAction = RehearsalAction | 'finish';
 export type AssessmentLevel = 'correct' | 'partial' | 'incorrect' | 'uncertain';
 export type PlanPointStatus = 'pending' | 'covered' | 'weak';
 export type MasteryStatus = 'mastered' | 'partial' | 'weak' | 'unverified';
@@ -97,7 +104,7 @@ export interface RehearsalPlanUpdate {
 export interface RehearsalDecision {
   assessment: RehearsalAssessment;
   planUpdates: RehearsalPlanUpdate[];
-  action: RehearsalAction;
+  action: RehearsalDecisionAction;
   nextQuestion?: string;
   reason?: string;
 }

@@ -32,6 +32,7 @@ import {
   type RequestLogContext,
 } from '../logging/structured-logger';
 import { SettingsService } from '../settings/settings.service';
+import { ConversationKnowledgeFactsService } from './conversation-knowledge-facts.service';
 import {
   ACTIVE_REHEARSAL_STATUSES,
   DIGEST_SUMMARY_CHARS,
@@ -205,6 +206,7 @@ export class RehearsalsService {
     private readonly settings: SettingsService,
     private readonly runs: RehearsalRunRegistry,
     private readonly preparing: RehearsalPreparingRegistry,
+    private readonly knowledgeFacts: ConversationKnowledgeFactsService,
   ) {}
 
   /**
@@ -588,13 +590,24 @@ export class RehearsalsService {
         throw this.mapModelError(error);
       }
 
+      // The cap is only an upper bound: the model may finish as soon as the planned points are
+      // covered, and `finish` must never create another turn.
       const completeByLimit =
         evaluating.askedQuestionCount >= MAX_TOTAL_QUESTIONS;
+      const completeByCoverage =
+        !completeByLimit && decision.action === 'finish';
+      const complete = completeByLimit || completeByCoverage;
+      const completeReason = completeByLimit ? 'limit' : 'coverage';
       const followUp =
-        !completeByLimit &&
+        !complete &&
         decision.action === 'follow_up' &&
         answeredTurn.followUpDepth < MAX_FOLLOW_UPS;
-      const nextQuestion = decision.nextQuestion;
+      const nextQuestion = complete ? '' : decision.nextQuestion ?? '';
+      if (!complete && !nextQuestion) {
+        throw new UnprocessableEntityException(
+          '模型没有生成下一道题，请重试评估。',
+        );
+      }
       const now = new Date();
       let nextTurn: RehearsalTurnEntity | null = null;
 
@@ -611,13 +624,13 @@ export class RehearsalsService {
           },
         );
 
-        if (completeByLimit) {
+        if (complete) {
           await rehearsalRepository.update(
             { id: rehearsalId },
             {
               planJson: JSON.stringify(updatedPlan),
               status: 'reporting',
-              endReason: 'limit',
+              endReason: completeReason,
             },
           );
           return;
@@ -659,11 +672,11 @@ export class RehearsalsService {
       const finalTurns = await this.loadTurns(rehearsalId);
       const finalRehearsal = await this.requireRehearsal(rehearsalId);
       let report: RehearsalReport | null = null;
-      if (completeByLimit) {
+      if (complete) {
         report = await this.finishRehearsal(
           finalRehearsal,
           finalTurns,
-          'limit',
+          completeReason,
           logContext,
           lease.controller.signal,
         );
@@ -674,7 +687,8 @@ export class RehearsalsService {
         rehearsalId,
         asked: finalRehearsal.askedQuestionCount,
         followUp,
-        completed: completeByLimit,
+        completed: complete,
+        endReason: complete ? completeReason : null,
         elapsedMs: Date.now() - startedAt,
       });
       return this.toAnswerResult(
@@ -1452,7 +1466,7 @@ export class RehearsalsService {
   private async finishRehearsal(
     rehearsal: RehearsalEntity,
     turns: readonly RehearsalTurnEntity[],
-    endReason: 'manual' | 'limit',
+    endReason: 'manual' | 'limit' | 'coverage',
     logContext: RequestLogContext,
     signal?: AbortSignal,
   ): Promise<RehearsalReport> {
@@ -1500,15 +1514,24 @@ export class RehearsalsService {
       }
     }
 
-    await this.dataSource.getRepository(RehearsalEntity).update(
-      { id: rehearsal.id },
-      {
-        status: 'completed',
-        overallEvaluationJson: JSON.stringify(report),
-        endReason,
-        endedAt: new Date(),
-      },
-    );
+    const endedAt = new Date();
+    // The report and its background fact signal commit together: a report can never be visible
+    // without the pending row that asks for fact regeneration, and a rolled-back report leaves no
+    // orphan task.
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(RehearsalEntity).update(
+        { id: rehearsal.id },
+        {
+          status: 'completed',
+          overallEvaluationJson: JSON.stringify(report),
+          endReason,
+          endedAt,
+        },
+      );
+      await this.knowledgeFacts.markPending(manager, rehearsal.conversationId);
+    });
+    // Wake after commit; a lost wake is recovered by the fact worker's periodic scan.
+    this.knowledgeFacts.wake(rehearsal.conversationId);
     const completed = await this.requireRehearsal(rehearsal.id);
     this.ensureTranscript(completed, turns, true);
     writeStructuredEvent(this.logger, 'log', 'rehearsal.report.completed', {

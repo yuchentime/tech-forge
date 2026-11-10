@@ -62,7 +62,8 @@ ${input.personaText?.trim() || '未提供，使用默认好奇学生画像。'}
   ],
   "firstQuestion": "第一道基础题"
 }
-知识点 3-8 个，id 唯一；firstQuestion 只能是一道题，必须能从学习内容得到依据。`;
+知识点 1-8 个，按对话实际覆盖的内容确定，id 唯一。内容少时可以只列 1-2 个，不要为凑数拆分或编造。
+15 次提问只是后续上限，不是必须完成的题量；firstQuestion 只能是一道题，必须能从学习内容得到依据。`;
 }
 
 /** Builds the answer-evaluation decision call. */
@@ -90,7 +91,7 @@ ${input.currentTurn.question}
 ${input.answer}
 
 ## 计数
-已提问 ${input.askedCount}/15。
+已提问 ${input.askedCount} 次，最多 15 次（含追问和跳过）。
 
 ## 输出要求
 只输出以下 JSON：
@@ -104,13 +105,14 @@ ${input.answer}
   "planUpdates": [
     { "id": "kp1", "status": "covered | weak | pending", "note": "可选" }
   ],
-  "action": "follow_up | next_question",
-  "nextQuestion": "下一道题",
+  "action": "follow_up | next_question | finish",
+  "nextQuestion": "下一道题；action 为 finish 时可省略",
   "reason": "一句话说明"
 }
 评估必须基于回答本身；回答没有证据时用 uncertain，不要臆测。
-如果本题追问深度已经是 2，action 必须是 next_question。
-如果计划中的知识点都已覆盖，优先追问薄弱点或设计迁移题，不要停止提问。`;
+如果本题追问深度已经是 2，action 必须是 next_question 或 finish。
+15 次只是上限，不是目标。对话内容少时，覆盖计划中的知识点后就应该用 finish 结束，不要为凑次数硬加迁移题。
+只有确实还有 pending/weak 的知识点、或回答暴露了需要澄清的关键缺口时，才继续 follow_up 或 next_question；没有这些缺口时用 finish。`;
 }
 
 /** Builds the skip call; skip never evaluates the current question. */
@@ -134,7 +136,7 @@ ${input.skippedTurn.question}
 用户跳过了这道题，不要评估它，也不要对它追问。
 
 ## 计数
-已提问 ${input.askedCount}/15。
+已提问 ${input.askedCount} 次，最多 15 次（含追问和跳过）。
 
 ## 输出要求
 只输出以下 JSON：
@@ -152,7 +154,7 @@ ${input.skippedTurn.question}
 export function buildReportPrompt(input: {
   plan: RehearsalPlan;
   turns: readonly RehearsalTurnEntity[];
-  endReason: 'manual' | 'limit';
+  endReason: 'manual' | 'limit' | 'coverage';
 }): string {
   return `## 学习摘要
 ${input.plan.learningSummary}
@@ -164,7 +166,11 @@ ${JSON.stringify(input.plan.knowledgePoints)}
 ${JSON.stringify(serializeTurns(input.turns, 500), null, 2)}
 
 ## 结束方式
-${input.endReason === 'limit' ? '已达到 15 次提问上限。' : '用户手动结束。'}
+${input.endReason === 'limit'
+    ? '已达到 15 次提问上限。'
+    : input.endReason === 'coverage'
+      ? '计划中的知识点已覆盖，模型判断可以结束。'
+      : '用户手动结束。'}
 
 ## 输出要求
 只输出以下 JSON：

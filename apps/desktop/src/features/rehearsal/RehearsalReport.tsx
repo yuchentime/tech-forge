@@ -48,7 +48,7 @@ export function RehearsalReport({
           {mode === 'history' ? '历史演练 · ' : ''}
           {formatRehearsalDate(detail.endedAt ?? detail.createdAt)}
           {detail.endReason ? ` · ${endReasonLabel(detail.endReason)}` : ''}
-          {` · 已提问 ${detail.progress.asked}/${detail.progress.limit}`}
+          {` · 已提问 ${detail.progress.asked} 次（最多 ${detail.progress.limit} 次）`}
           {detail.progress.skipped > 0
             ? ` · 跳过 ${detail.progress.skipped}`
             : ''}

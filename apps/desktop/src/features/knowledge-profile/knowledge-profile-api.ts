@@ -45,15 +45,28 @@ export interface KnowledgeFactView {
   updatedAt: string;
 }
 
-/** One item in the existing cards collection, reusing the single-conversation fact response. */
-export interface KnowledgeFactResponse {
+/** Small fact row returned by the collection endpoint; knowledge-point details are omitted. */
+export interface KnowledgeFactListItem {
   conversationId: string;
-  fact: KnowledgeFactView | null;
+  summary: string | null;
+  tags: string[] | null;
+  masteryLevel: KnowledgeFactMasteryLevel | null;
+  generationStatus: KnowledgeFactGenerationStatus;
+  lastError: string | null;
+  generatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-/** Response envelope retained by the existing knowledge-cards route. */
-interface KnowledgeCardsView {
-  items: KnowledgeFactResponse[];
+/** Response envelope returned by the lightweight collection endpoint. */
+interface KnowledgeFactsListView {
+  items: KnowledgeFactListItem[];
+}
+
+/** Single-conversation endpoint response, including its optional published fact. */
+export interface ConversationKnowledgeFactsView {
+  conversationId: string;
+  fact: KnowledgeFactView | null;
 }
 
 const MASTERY_LEVELS = new Set<KnowledgeFactMasteryLevel>([
@@ -76,17 +89,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const ISO_DATE_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-/** Loads and validates the fact-shaped list through the restricted local desktop bridge. */
-export async function loadKnowledgeCards(): Promise<KnowledgeFactResponse[]> {
+/** Loads lightweight fact rows through the restricted local desktop bridge. */
+export async function loadKnowledgeFacts(): Promise<KnowledgeFactListItem[]> {
   if (!hasDesktopBridge()) {
     throw new Error('请通过 TeachForge 桌面应用查看知识掌握。');
   }
 
   const response = await window.teachforge.request<unknown>({
     method: 'GET',
-    path: '/api/rehearsals/knowledge-cards',
+    path: '/api/knowledge-facts',
   });
-  if (response.status !== 200 || !isKnowledgeCardsView(response.data)) {
+  if (response.status !== 200 || !isKnowledgeFactsListView(response.data)) {
     throw new Error(
       readBackendErrorMessage(response.data, '读取知识掌握情况失败，请重试。'),
     );
@@ -94,24 +107,147 @@ export async function loadKnowledgeCards(): Promise<KnowledgeFactResponse[]> {
   return response.data.items;
 }
 
-/** Checks the collection envelope and every nested response against the closed API schema. */
-function isKnowledgeCardsView(value: unknown): value is KnowledgeCardsView {
+/** Loads one full fact only after the user opens that conversation's detail page. */
+export async function loadConversationKnowledgeFact(
+  conversationId: string,
+): Promise<KnowledgeFactView | null> {
+  if (!hasDesktopBridge()) {
+    throw new Error('请通过 TeachForge 桌面应用查看知识掌握。');
+  }
+  if (!UUID_PATTERN.test(conversationId)) {
+    throw new Error('会话标识无效，无法读取评估详情。');
+  }
+
+  const response = await window.teachforge.request<unknown>({
+    method: 'GET',
+    path: `/api/conversations/${encodeURIComponent(conversationId)}/knowledge-facts`,
+  });
+  if (
+    response.status !== 200 ||
+    !isConversationKnowledgeFactsView(response.data) ||
+    response.data.conversationId !== conversationId
+  ) {
+    throw new Error(
+      readBackendErrorMessage(response.data, '读取评估详情失败，请重试。'),
+    );
+  }
+  return response.data.fact;
+}
+
+/** Checks the lightweight collection envelope and each detail-free fact row. */
+function isKnowledgeFactsListView(value: unknown): value is KnowledgeFactsListView {
   return (
     isRecord(value) &&
     hasOnlyKeys(value, ['items']) &&
     Array.isArray(value.items) &&
-    value.items.every(isKnowledgeFactResponse)
+    value.items.every(isKnowledgeFactListItem)
   );
 }
 
-/** Validates the single-conversation response reused by each collection item. */
-function isKnowledgeFactResponse(value: unknown): value is KnowledgeFactResponse {
+/** Validates the compact collection row without expecting the omitted details field. */
+function isKnowledgeFactListItem(value: unknown): value is KnowledgeFactListItem {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      'conversationId',
+      'summary',
+      'tags',
+      'masteryLevel',
+      'generationStatus',
+      'lastError',
+      'generatedAt',
+      'createdAt',
+      'updatedAt',
+    ]) &&
+    typeof value.conversationId === 'string' &&
+    UUID_PATTERN.test(value.conversationId) &&
+    isNullableNonEmptyString(value.summary, 200) &&
+    isNullableTags(value.tags) &&
+    isNullableMasteryLevel(value.masteryLevel) &&
+    isGenerationStatus(value.generationStatus) &&
+    isNullableError(value.lastError) &&
+    (value.generatedAt === null || isIsoDateTime(value.generatedAt)) &&
+    isIsoDateTime(value.createdAt) &&
+    isIsoDateTime(value.updatedAt) &&
+    isListLifecycleValid(value)
+  );
+}
+
+/** Validates the full single-conversation response returned on demand. */
+function isConversationKnowledgeFactsView(
+  value: unknown,
+): value is ConversationKnowledgeFactsView {
   return (
     isRecord(value) &&
     hasOnlyKeys(value, ['conversationId', 'fact']) &&
     typeof value.conversationId === 'string' &&
     UUID_PATTERN.test(value.conversationId) &&
     (value.fact === null || isKnowledgeFact(value.fact))
+  );
+}
+
+/** Validates the lifecycle/content relationship of the detail-free collection fields. */
+function isListLifecycleValid(value: Record<string, unknown>): boolean {
+  const hasPublishedContent = value.generatedAt !== null;
+  const contentIsValid = hasPublishedContent
+    ? typeof value.summary === 'string' && Array.isArray(value.tags)
+    : value.summary === null &&
+      value.tags === null &&
+      value.masteryLevel === null;
+  const lifecycleIsValid =
+    value.generationStatus === 'completed'
+      ? hasPublishedContent && value.lastError === null
+      : value.generationStatus === 'failed'
+        ? typeof value.lastError === 'string'
+        : value.lastError === null;
+  return contentIsValid && lifecycleIsValid;
+}
+
+/** Checks a nullable fact summary or error string with its contract length bound. */
+function isNullableNonEmptyString(value: unknown, maxLength: number): boolean {
+  return (
+    value === null ||
+    (typeof value === 'string' &&
+      value.trim().length > 0 &&
+      codePointLength(value) <= maxLength)
+  );
+}
+
+/** Checks nullable collection tags and their count, content and uniqueness constraints. */
+function isNullableTags(value: unknown): boolean {
+  return (
+    value === null ||
+    (Array.isArray(value) &&
+      value.length <= 8 &&
+      value.every(isNonEmptyString) &&
+      new Set(value.map((tag) => tag.trim())).size === value.length)
+  );
+}
+
+/** Narrows a nullable mastery level to the fact contract's three supported levels. */
+function isNullableMasteryLevel(value: unknown): boolean {
+  return (
+    value === null ||
+    (typeof value === 'string' &&
+      MASTERY_LEVELS.has(value as KnowledgeFactMasteryLevel))
+  );
+}
+
+/** Checks a generation status against the closed fact lifecycle enum. */
+function isGenerationStatus(value: unknown): value is KnowledgeFactGenerationStatus {
+  return (
+    typeof value === 'string' &&
+    GENERATION_STATUSES.has(value as KnowledgeFactGenerationStatus)
+  );
+}
+
+/** Checks nullable error summaries and their contract length bound. */
+function isNullableError(value: unknown): boolean {
+  return (
+    value === null ||
+    (typeof value === 'string' &&
+      value.trim().length > 0 &&
+      codePointLength(value) <= 500)
   );
 }
 

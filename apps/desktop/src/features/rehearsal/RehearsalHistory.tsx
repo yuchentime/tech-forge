@@ -169,7 +169,7 @@ function HistoryRow({
       <p className="mt-1 text-xs text-stone-500">
         {formatRehearsalDate(item.endedAt ?? item.createdAt)}
         {item.endReason ? ` · ${endReasonLabel(item.endReason)}` : ''}
-        {` · 已提问 ${item.progress.asked}/${item.progress.limit}`}
+        {` · 已提问 ${item.progress.asked} 次（最多 ${item.progress.limit} 次）`}
         {item.progress.skipped > 0 ? ` · 跳过 ${item.progress.skipped}` : ''}
       </p>
       {description && (

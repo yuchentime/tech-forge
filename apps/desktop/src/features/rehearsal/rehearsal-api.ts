@@ -19,7 +19,7 @@ export type RehearsalTurnStatus =
   | 'failed';
 
 export type RehearsalTurnKind = 'base' | 'follow_up';
-export type RehearsalEndReason = 'manual' | 'limit' | 'failed';
+export type RehearsalEndReason = 'manual' | 'limit' | 'coverage' | 'failed';
 export type RehearsalAction = 'follow_up' | 'next_question';
 export type AssessmentLevel = 'correct' | 'partial' | 'incorrect' | 'uncertain';
 

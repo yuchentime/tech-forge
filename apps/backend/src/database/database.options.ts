@@ -10,6 +10,7 @@ import { ConversationDocumentEntity } from '../documents/conversation-document.e
 import { DocumentChunkEntity } from '../documents/document-chunk.entity';
 import { DocumentEntity } from '../documents/document.entity';
 import { DocumentVersionEntity } from '../documents/document-version.entity';
+import { ConversationKnowledgeFactEntity } from '../rehearsals/conversation-knowledge-fact.entity';
 import { RehearsalTurnEntity } from '../rehearsals/rehearsal-turn.entity';
 import { RehearsalEntity } from '../rehearsals/rehearsal.entity';
 
@@ -29,6 +30,7 @@ export function buildDatabaseOptions(): TypeOrmModuleOptions {
       PiSessionSnapshotEntity,
       RehearsalEntity,
       RehearsalTurnEntity,
+      ConversationKnowledgeFactEntity,
       DocumentEntity,
       DocumentVersionEntity,
       ConversationDocumentEntity,

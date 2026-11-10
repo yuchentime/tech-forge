@@ -5,7 +5,7 @@ domain: knowledge-profile
 canonical_for:
   - knowledge-profile-implementation-verification
 last_verified: 2026-11-10
-version: 3.0
+version: 5.0
 acceptance_review_status: approved
 ---
 
@@ -23,20 +23,20 @@ acceptance_review_status: approved
 
 | 要素 | 内容 |
 | --- | --- |
-| 代码位置 | `RehearsalsController.getKnowledgeCards` (`apps/backend/src/rehearsals/rehearsals.controller.ts`)；`KnowledgeCardsView` 与知识事实响应类型 (`apps/backend/src/rehearsals/rehearsal.types.ts`)；事实 JSON Schema (`docs/changes/2026-11-10-conversation-knowledge-facts/api-schema.json`) |
-| 前置条件 | GET 请求经既有本地 JSON bridge 到达 controller |
-| 预期行为 | 路径仍为 `GET /api/rehearsals/knowledge-cards`，返回 `{ items }`；每项严格符合 `{ conversationId, fact }`。fact 对象字段、null 规则、枚举和嵌套知识点/证据字段符合事实 schema；无会话时 items 为空数组 |
-| 禁止出现 | 列表仍不调用 LLM、不根据会话文本或演练报告计算评估、不写 SQLite；不替换现存的单会话 facts 路由 |
-| 判定方式 | TypeScript 类型与 controller 代码走查；核对列表与单会话路由职责互不替代 |
+| 代码位置 | `knowledge-profile-api.ts` 与 `KnowledgeProfilePage.tsx`；列表和详情 API 由 `ConversationKnowledgeFactsController` 提供 |
+| 前置条件 | 页面 GET 经既有本地 JSON bridge 到达 backend |
+| 预期行为 | 首屏使用 `GET /api/knowledge-facts` 的 `{ items }` 小字段集合；列表项不包含 `knowledgePointDetails`。仅点击「查看详情」后调用 `GET /api/conversations/:conversationId/knowledge-facts` 获取完整事实 |
+| 禁止出现 | 页面初始化或排序时加载所有详情；列表 validator 要求不存在的 details 字段；卡片页触发事实生成 |
+| 判定方式 | API 客户端与页面代码走查；确认两个 endpoint 路径和加载时机 |
 
 ### AC-02 掌握状态排序
 
 | 要素 | 内容 |
 | --- | --- |
 | 代码位置 | `RehearsalsController` 的知识卡片 GET 路由 |
-| 前置条件 | item.fact 含三种 `masteryLevel`，知识点可含 ISO `lastAssessedAt` |
-| 预期行为 | 依次排序 `needs_improvement`、`basic`、`proficient`；同组按 `knowledgePointDetails[].lastAssessedAt` 的最大有效时间降序 |
-| 禁止出现 | 使用 `generatedAt` 或当前时间改变排序；引入第四种掌握状态；将 `needs_improvement` 改成旧枚举 |
+| 前置条件 | 列表项含三种 `masteryLevel`、`masteryLevel=null` 和 ISO `updatedAt` |
+| 预期行为 | 依次排序 `needs_improvement`、`null`（证据不足）、`basic`、`proficient`；同组按轻量列表中的 `updatedAt` 倒序 |
+| 禁止出现 | 使用 `generatedAt` 或当前时间改变排序；把 `null` 当成未发布而丢弃；将 `needs_improvement` 改成旧枚举 |
 | 判定方式 | Controller comparator 代码走查；如用户要求验证，再补局部逻辑检查 |
 
 ### AC-03 卡片展示和交互
@@ -44,8 +44,8 @@ acceptance_review_status: approved
 | 要素 | 内容 |
 | --- | --- |
 | 代码位置 | `apps/desktop/src/features/knowledge-profile/KnowledgeProfilePage.tsx` 和 `knowledge-profile-api.ts` |
-| 前置条件 | 页面成功获取 `{conversationId, fact}` 列表 |
-| 预期行为 | 按会话 ID 合并标题；只有 fact 已成功发布、摘要完整且总体等级非空时才显示卡片；卡片完整显示摘要；点击详情后切换到独立详情页面；详情页顶部「← 返回」回到原列表并保留滚动位置；知识点为空时隐藏详情入口；底部会话入口独立于详情入口；状态样式无卡片图标 |
+| 前置条件 | 页面成功获取 detail-free facts 列表 |
+| 预期行为 | 按会话 ID 合并标题；事实已成功发布、摘要和标签完整时显示卡片，总体等级为 `null` 时显示「证据不足」；卡片完整显示摘要；点击详情后切换到独立详情页面并请求单会话 GET；加载失败提供重试；详情页顶部「← 返回」回到原列表并保留滚动位置；底部会话入口独立于详情入口；状态样式无卡片图标 |
 | 禁止出现 | 显示整体印象/会话评估/冗余解释标题；摘要被截断；空 `conversationId` 发起跳转 |
 | 判定方式 | API 校验器与 React 视图代码走查；如用户要求验证，再做桌面端视觉检查 |
 
@@ -145,3 +145,18 @@ npm run build --workspace @teachforge/desktop
 - 改动内容：AC-03 改为独立详情页面、页顶返回和列表滚动位置恢复；卡片详情入口仍与会话入口分开。
 - 影响范围：知识掌握页的局部视图状态和 L3 交互验收；API schema、mock、排序和会话恢复边界不变。
 - 处理状态：v3 设计评审、AC 严格核验和代码实现已完成；未运行构建和产品测试。
+
+### v5.0 — 2026-11-10
+
+- 触发：用户反馈事实表已有记录但知识掌握页为空。
+- 根因：已发布事实的整体 `masteryLevel` 为 null，旧 AC/实现把它当作未发布过滤。
+- 改动内容：AC-02 加入 `null` 排序；AC-03 改为摘要/标签完整即展示，`null` 等级显示「证据不足」。
+- 影响范围：卡片过滤、排序和状态展示；API 与持久化不变。
+- 处理状态：已实现并通过 `test:knowledge-profile` 与 renderer 构建。
+
+### v4.0 — 2026-11-10
+
+- 触发：开发者要求使用不含详情字段的列表接口，并在打开详情时单独 GET。
+- 改动内容：AC-01 改为校验轻量列表和单会话详情两个 API；AC-02 改用列表提供的 `updatedAt`；AC-03 增加按需详情加载、重试与返回行为。
+- 影响范围：API 客户端字段校验、详情请求时机与加载状态。
+- 处理状态：已按反馈实施，未运行构建或视觉检查。

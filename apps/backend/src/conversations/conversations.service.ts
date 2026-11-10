@@ -891,8 +891,12 @@ export class ConversationsService {
         if (!existing) {
           throw new NotFoundException('没有找到这个会话，它可能已经被删除。');
         }
-        // Children first: rehearsals and artifacts reference the conversation directly, the turn
+        // Children first: fact rows and rehearsals reference the conversation directly, the turn
         // rows reference the rehearsal, and snapshots carry a raw conversation id.
+        await manager.query(
+          'DELETE FROM "conversation_knowledge_facts" WHERE "conversationId" = ?',
+          [conversationId],
+        );
         await manager.query(
           'DELETE FROM "rehearsal_turns" WHERE "rehearsalId" IN (SELECT id FROM "rehearsals" WHERE "conversationId" = ?)',
           [conversationId],

@@ -12,7 +12,8 @@
     "test:agent-stream": "npm run build:electron && node --test test/agent-stream.test.cjs",
     "test:conversation-history": "npm run build:electron && node --test test/conversation-history.test.cjs test/tool-activity-label.test.cjs",
     "test:rehearsal": "npm run build:electron && node --test test/rehearsal-store.test.cjs",
-    "test:backend-request": "npm run build:electron && node --test test/backend-request.test.cjs"
+    "test:backend-request": "npm run build:electron && node --test test/backend-request.test.cjs",
+    "test:knowledge-profile": "npm run build:electron && node --test test/knowledge-profile-cards.test.cjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.32",

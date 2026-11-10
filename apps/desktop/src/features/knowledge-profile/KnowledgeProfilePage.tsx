@@ -1,20 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFailure } from '../../api/backend-error';
 import type { ConversationSummary } from '../agent/conversation-store';
 import {
-  loadKnowledgeCards,
+  loadConversationKnowledgeFact,
+  loadKnowledgeFacts,
   type KnowledgeFactMasteryLevel,
-  type KnowledgeFactResponse,
+  type KnowledgeFactListItem,
+  type KnowledgeFactView,
 } from './knowledge-profile-api';
+import { mapKnowledgeCards, type KnowledgeCard } from './knowledge-profile-cards';
 
-interface KnowledgeCard {
-  conversationId: string;
-  conversationTitle: string;
-  tags: string[];
-  masteryLevel: KnowledgeFactMasteryLevel;
-  summary: string;
-  details: string | null;
-}
+type DetailStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 const STATUS_PRESENTATION: Record<
   KnowledgeFactMasteryLevel,
@@ -37,6 +33,18 @@ const STATUS_PRESENTATION: Record<
   },
 };
 
+/** Published facts may carry no overall level when evidence is insufficient. */
+const INSUFFICIENT_PRESENTATION = {
+  label: '证据不足',
+  cardClass: 'border-stone-200 bg-stone-50/60',
+  badgeClass: 'bg-stone-100 text-stone-700',
+};
+
+/** Maps a nullable overall level to its badge/card presentation. */
+function getStatusPresentation(level: KnowledgeFactMasteryLevel | null) {
+  return level ? STATUS_PRESENTATION[level] : INSUFFICIENT_PRESENTATION;
+}
+
 /** Shows eligible conversation facts and routes card actions back through the Agent page. */
 export function KnowledgeProfilePage({
   conversations,
@@ -45,10 +53,14 @@ export function KnowledgeProfilePage({
   conversations: readonly ConversationSummary[];
   onSelectConversation: (conversationId: string) => void;
 }) {
-  const [items, setItems] = useState<KnowledgeFactResponse[]>([]);
+  const [items, setItems] = useState<KnowledgeFactListItem[]>([]);
   const [listStatus, setListStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [listError, setListError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [detailStatus, setDetailStatus] = useState<DetailStatus>('idle');
+  const [detailFact, setDetailFact] = useState<KnowledgeFactView | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequestVersion = useRef(0);
   const cards = useMemo(
     () => mapKnowledgeCards(items, conversations),
     [conversations, items],
@@ -57,12 +69,12 @@ export function KnowledgeProfilePage({
     ({ conversationId }) => conversationId === selectedConversationId,
   );
 
-  /** Loads the mock-backed fact contract through the typed local API helper. */
+  /** Loads only compact fact rows for the card grid. */
   const loadCards = useCallback(async () => {
     setListStatus('loading');
     setListError(null);
     try {
-      setItems(await loadKnowledgeCards());
+      setItems(await loadKnowledgeFacts());
       setListStatus('ready');
     } catch (error) {
       setListStatus('error');
@@ -73,6 +85,42 @@ export function KnowledgeProfilePage({
   useEffect(() => {
     void loadCards();
   }, [loadCards]);
+
+  useEffect(
+    () => () => {
+      detailRequestVersion.current += 1;
+    },
+    [],
+  );
+
+  /** Opens a detail view and fetches its large knowledge-point payload on demand. */
+  const loadDetails = useCallback(async (conversationId: string) => {
+    const requestVersion = detailRequestVersion.current + 1;
+    detailRequestVersion.current = requestVersion;
+    setSelectedConversationId(conversationId);
+    setDetailStatus('loading');
+    setDetailFact(null);
+    setDetailError(null);
+    try {
+      const fact = await loadConversationKnowledgeFact(conversationId);
+      if (detailRequestVersion.current !== requestVersion) return;
+      setDetailFact(fact);
+      setDetailStatus('ready');
+    } catch (error) {
+      if (detailRequestVersion.current !== requestVersion) return;
+      setDetailStatus('error');
+      setDetailError(describeFailure(error, '读取评估详情失败，请重试。'));
+    }
+  }, []);
+
+  /** Invalidates any in-flight detail response before returning to the preserved list. */
+  const closeDetails = useCallback(() => {
+    detailRequestVersion.current += 1;
+    setSelectedConversationId(null);
+    setDetailStatus('idle');
+    setDetailFact(null);
+    setDetailError(null);
+  }, []);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
@@ -115,7 +163,7 @@ export function KnowledgeProfilePage({
                     card={card}
                     key={card.conversationId}
                     onSelectConversation={onSelectConversation}
-                    onSelectDetails={setSelectedConversationId}
+                    onSelectDetails={(conversationId) => void loadDetails(conversationId)}
                   />
                 ))}
               </div>
@@ -127,53 +175,15 @@ export function KnowledgeProfilePage({
       {selectedCard && (
         <KnowledgeFactDetailPage
           card={selectedCard}
-          onBack={() => setSelectedConversationId(null)}
+          detailError={detailError}
+          detailFact={detailFact}
+          detailStatus={detailStatus}
+          onBack={closeDetails}
+          onRetry={() => void loadDetails(selectedCard.conversationId)}
         />
       )}
     </section>
   );
-}
-
-/** Joins conversation titles and derives display text from each published fact. */
-function mapKnowledgeCards(
-  items: readonly KnowledgeFactResponse[],
-  conversations: readonly ConversationSummary[],
-): KnowledgeCard[] {
-  const titles = new Map(
-    conversations.map((conversation) => [conversation.id, conversation.title]),
-  );
-
-  return items.flatMap(({ conversationId, fact }) => {
-    if (
-      !fact ||
-      fact.generatedAt === null ||
-      !fact.summary?.trim() ||
-      !fact.tags ||
-      !fact.masteryLevel
-    ) {
-      return [];
-    }
-
-    const details = fact.knowledgePointDetails
-      ?.map((point) => {
-        const pointLevel = point.masteryLevel
-          ? `（${STATUS_PRESENTATION[point.masteryLevel].label}）`
-          : '';
-        return `${point.name}${pointLevel}\n${point.details}\n${point.changeDescription}`;
-      })
-      .join('\n\n');
-
-    return [
-      {
-        conversationId,
-        conversationTitle: titles.get(conversationId)?.trim() || '未命名会话',
-        tags: fact.tags,
-        masteryLevel: fact.masteryLevel,
-        summary: fact.summary,
-        details: details || null,
-      },
-    ];
-  });
 }
 
 /** Renders the complete summary with separate detail and conversation actions. */
@@ -186,7 +196,7 @@ function KnowledgeCardItem({
   onSelectConversation: (conversationId: string) => void;
   onSelectDetails: (conversationId: string) => void;
 }) {
-  const presentation = STATUS_PRESENTATION[card.masteryLevel];
+  const presentation = getStatusPresentation(card.masteryLevel);
 
   return (
     <article className={`rounded-2xl border p-5 ${presentation.cardClass}`}>
@@ -218,15 +228,13 @@ function KnowledgeCardItem({
         </p>
       </section>
 
-      {card.details && (
-        <button
-          className="mt-3 inline-flex min-h-8 items-center text-sm font-medium text-violet-700 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
-          onClick={() => onSelectDetails(card.conversationId)}
-          type="button"
-        >
-          查看详情 →
-        </button>
-      )}
+      <button
+        className="mt-3 inline-flex min-h-8 items-center text-sm font-medium text-violet-700 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
+        onClick={() => onSelectDetails(card.conversationId)}
+        type="button"
+      >
+        查看详情 →
+      </button>
 
       <footer className="mt-5 border-t border-stone-300/70 pt-3">
         <button
@@ -244,12 +252,26 @@ function KnowledgeCardItem({
 /** Shows one conversation's full assessment on a separate view with a return action. */
 function KnowledgeFactDetailPage({
   card,
+  detailError,
+  detailFact,
+  detailStatus,
   onBack,
+  onRetry,
 }: {
   card: KnowledgeCard;
+  detailError: string | null;
+  detailFact: KnowledgeFactView | null;
+  detailStatus: DetailStatus;
   onBack: () => void;
+  onRetry: () => void;
 }) {
-  const presentation = STATUS_PRESENTATION[card.masteryLevel];
+  // `null` is a real published value (insufficient evidence), not "missing"; only fall back to the
+  // list card before the detail request resolves.
+  const masteryLevel = detailFact ? detailFact.masteryLevel : card.masteryLevel;
+  const presentation = getStatusPresentation(masteryLevel);
+  const tags = detailFact?.tags ?? card.tags;
+  const summary = detailFact?.summary ?? card.summary;
+  const knowledgePoints = detailFact?.knowledgePointDetails ?? [];
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -276,7 +298,7 @@ function KnowledgeFactDetailPage({
           </span>
 
           <ul aria-label="知识标签" className="mt-4 flex flex-wrap gap-2">
-            {card.tags.map((tag) => (
+            {tags.map((tag) => (
               <li
                 className="rounded-full bg-violet-100/80 px-3 py-1 text-sm text-violet-900"
                 key={`${card.conversationId}-${tag}`}
@@ -289,16 +311,71 @@ function KnowledgeFactDetailPage({
           <section aria-label="评估摘要" className="mt-6">
             <h2 className="text-base font-semibold text-stone-800">评估摘要</h2>
             <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-900">
-              {card.summary}
+              {summary}
             </p>
           </section>
 
-          {card.details && (
+          {detailStatus === 'loading' && (
+            <p className="mt-8 border-t border-stone-200 pt-6 text-sm text-stone-500" role="status">
+              正在加载评估详情…
+            </p>
+          )}
+
+          {detailStatus === 'error' && (
+            <div
+              className="mt-8 flex items-center gap-3 border-t border-stone-200 pt-6 text-sm text-rose-800"
+              role="alert"
+            >
+              <span className="min-w-0 flex-1">{detailError ?? '读取评估详情失败，请重试。'}</span>
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={onRetry}
+                type="button"
+              >
+                重试
+              </button>
+            </div>
+          )}
+
+          {detailStatus === 'ready' && !detailFact && (
+            <p className="mt-8 border-t border-stone-200 pt-6 text-sm text-stone-500">
+              该会话当前没有可展示的评估详情。
+            </p>
+          )}
+
+          {detailStatus === 'ready' && detailFact && (
             <section aria-label="评估详情" className="mt-8 border-t border-stone-200 pt-6">
               <h2 className="text-base font-semibold text-stone-800">评估详情</h2>
-              <p className="mt-3 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-700">
-                {card.details}
-              </p>
+              {knowledgePoints.length === 0 ? (
+                <p className="mt-3 text-[15px] leading-7 text-stone-600">
+                  当前没有可展示的知识点详情。
+                </p>
+              ) : (
+                <div className="mt-4 space-y-6">
+                  {knowledgePoints.map((point, index) => (
+                    <section
+                      aria-label={point.name}
+                      className={index === 0 ? '' : 'border-t border-stone-200 pt-5'}
+                      key={`${point.name}-${index}`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-stone-900">{point.name}</h3>
+                        {point.masteryLevel && (
+                          <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+                            {STATUS_PRESENTATION[point.masteryLevel].label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-700">
+                        {point.details}
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-500">
+                        {point.changeDescription}
+                      </p>
+                    </section>
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </article>

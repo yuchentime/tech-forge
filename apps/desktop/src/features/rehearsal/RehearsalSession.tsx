@@ -11,6 +11,7 @@ import {
 export function RehearsalSession({
   detail,
   isSubmitting,
+  isEvaluatingAnswer,
   isEnding,
   answerError,
   pendingAnswer,
@@ -23,6 +24,7 @@ export function RehearsalSession({
 }: {
   detail: RehearsalDetail;
   isSubmitting: boolean;
+  isEvaluatingAnswer: boolean;
   isEnding: boolean;
   answerError: string | null;
   pendingAnswer: { turnId: string; answer: string; requestId: string } | null;
@@ -41,6 +43,14 @@ export function RehearsalSession({
     setAnswer('');
   }, [questionId]);
 
+  // A restored answer whose evaluation never finished is the only text the backend accepts for
+  // that turn, so surface it in the composer instead of an empty box.
+  useEffect(() => {
+    if (pendingAnswer) {
+      setAnswer((current) => current || pendingAnswer.answer);
+    }
+  }, [pendingAnswer]);
+
   useEffect(() => {
     const viewport = viewportRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
@@ -56,6 +66,9 @@ export function RehearsalSession({
   const needsNextQuestion =
     detail.status === 'preparing_next' ||
     (detail.status === 'awaiting_answer' && !detail.currentQuestion);
+  // An answer evaluation is running either locally (request in flight) or server-side after a
+  // reload; both keep the composer read-only and show one status line.
+  const isEvaluating = isEvaluatingAnswer || detail.status === 'evaluating';
 
   const submit = (): void => {
     if (!answer.trim() || busy) return;
@@ -128,21 +141,17 @@ export function RehearsalSession({
       {answerError && !pendingAnswer && (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
           <span className="min-w-0 flex-1">{answerError}</span>
-          {pendingAnswer && (
-            <button
-              className="font-medium underline underline-offset-2"
-              disabled={isSubmitting}
-              onClick={onRetryAnswer}
-              type="button"
-            >
-              重试评估
-            </button>
-          )}
         </div>
       )}
 
       <div className="mt-3 shrink-0 border-t border-stone-200 pt-3">
-        {pendingAnswer ? (
+        {isEvaluating && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
+            <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
+            正在进行评估…
+          </div>
+        )}
+        {pendingAnswer && !isEvaluating ? (
           <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p className="font-medium">上次回答已保存，但评估没有完成。</p>
             <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-800">
@@ -157,7 +166,7 @@ export function RehearsalSession({
               onClick={onRetryAnswer}
               type="button"
             >
-              {isSubmitting ? '正在重试…' : '重试评估'}
+              重试评估
             </button>
           </div>
         ) : needsNextQuestion ? (
@@ -195,10 +204,10 @@ export function RehearsalSession({
               value={answer}
             />
           </>
-        ) : (
+        ) : isEvaluating ? null : (
           <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
             <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
-            {detail.status === 'evaluating' ? '正在评估你的回答…' : '学生正在思考…'}
+            学生正在思考…
           </div>
         )}
 
@@ -207,11 +216,11 @@ export function RehearsalSession({
             {showEndAction ? (
               <button
                 className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isEnding}
+                disabled={busy}
                 onClick={onEnd}
                 type="button"
               >
-                {isEnding ? '处理中…' : '结束演练'}
+                结束演练
               </button>
             ) : (
               <span />
@@ -232,7 +241,7 @@ export function RehearsalSession({
                   onClick={submit}
                   type="button"
                 >
-                  {busy ? '评估中…' : '提交回答'}
+                  提交回答
                 </button>
               </div>
             )}

@@ -26,4 +26,5 @@ last_verified: 2026-11-10
 - [已接受决策索引](decisions/index.md)：长期有效的已接受权衡。
 - [故障复盘与复用经验](postmortems/index.md)：运行失败的证据、根因及防复发验收。
 
-- [会话知识掌握卡片实施记录](changes/2026-11-10-knowledge-session-cards/design.md)：当前为只读 mock 卡片视图，真实评估数据尚未接入。
+- [会话知识掌握事实](changes/2026-11-10-conversation-knowledge-facts/design.md)：演练后异步维护会话当前掌握情况；自动化 L1/L2 已实现，真实 provider 语义验收待补。
+- [会话知识掌握卡片实施记录](changes/2026-11-10-knowledge-session-cards/design.md)：卡片列表读取轻量 facts 集合，详情在用户打开时单独读取。

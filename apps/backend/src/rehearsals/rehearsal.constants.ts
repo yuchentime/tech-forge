@@ -1,9 +1,9 @@
-/** Hard product limits for one rehearsal batch. */
+/** Question cap for one rehearsal batch; the drill may finish earlier once points are covered. */
 export const MAX_TOTAL_QUESTIONS = 15;
 export const MAX_FOLLOW_UPS = 2;
 export const MAX_PERSONA_LENGTH = 1_000;
 export const MAX_ANSWER_LENGTH = 5_000;
-export const MIN_PLAN_POINTS = 3;
+export const MIN_PLAN_POINTS = 1;
 export const MAX_PLAN_POINTS = 8;
 
 /** Local file that carries the student persona across conversations. */

@@ -3,6 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { LlmModule } from '../llm/llm.module';
 import { SettingsModule } from '../settings/settings.module';
+import { ConversationKnowledgeFactEntity } from './conversation-knowledge-fact.entity';
+import { ConversationKnowledgeFactsController } from './conversation-knowledge-facts.controller';
+import { ConversationKnowledgeFactsService } from './conversation-knowledge-facts.service';
 import {
   ConversationRehearsalsController,
   RehearsalPersonaController,
@@ -14,10 +17,14 @@ import { RehearsalTurnEntity } from './rehearsal-turn.entity';
 import { RehearsalEntity } from './rehearsal.entity';
 import { RehearsalsService } from './rehearsals.service';
 
-/** Composes the rehearsal state machine, its HTTP boundary and shared dependencies. */
+/** Composes the rehearsal state machine, fact worker, their HTTP boundaries and shared dependencies. */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RehearsalEntity, RehearsalTurnEntity]),
+    TypeOrmModule.forFeature([
+      RehearsalEntity,
+      RehearsalTurnEntity,
+      ConversationKnowledgeFactEntity,
+    ]),
     ConversationsModule,
     LlmModule,
     SettingsModule,
@@ -26,8 +33,14 @@ import { RehearsalsService } from './rehearsals.service';
     ConversationRehearsalsController,
     RehearsalsController,
     RehearsalPersonaController,
+    ConversationKnowledgeFactsController,
   ],
-  providers: [RehearsalsService, RehearsalRunRegistry, RehearsalPreparingRegistry],
-  exports: [RehearsalsService],
+  providers: [
+    RehearsalsService,
+    ConversationKnowledgeFactsService,
+    RehearsalRunRegistry,
+    RehearsalPreparingRegistry,
+  ],
+  exports: [RehearsalsService, ConversationKnowledgeFactsService],
 })
 export class RehearsalsModule {}

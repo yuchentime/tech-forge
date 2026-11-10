@@ -5,6 +5,7 @@ import type {
   PlanPointStatus,
   RehearsalAssessment,
   RehearsalDecision,
+  RehearsalDecisionAction,
   RehearsalPlanPoint,
   RehearsalPlanUpdate,
   RehearsalReport,
@@ -84,7 +85,12 @@ export function parsePlanResponse(value: unknown): ParsedPlan {
   return { topic, learningSummary, knowledgePoints, firstQuestion };
 }
 
-/** Validates one answer decision. A model `complete` is treated as a normal next question. */
+/**
+ * Validates one answer decision.
+ *
+ * `finish` is the model's early exit when the planned content is covered; every other action must
+ * carry the next question. Any other action name (including the old `complete`) is rejected.
+ */
 export function parseDecisionResponse(value: unknown): RehearsalDecision {
   const record = asRecord(value);
   const assessment = parseAssessment(record.assessment);
@@ -92,13 +98,14 @@ export function parseDecisionResponse(value: unknown): RehearsalDecision {
   if (
     rawAction !== 'follow_up' &&
     rawAction !== 'next_question' &&
-    rawAction !== 'complete'
+    rawAction !== 'finish'
   ) {
     throw new Error('Decision action is invalid.');
   }
-  const action = rawAction === 'follow_up' ? 'follow_up' : 'next_question';
-  const nextQuestion = readString(record.nextQuestion);
-  if (!nextQuestion) {
+  const action = rawAction as RehearsalDecisionAction;
+  const nextQuestion =
+    action === 'finish' ? undefined : readString(record.nextQuestion);
+  if (action !== 'finish' && !nextQuestion) {
     throw new Error('Decision is missing the next question.');
   }
   return {

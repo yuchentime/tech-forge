@@ -37,7 +37,8 @@ export function assessmentTone(level: AssessmentLevel): string {
 /** Returns the Chinese label for a rehearsal end reason. */
 export function endReasonLabel(reason: RehearsalEndReason | null): string {
   if (reason === 'manual') return '手动结束';
-  if (reason === 'limit') return '达到 15 问上限';
+  if (reason === 'limit') return '达到 15 次提问上限';
+  if (reason === 'coverage') return '计划知识点已覆盖';
   if (reason === 'failed') return '未完成';
   return '';
 }
