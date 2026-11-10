@@ -1,5 +1,4 @@
 import {
-  ArrowClockwise,
   Books,
   ChatCircle,
   DotsThree,
@@ -46,7 +45,7 @@ export function ConversationSidebar({
       className="flex h-48 min-h-0 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="shrink-0 border-b border-stone-200 px-2 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center">
           <button
             aria-label="新建课题"
             className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-sm text-stone-700 transition hover:bg-stone-200/70 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40"
@@ -57,19 +56,6 @@ export function ConversationSidebar({
           >
             <NotePencil aria-hidden="true" className="size-4 shrink-0" />
             <span className="truncate">新建课题</span>
-          </button>
-          <button
-            aria-label="刷新对话列表"
-            className="flex size-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-200 hover:text-stone-900 disabled:cursor-wait disabled:opacity-40"
-            disabled={state.listStatus === 'loading'}
-            onClick={onRefresh}
-            title="刷新列表"
-            type="button"
-          >
-            <ArrowClockwise
-              aria-hidden="true"
-              className={`size-4 ${state.listStatus === 'loading' ? 'animate-spin' : ''}`}
-            />
           </button>
         </div>
         <button

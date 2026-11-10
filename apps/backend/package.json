@@ -27,7 +27,8 @@
     "test:rehearsal": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/rehearsal.test.cjs",
     "test:knowledge-facts": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-facts.test.cjs test/knowledge-facts-http.test.cjs",
     "verify:knowledge-facts-provider": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-knowledge-facts-provider.cjs",
-    "test:session-entries": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/session-entries.test.cjs"
+    "test:session-entries": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/session-entries.test.cjs",
+    "test:deep-research": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/deep-research.test.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",

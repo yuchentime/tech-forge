@@ -23,7 +23,7 @@ last_verified: 2026-11-10
 
 设置入口位于 Agent 对话侧栏底部。打开后主区域显示模型配置和风格偏好；侧栏仍可切换设置与对话。设置由本机 backend 管理，不属于 SQLite 业务数据，也不通过 renderer 文件系统访问。
 
-backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`；设置 `TEACHFORGE_CONFIG_DIR` 可把该根目录重定向到任意绝对路径（便携部署与隔离集成测试使用，默认仍是 `~/.tech-forge`）。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页编辑。密钥输入框默认遮蔽内容，用户可点击输入框右侧的眼睛图标临时显示或再次隐藏。全局 `workspacePath`（`[workspace].path`，默认 `.tech-forge/workspace/`）已从设置页移除：Agent 改用每会话工作区，该值只剩 skills/prompts 资源锚点与无会话 session 的回退 cwd 两处用途。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
+backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`、空的 `.tech-forge/SOULS.md` 和 `.tech-forge/workspace/`；首个 Agent session 创建前还会把内置 skill 模板安装到 `.tech-forge/skills/`。设置 `TEACHFORGE_CONFIG_DIR` 可把该根目录重定向到任意绝对路径（便携部署与隔离集成测试使用，默认仍是 `~/.tech-forge`）。设置页通过受本机认证保护的 GET /api/settings 和 PUT /api/settings 读取、保存配置；响应包含两个 Provider 已保存的 API Key 明文，供本机设置页编辑。密钥输入框默认遮蔽内容，用户可点击输入框右侧的眼睛图标临时显示或再次隐藏。全局 `workspacePath`（`[workspace].path`，默认 `.tech-forge/workspace/`）已从设置页移除：Agent 改用每会话工作区，该值只剩 skills/prompts 资源锚点与无会话 session 的回退 cwd 两处用途。旧配置中缺失路径或仍指向旧默认 `.tech-forge/` 的值会映射至新的子目录。
 
 | 配置 | 当前行为 |
 |---|---|
@@ -34,6 +34,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 | 工作空间 | 保存在 `[workspace].path`；默认值为 `.tech-forge/workspace/`；路径必须绝对，不能是 `.tech-forge` 本身或其祖先；`SettingsService.getWorkspacePath()` 返回规范化路径，但 Pi cwd 与 Agent 文件工具已改用 `getSessionWorkspaceDirectory(conversationId)` |
 | 风格偏好 | SOULS.md 的非空文本在每个新 Pi session 的固定系统提示词之后追加；空白内容不改变提示词 |
 | Agent 记忆 | `pi-memory` 的存储根固定为 `<configDir>/memory`（默认 `~/.tech-forge/memory/`），与知识库、会话文件同级；`LlmService` 创建 session 前以 `PI_MEMORY_DIR` 注入，`TEACHFORGE_CONFIG_DIR` 同样会重定向它。目录由扩展在首次使用时创建，不随 workspace 变化，也不经设置 API 编辑；早期落在 `~/.pi/agent/memory/` 的内容需要手工迁移 |
+| Agent Skill | 安装根固定为 `<configDir>/skills`（默认 `~/.tech-forge/skills/`），与 workspace、memory 同级；backend 首次 session 前把 `assets/skills` 模板复制进去，目标 skill 已有 `SKILL.md` 时不覆盖。`LlmService` 把该目录与用户 `<workspace>/skills` 一起加入 Pi 显式 skill 路径；用户可直接查看和编辑，不随会话删除 |
 
 配置文件新建时 POSIX 权限为目录 0700、文件 0600；Windows 使用用户目录继承 ACL。配置写入先写同目录临时文件，再替换目标文件。应用只识别自身定义的 TOML 字段，格式错误时不会重置已有配置。保存不会迁移或改变 SQLite 的 `TEACHFORGE_DATA_DIR`；未设置该变量时数据根与配置根同为 `~/.tech-forge`，SQLite 主库位于 `~/.tech-forge/teachforge.db`。桌面端首次以该默认位置启动时，若旧 Electron `userData` 下存在 `teachforge.db` 而新位置还没有数据库，backend 会在打开数据库前把它（含 WAL/SHM）与 `documents/` 迁入；新位置已有数据库时不做任何迁移。
 
@@ -43,7 +44,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 |---|---|
 | Agent 设置界面 | Provider 表单、密钥输入状态、SOULS 文本和加载/保存反馈（工作空间路径已移除） |
 | SettingsController / SettingsService | DTO 校验、本机设置 API 响应、本机文件初始化、配置读取和替换；独占 config.toml 与 SOULS.md，并提供独立 workspace 与托管文件路径 |
-| LlmService / workspace-file-tools | 每个新 Pi session 读取 Provider 与风格；Pi cwd 为会话工作区，read/edit/write 工具同根；文件工具执行读取与修改权限检查 |
+| LlmService / workspace-file-tools | 每个新 Pi session 读取 Provider 与风格；Pi cwd 为会话工作区，read/edit/write 工具同根；文件工具执行读取与修改权限检查；首次 session 前把内置 skill 模板安装到 `<configDir>/skills` |
 | 对话持久化 | Conversation 和消息仍归 ConversationsService / SQLite；设置不写入对话数据库 |
 
 ## 接口与文件契约
@@ -64,7 +65,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 - Desktop 设置页：apps/desktop/src/features/settings/SettingsPage.tsx
 - Agent 视图入口：apps/desktop/src/features/agent/AgentChatPage.tsx、ConversationSidebar.tsx
 - HTTP DTO / Controller / 文件服务：apps/backend/src/settings/
-- Session cwd、模型提示词与工具注册：apps/backend/src/llm/llm.service.ts
+- Session cwd、模型提示词、工具注册与 skill 安装：apps/backend/src/llm/llm.service.ts、apps/backend/src/llm/skills.ts
 - Agent 文件读写边界：apps/backend/src/llm/tools/workspace-file-tools.ts
 
 ## 验证

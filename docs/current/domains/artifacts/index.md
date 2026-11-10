@@ -10,6 +10,7 @@ related:
   - docs/current/platform/agent-runtime.md
   - docs/changes/2026-11-09-artifact-sidebar/design.md
   - docs/changes/2026-11-09-artifact-sidebar/verification.md
+  - docs/changes/2026-11-10-deep-research-command/design.md
 last_verified: 2026-11-10
 ---
 
@@ -26,6 +27,8 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 - **预览格式**：按扩展名判定 `markdown`（含 ` ```mermaid ` 块时渲染图表）、`mermaid`、`svg`、`json`（≤256 KiB 且可解析则美化）、`jsonl`、`text`；正文读取上限 512 KiB，超出返回 `truncated`。
 - **SVG**：以 `<img>` + `data:image/svg+xml;base64` 显示，不内联成活标记——图片上下文是静态模式，脚本不执行、外部引用不加载、也无法触达 `window.teachforge`。尺寸取 `width`/`height` 像素属性，缺失时用 `viewBox` 且小于 480 px 的坐标系按比例放大到 480，两者都没有则用 640×400 兜底；解析失败或解码失败回退为源码文本。`contentFormat` 为 `svg`，`mimeType` 为 `image/svg+xml`。
 - **知识结构图**：普通问题、解释、学习建议和分析直接在聊天中回答；仅在用户明确要求思维导图、知识图、图表或文件产物时生成图文件。明确请求后默认写 `.svg`——左侧根卡片 + 右侧分支卡片列（分支的要点作为卡片内的 `<text>` 行）、连接线用 `<line>`/`<path>` 垫在卡片下方；画布 560-640 px 宽、按分支数向下增长，带匹配的 `viewBox`，总盒子/线约 20-25 个，标签 ≤12 汉字。SVG 要求自包含：`font-family="system-ui, sans-serif"`、无 `<script>`、无 `<foreignObject>`、无外部字体/图片/样式表。仅当用户明确要 Mermaid 或要可编辑图时才写 `.mmd`（单个 `flowchart LR`；`mindmap` 只在用户要放射状时使用，因为它按力导向铺开，节点一多就成了不可读的网）；用户明确要 `.md` 时写含单个 ```mermaid 块的 Markdown。图表与图片都按自然尺寸渲染，面板内双向滚动，不强行缩放到面板宽度（缩到 400px 时标签不可读）。聊天正文仍按普通 Markdown 渲染，`mermaid` 代码块在侧边栏才展开为图形。
+- **探索主题产物**：`/探索主题 <主题>` 由内置 `deep-research` skill 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，两者按普通会话文件登记，不新增 artifact 类型；SVG 走上面的静态预览，Markdown 走普通 Markdown 预览。模型若只写其中一个，列表与响应卡片也只显示实际存在的文件。
+- **路径归属比较**：登记时用 canonical path 判断文件是否在会话工作区内，避免配置目录含符号链接祖先（如 macOS `/var` → `/private/var`）时把 Agent 写出的会话文件误标为 `external`；存储的仍是相对工作区路径，配置目录整体搬迁后仍可解析。
 - **元数据**：`fileName` 仅用于展示，列表不显示路径；`byteSize` 与 `fileHash`（≤2 MiB 时计算）供展示与漂移判断。
 
 ## 接口

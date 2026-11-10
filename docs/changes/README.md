@@ -20,6 +20,7 @@ last_verified: 2026-11-10
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| `/探索主题` 斜杠命令 | 固定先检索知识库，再用内置 `deep-research` Pi skill 生成知识文档与自包含 SVG 知识地图；不新增 Agent/表，产物按普通会话 artifact 登记 | [简报](2026-11-10-deep-research-command/brief.md) · [设计](2026-11-10-deep-research-command/design.md) · [验收](2026-11-10-deep-research-command/verification.md) |
 | Chat 截断语义与实时文件卡片（待评审） | 输出上限/内部取消的终态与消息行状态一致；线程结束后保留实时文件卡片，历史加载时按会话去重 | [交接](2026-11-10-chat-truncation-and-artifact-footer/handoff.md) |
 | 会话知识掌握卡片 | 三种掌握状态的会话卡片、摘要/详情和会话跳转；轻量列表读取，详情按需读取 | [简报](2026-11-10-knowledge-session-cards/brief.md) · [设计](2026-11-10-knowledge-session-cards/design.md) · [验收](2026-11-10-knowledge-session-cards/verification.md) · [实施记录](2026-11-10-knowledge-session-cards/worklog.md) |
 | 会话知识掌握事实（已实现，L3 待补） | 一会话一条事实；报告后异步更新、时间序列归纳、上下文截断与持久化待处理状态；只读查询接口 | [简报](2026-11-10-conversation-knowledge-facts/brief.md) · [设计](2026-11-10-conversation-knowledge-facts/design.md) · [API](2026-11-10-conversation-knowledge-facts/api-contract.md) · [验收](2026-11-10-conversation-knowledge-facts/verification.md) · [任务](2026-11-10-conversation-knowledge-facts/tasks.md) · [worklog](2026-11-10-conversation-knowledge-facts/worklog.md) · [技术评审 PASS](2026-11-10-conversation-knowledge-facts/reviews/design-review.md) · [实施评审](2026-11-10-conversation-knowledge-facts/reviews/L001.md) |

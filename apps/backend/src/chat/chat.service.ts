@@ -13,8 +13,9 @@ import {
   type StoredAttachments,
 } from '../attachments/attachments.service';
 import { KnowledgeService, type KnowledgeContextResult } from '../knowledge/knowledge.service';
-import { parseKnowledgeCommand } from '../knowledge/knowledge-command';
 import { LlmService } from '../llm/llm.service';
+import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
+import { parseTurnCommand } from './turn-command';
 import { RehearsalsService } from '../rehearsals/rehearsals.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { ConversationRunRegistry } from '../conversations/conversation-run-registry';
@@ -77,9 +78,12 @@ export class ChatService {
       requestId,
       conversationId: resolvedConversationId,
     };
-    // Retrieval is an explicit user decision: only the leading command turns it on for this turn.
-    const parsedCommand = parseKnowledgeCommand(prompt);
-    const userPrompt = parsedCommand.prompt;
+    // Retrieval is an explicit user decision: only a leading command turns it on for this turn.
+    // Deep research always retrieves first; the skill then turns the evidence into a document and
+    // a knowledge map. Both commands are leading-token switches, so either order is accepted.
+    const turnCommand = parseTurnCommand(prompt);
+    const userPrompt = turnCommand.prompt;
+    const forceKnowledge = turnCommand.research || turnCommand.knowledge;
     let phase = 'request_start';
     let releaseLock: (() => void) | undefined;
     let turn:
@@ -103,7 +107,8 @@ export class ChatService {
       ...logContext,
       requestedConversation: conversationId !== undefined,
       promptLength: Array.from(prompt).length,
-      knowledgeCommand: parsedCommand.force,
+      knowledgeCommand: turnCommand.knowledge,
+      researchCommand: turnCommand.research,
       userPromptLength: Array.from(userPrompt).length,
     });
 
@@ -283,7 +288,7 @@ export class ChatService {
       }
 
       let knowledgeContext: KnowledgeContextResult | undefined;
-      if (parsedCommand.force) {
+      if (forceKnowledge) {
         phase = 'knowledge.context';
         // Scope is conversation state, not model judgement: an explicit selection restricts the
         // search, and an empty one keeps the default range.
@@ -332,12 +337,15 @@ export class ChatService {
         knowledgeOutcome: knowledgeContext?.outcome,
         injectedDocumentCount: knowledgeContext?.refs.length ?? 0,
         injectedTokens: knowledgeContext?.stats.injectedTokens ?? 0,
+        researchCommand: turnCommand.research,
         rehearsalDigestCharacters: rehearsalDigest.text.length,
         promptContextCharacters: promptContext.length,
       });
       const piEvents = this.llm.stream(userPrompt, {
         requestId,
         signal,
+        // The skill body is expanded into the model prompt; `userPrompt` stays the stored text.
+        skillName: turnCommand.research ? DEEP_RESEARCH_SKILL_NAME : undefined,
         promptContext: promptContext === '' ? undefined : promptContext,
         contextMessage: rehearsalDigest.text
           ? { type: 'rehearsal_digest', text: rehearsalDigest.text }

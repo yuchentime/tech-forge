@@ -63,12 +63,19 @@ export function getSafeErrorLogFields(error: unknown): Record<string, unknown> {
   };
   const record = error as Error & {
     code?: unknown;
+    syscall?: unknown;
     status?: unknown;
     statusCode?: unknown;
   };
 
   if (typeof record.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(record.code)) {
     fields.errorCode = record.code;
+  }
+  if (
+    typeof record.syscall === 'string' &&
+    /^[A-Za-z0-9_]{1,40}$/.test(record.syscall)
+  ) {
+    fields.errorSyscall = record.syscall;
   }
   const statusCode = record.statusCode ?? record.status;
   if (typeof statusCode === 'number' && Number.isInteger(statusCode)) {

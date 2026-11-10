@@ -95,6 +95,14 @@ export class SettingsService implements OnModuleInit {
   /** Per-conversation local files (attachments and future run data), beside config and knowledge. */
   private readonly sessionsDirectory = join(this.configDirectory, 'sessions');
   /**
+   * User-visible Pi skill root.
+   *
+   * It sits beside config, knowledge and sessions rather than inside a per-conversation workspace,
+   * so skills survive conversation deletion and can be edited by the user. The bundled deep-research
+   * skill is seeded here on first use; existing files are never overwritten.
+   */
+  private readonly skillsDirectory = join(this.configDirectory, 'skills');
+  /**
    * Agent long-term memory owned by the pi-memory extension.
    *
    * Kept beside config/knowledge instead of the extension's default `~/.pi/agent/memory`, so all
@@ -157,6 +165,15 @@ export class SettingsService implements OnModuleInit {
   /** Returns the root for per-conversation session files (attachments and future run data). */
   getSessionsDirectory(): string {
     return this.sessionsDirectory;
+  }
+
+  /**
+   * Returns the user-visible Pi skill root (`<configDir>/skills`).
+   *
+   * `LlmService` seeds bundled skills here and adds it to Pi's explicit skill paths.
+   */
+  getSkillsDirectory(): string {
+    return this.skillsDirectory;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { DataSource, type Repository } from 'typeorm';
 import { ArtifactEntity } from './artifact.entity';
@@ -78,29 +78,34 @@ export class ArtifactsService {
    */
   async registerArtifact(input: ArtifactWriteInput): Promise<ArtifactSummaryDto | undefined> {
     try {
-      const absolutePath = resolve(input.absolutePath);
+      const requestedPath = resolve(input.absolutePath);
       const workspaceRoot = this.settings.getSessionWorkspaceDirectory(input.conversationId);
-      const insideWorkspace = isPathWithin(workspaceRoot, absolutePath);
+      // The file tools hand back a canonical path while the configured workspace may still contain
+      // a symlinked ancestor (for example macOS `/var` → `/private/var`). Compare canonical paths,
+      // but keep the relative path so a moved configuration directory still resolves later.
+      const canonicalWorkspaceRoot = canonicalPath(workspaceRoot);
+      const canonicalFilePath = canonicalPath(requestedPath);
+      const insideWorkspace = isPathWithin(canonicalWorkspaceRoot, canonicalFilePath);
       const relativePath = insideWorkspace
-        ? relative(workspaceRoot, absolutePath).split(sep).join('/')
+        ? relative(canonicalWorkspaceRoot, canonicalFilePath).split(sep).join('/')
         : '';
       const pathKind = insideWorkspace ? PATH_KIND_SESSION : PATH_KIND_EXTERNAL;
-      const fileName = basename(absolutePath);
+      const fileName = basename(requestedPath);
       const format = resolveContentFormat(fileName);
-      const fileInfo = readFileInfo(absolutePath);
+      const fileInfo = readFileInfo(requestedPath);
 
       const existing = await this.artifacts.findOneBy({
         conversationId: input.conversationId,
         pathKind,
         relativePath,
-        absolutePath: insideWorkspace ? '' : absolutePath,
+        absolutePath: insideWorkspace ? '' : requestedPath,
       });
       const row: ArtifactEntity = existing ?? this.artifacts.create({
         id: randomUUID(),
         conversationId: input.conversationId,
         pathKind,
         relativePath,
-        absolutePath: insideWorkspace ? '' : absolutePath,
+        absolutePath: insideWorkspace ? '' : requestedPath,
         createdAt: new Date(),
       });
       row.userMessageId = input.userMessageId;
@@ -361,6 +366,15 @@ function isExistingDirectory(absolutePath: string): boolean {
     return statSync(absolutePath).isDirectory();
   } catch {
     return false;
+  }
+}
+
+/** Resolves symlinked ancestors when the path exists, falling back to its lexical form. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
   }
 }
 

@@ -9,7 +9,8 @@ related:
   - docs/current/domains/documents/index.md
   - docs/current/platform/architecture-and-code-placement.md
   - docs/changes/2026-11-08-knowledge-retrieval/design.md
-last_verified: 2026-11-09
+  - docs/changes/2026-11-10-deep-research-command/design.md
+last_verified: 2026-11-10
 ---
 
 # 知识库检索当前事实
@@ -22,7 +23,8 @@ last_verified: 2026-11-09
 |---|---|
 | `RetrievalService.search({ query, limit?, documentIds?, minVectorScore?, expand? })` | 分片级检索，只负责排序，不负责上下文 |
 | `KnowledgeService.buildContext({ conversationId, query, loadedRefs })` | 把命中聚合成文档并渲染成注入块；由 `ChatService` 在斜杠命令轮次调用 |
-| `POST /api/chat/stream` 的 `prompt` 前缀 `/知识库 ` | 唯一的用户入口；后端解析并剥掉命令后再入库与调用模型 |
+| `POST /api/chat/stream` 的 `prompt` 前缀 `/查询资料库 ` | 用户显式检索入口；后端解析并剥掉命令后再入库与调用模型 |
+| `POST /api/chat/stream` 的 `prompt` 前缀 `/探索主题 ` | 研究入口：固定先检索，再加载内置 `deep-research` skill 生成知识文档与 SVG 知识地图；检索链路与上面完全相同 |
 | `npm run verify:retrieval --workspace @teachforge/backend -- <file> <query…>` | 手工验证脚本 |
 
 模型没有检索工具。`search_documents` 及其注册、测试已于 2026-11-09 删除：触发权归用户，避免"模型不调用"与"模型滥用"两种失败模式。
@@ -96,14 +98,23 @@ last_verified: 2026-11-09
 
 知识块不进入 system prompt：`ChatService` 把它和附件正文一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由后者拼在本轮 user message 前面（`## 用户输入` 标记之后是用户原话）。system prompt 因此逐字稳定，provider 的前缀缓存不会被每轮数据打断。
 
+### 3.5 探索主题
+
+`/探索主题 <主题>` 复用本节的检索链路，不改变范围、分片上限、重排或去重：
+
+- 命令解析由 `chat/turn-command.ts` 完成，`/探索主题` 与 `/查询资料库` 可组合、顺序不限；研究轮次即使没写 `/查询资料库` 也固定检索。
+- 检索结果仍写入该轮 `contextRefsJson.knowledge`，`triggeredBy` 仍为 `command`。
+- `ChatService` 额外向 `LlmService` 传 `skillName: 'deep-research'`；`LlmService` 把 `/skill:deep-research` 放在模型 prompt 首位，资料块与主题作为参数。技能正文只进模型输入，不进 SQLite 消息或快照。
+- 产物是会话工作区里的 `知识文档.md` 与 `知识地图.svg`，按普通 artifact 登记。详见[Agent Runtime](../../platform/agent-runtime.md#技能装载与探索主题)。
+
 ## 4. 日志
 
 全部走 `writeStructuredEvent`（Nest Logger + JSON 单行，`logging/structured-logger.ts`），并带本轮 `requestId` / `conversationId`。
 
 | 事件 | 级别 | 关键字段 |
 |---|---|---|
-| `chat.turn.accepted` | log | `knowledgeCommand`（是否识别到命令）、`promptLength`、`userPromptLength` |
-| `chat.llm.stream.started` | log | `knowledgeOutcome`、`injectedDocumentCount`（=注入分片数）、`injectedTokens` |
+| `chat.turn.accepted` | log | `knowledgeCommand`、`researchCommand`、`promptLength`、`userPromptLength` |
+| `chat.llm.stream.started` | log | `knowledgeOutcome`、`injectedDocumentCount`（=注入分片数）、`injectedTokens`、`researchCommand` |
 | `knowledge.context.injected` | log | `query`（≤200 字）、`chunks[]`（`chunkId`/`documentId`/`title`/`headingPath`/`pageStart`）、`scopeDocuments`、`candidateChunks`、`skippedAlreadyLoaded`、`reranked`、`injectedChunks`、`injectedTokens`、`elapsedMs` |
 | `knowledge.rerank.skipped` / `.failed` | debug / warn | 未配置 Provider 或重排失败；请求继续用 RRF 顺序 |
 | `knowledge.context.no_hits` / `.already_loaded` / `.empty_scope` / `.budget_exhausted` | log / warn | 同上口径，说明为什么没有注入正文 |

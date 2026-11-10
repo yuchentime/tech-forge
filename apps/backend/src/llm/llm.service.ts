@@ -23,6 +23,10 @@ import {
   createWorkspaceFileTools,
   prepareWorkspaceDirectory,
 } from "./tools/workspace-file-tools";
+import {
+  BUNDLED_SKILLS_ASSET_PATH,
+  installBundledSkills,
+} from "./skills";
 import { parsePersistedPiMessage } from "../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../conversations/pi-session-snapshots.service";
 import { replaceInjectedUserText } from "./session-entries";
@@ -87,6 +91,15 @@ export interface LlmRequestOptions {
     absolutePath: string;
     tool: "write" | "edit";
   }) => Promise<void> | void;
+  /**
+   * Pi skill expanded at the start of this turn's model prompt.
+   *
+   * The skill body becomes part of the user message, not the system prompt, so per-turn context
+   * (attachments, knowledge chunks) can still follow it. The stored transcript and snapshot keep
+   * the user's own text: the caller passes that text as `prompt`, while this option only changes
+   * what the model reads. `createSession` fails loudly when the named skill is not discoverable.
+   */
+  skillName?: string;
 }
 
 /** Adds request-scoped cancellation to streamed LLM calls. */
@@ -237,6 +250,8 @@ function createConversationPersistenceExtension(
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private piSdkPromise?: Promise<PiSdk>;
+  /** One-shot seeding of bundled skills into `<configDir>/skills`; retried after a failure. */
+  private installedSkillsPromise?: Promise<void>;
 
   /** Injects local settings, provider adapters, and the per-conversation Pi snapshot store. */
   constructor(
@@ -445,9 +460,17 @@ export class LlmService {
         contextTokens: startingContextUsage?.tokens ?? null,
         contextWindow: startingContextUsage?.contextWindow ?? null,
         contextPercent: startingContextUsage?.percent ?? null,
+        skillName: options.skillName ?? null,
       });
-      const modelPrompt = composeModelPrompt(prompt, options.promptContext);
-      const run = session.prompt(modelPrompt, { expandPromptTemplates: false }).then(
+      // A skill command must be the first token for Pi to expand it. The per-turn context is part
+      // of its arguments, so the model reads the skill first and then the evidence and user text.
+      const composedPrompt = composeModelPrompt(prompt, options.promptContext);
+      const modelPrompt = options.skillName
+        ? `/skill:${options.skillName} ${composedPrompt}`
+        : composedPrompt;
+      const run = session.prompt(modelPrompt, {
+        expandPromptTemplates: Boolean(options.skillName),
+      }).then(
         () => {
           runSettled = true;
           wake();
@@ -896,6 +919,32 @@ export class LlmService {
           ...(options.onFileWritten
             ? { onFileWritten: options.onFileWritten }
             : {}),
+          onFileOperationFailed: ({
+            toolName,
+            operation,
+            pathScope,
+            elapsedMs,
+            error,
+          }) => {
+            const errorFields = getSafeErrorLogFields(error);
+            const isPolicyDenied = errorFields.errorCode === "EWORKSPACE";
+            writeStructuredEvent(
+              this.logger,
+              isPolicyDenied ? "warn" : "error",
+              "llm.file_tool.operation.failed",
+              {
+                ...logContext,
+                toolName,
+                operation,
+                pathScope,
+                elapsedMs,
+                ...(isPolicyDenied
+                  ? { failureReason: "workspace_policy_denied" }
+                  : {}),
+                ...errorFields,
+              },
+            );
+          },
         },
       );
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
@@ -942,6 +991,10 @@ export class LlmService {
       // Without it the extension writes to ~/.pi/agent/memory, outside the TeachForge config root.
       process.env.PI_MEMORY_DIR = this.settings.getMemoryDirectory();
 
+      // Bundled skill templates are copied into the config root once. The user can then inspect,
+      // edit or replace them without depending on the backend install directory.
+      await this.ensureInstalledSkills();
+
       const resourceLoader = new sdk.DefaultResourceLoader({
         cwd,
         agentDir,
@@ -955,7 +1008,13 @@ export class LlmService {
         extensionFactories,
         // These stay anchored to the configured root instead of the session cwd, so per-session
         // workspaces never change where user-provided skills and prompt templates are looked up.
-        additionalSkillPaths: [join(resourceRoot, "skills")],
+        // `noSkills` only disables discovery, not these explicit paths. The config-root directory
+        // is the installed location (`<configDir>/skills`); the workspace directory remains for
+        // users who keep project-local skills next to their other Agent files.
+        additionalSkillPaths: [
+          this.settings.getSkillsDirectory(),
+          join(resourceRoot, "skills"),
+        ],
         additionalPromptTemplatePaths: [join(resourceRoot, "prompts")],
         appendSystemPromptOverride: (base) => [...base, customSystemPrompt],
       });
@@ -967,6 +1026,18 @@ export class LlmService {
         phase,
       });
       await resourceLoader.reload();
+
+      // `/skill:name` silently stays literal when the skill is missing. A caller that asked for a
+      // skill must get a real error here instead of a model turn that can no longer follow the
+      // procedure it was promised.
+      if (options.skillName) {
+        const requestedSkill = resourceLoader
+          .getSkills()
+          .skills.find((skill) => skill.name === options.skillName);
+        if (!requestedSkill) {
+          throw new Error(`Pi skill not found: ${options.skillName}.`);
+        }
+      }
 
       const settingsManager = sdk.SettingsManager.create(
         cwd,
@@ -1041,6 +1112,7 @@ export class LlmService {
         extensionCount: extensionFactories.length,
         customToolCount: customTools.length,
         toolCount: toolAllowlist.length,
+        skillsDirectory: this.settings.getSkillsDirectory(),
         loadMemory,
         compactionEnabled: compactionSettings.enabled,
         compactionReserveTokens: compactionSettings.reserveTokens,
@@ -1208,6 +1280,27 @@ export class LlmService {
       throw new Error("Stored conversation content is not valid text blocks.");
     }
     return value as Array<{ type: "text"; text: string }>;
+  }
+
+  /**
+   * Seeds bundled skill templates into `<configDir>/skills` once per process.
+   *
+   * The promise is retained so concurrent sessions do not race the same copies; a failure clears
+   * it so the next session retries instead of permanently disabling skills.
+   */
+  private ensureInstalledSkills(): Promise<void> {
+    this.installedSkillsPromise ??= Promise.resolve()
+      .then(() =>
+        installBundledSkills(
+          BUNDLED_SKILLS_ASSET_PATH,
+          this.settings.getSkillsDirectory(),
+        ),
+      )
+      .catch((error: unknown) => {
+        this.installedSkillsPromise = undefined;
+        throw error;
+      });
+    return this.installedSkillsPromise;
   }
 
   /** Loads and caches the Pi SDK module. */

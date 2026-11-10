@@ -1,5 +1,5 @@
 import { useAui, useAuiState } from '@assistant-ui/react';
-import { Database } from '@phosphor-icons/react';
+import { Database, MagnifyingGlass } from '@phosphor-icons/react';
 import {
   useCallback,
   useEffect,
@@ -9,6 +9,9 @@ import {
 } from 'react';
 import { composerCommandStore } from './composer-command-store';
 
+/** Visual identity of one slash command in the menu and the composer chip. */
+export type SlashCommandIcon = 'database' | 'research';
+
 /** One entry offered by the composer's slash menu. */
 export interface SlashCommandItem {
   id: string;
@@ -16,6 +19,7 @@ export interface SlashCommandItem {
   description: string;
   /** Command text the adapter prepends when the chip is present. */
   insert: string;
+  icon: SlashCommandIcon;
 }
 
 /**
@@ -31,9 +35,34 @@ export const KNOWLEDGE_SLASH_COMMAND: SlashCommandItem = {
   label: '查询资料库',
   description: '查询本地上传的资料库',
   insert: '/查询资料库 ',
+  icon: 'database',
 };
 
-const SLASH_COMMANDS: readonly SlashCommandItem[] = [KNOWLEDGE_SLASH_COMMAND];
+/**
+ * The deep-research command.
+ *
+ * `/探索主题` is also a backend protocol: `deep-research-command.ts` parses exactly this token and
+ * loads the bundled `deep-research` Pi skill. The backend always retrieves knowledge first, then the
+ * skill writes a Markdown document and an SVG knowledge map into the conversation workspace.
+ */
+export const DEEP_RESEARCH_SLASH_COMMAND: SlashCommandItem = {
+  id: 'deep-research',
+  label: '探索主题',
+  description: '输入一个主题，AI 将帮你深入研究并生成知识地图',
+  insert: '/探索主题 ',
+  icon: 'research',
+};
+
+const SLASH_COMMANDS: readonly SlashCommandItem[] = [
+  KNOWLEDGE_SLASH_COMMAND,
+  DEEP_RESEARCH_SLASH_COMMAND,
+];
+
+/** Finds the menu entry behind a stored chip command, for labels and icons. */
+export function getSlashCommand(command: string | null): SlashCommandItem | null {
+  if (!command) return null;
+  return SLASH_COMMANDS.find((item) => item.insert.trim() === command) ?? null;
+}
 
 /**
  * Reads the trigger query out of the draft.
@@ -170,7 +199,11 @@ export function SlashCommandMenu({ menu }: { menu: SlashCommandMenuState }) {
           role="option"
           type="button"
         >
-          <Database className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+          {item.icon === 'research' ? (
+            <MagnifyingGlass className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+          ) : (
+            <Database className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+          )}
           <span className="shrink-0 font-medium text-stone-900">{item.label}</span>
           <span className="min-w-0 flex-1 truncate text-stone-500">{item.description}</span>
         </button>

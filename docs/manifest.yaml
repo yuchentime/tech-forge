@@ -533,3 +533,31 @@ routes:
       - docs/changes/2026-11-10-knowledge-session-cards/brief.md
       - docs/changes/2026-11-10-knowledge-session-cards/worklog.md
     history_on_demand: []
+  deep-research-command:
+    description: "Slash-triggered deep research: force knowledge retrieval, expand the bundled deep-research Pi skill, write a Markdown knowledge document and a self-contained SVG knowledge map as session artifacts"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/assets/skills/deep-research/**"
+      - "apps/backend/src/chat/deep-research-command.ts"
+      - "apps/backend/src/chat/turn-command.ts"
+      - "apps/backend/src/chat/chat.service.ts"
+      - "apps/backend/src/llm/llm.service.ts"
+      - "apps/backend/src/llm/skills.ts"
+      - "apps/backend/src/settings/settings.service.ts"
+      - "apps/backend/src/artifacts/artifacts.service.ts"
+      - "apps/backend/test/deep-research.test.cjs"
+      - "apps/backend/test/agent-stream.test.cjs"
+      - "apps/desktop/src/features/agent/SlashCommandMenu.tsx"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/retrieval/index.md
+      - docs/current/domains/artifacts/index.md
+      - docs/changes/2026-11-10-deep-research-command/brief.md
+      - docs/changes/2026-11-10-deep-research-command/design.md
+      - docs/changes/2026-11-10-deep-research-command/verification.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-09-knowledge-command-context/brief.md
+    history_on_demand: []

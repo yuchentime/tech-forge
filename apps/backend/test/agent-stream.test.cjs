@@ -144,6 +144,148 @@ test('ChatService delegates the prompt and request signal to the configured mode
   );
 });
 
+test('deep research forces knowledge retrieval and loads the bundled skill', async () => {
+  const streamOptions = [];
+  const knowledgeCalls = [];
+  const llm = {
+    stream(prompt, options) {
+      streamOptions.push({ prompt, options });
+      return (async function* () {})();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    getKnowledgeScope: async () => ({ documentIds: [] }),
+    finishTurn: async () => undefined,
+  };
+  const knowledge = {
+    buildContext: async (input) => {
+      knowledgeCalls.push(input);
+      return {
+        outcome: 'injected',
+        text: '## 资料库检索结果\n\n### 片段 1（资料：生物讲义；页码：1）\n光合作用',
+        refs: [
+          {
+            chunkId: 'chunk-1',
+            documentId: 'document-1',
+            documentVersionId: 'version-1',
+            title: '生物讲义',
+            headingPath: ['光合作用'],
+            pageStart: 1,
+            pageEnd: 1,
+          },
+        ],
+        stats: {
+          scopeDocuments: 1,
+          candidateChunks: 1,
+          skippedAlreadyLoaded: 0,
+          reranked: false,
+          injectedChunks: 1,
+          injectedTokens: 24,
+          elapsedMs: 3,
+        },
+      };
+    },
+    toContextRefsJson: () => null,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({
+      text: '',
+      refsJson: null,
+      rehearsalIds: [],
+    }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    knowledge,
+    undefined,
+    undefined,
+    rehearsals,
+  );
+
+  await collect(
+    service.stream(
+      '/探索主题 光合作用',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  assert.equal(knowledgeCalls.length, 1);
+  assert.equal(knowledgeCalls[0].query, '光合作用');
+  assert.equal(streamOptions.length, 1);
+  // The stored message and snapshot keep the user's topic; the skill is only in the model prompt.
+  assert.equal(streamOptions[0].prompt, '光合作用');
+  assert.equal(streamOptions[0].options.skillName, 'deep-research');
+  assert.match(streamOptions[0].options.promptContext, /## 资料库检索结果/);
+});
+
+test('a plain turn does not retrieve knowledge or load a skill', async () => {
+  const streamOptions = [];
+  let knowledgeCalls = 0;
+  const llm = {
+    stream(prompt, options) {
+      streamOptions.push({ prompt, options });
+      return (async function* () {})();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const knowledge = {
+    buildContext: async () => {
+      knowledgeCalls += 1;
+      throw new Error('must not retrieve without a command');
+    },
+    toContextRefsJson: () => null,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({
+      text: '',
+      refsJson: null,
+      rehearsalIds: [],
+    }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    knowledge,
+    undefined,
+    undefined,
+    rehearsals,
+  );
+
+  await collect(
+    service.stream(
+      '光合作用是什么',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  assert.equal(knowledgeCalls, 0);
+  assert.equal(streamOptions[0].prompt, '光合作用是什么');
+  assert.equal(streamOptions[0].options.skillName, undefined);
+});
+
 test('ChatPromptDto trims input and counts Unicode characters', async () => {
   const valid = plainToInstance(ChatPromptDto, { prompt: '  备课问题  ' });
   assert.equal(valid.prompt, '备课问题');
@@ -346,6 +488,56 @@ test('durable context is appended as its own Pi message entry before prompting',
     ['prompt', '问题'],
     ['append', 'rehearsal_digest', '## 此前的演练记录\n背景', false],
     ['prompt', '问题'],
+  ]);
+});
+
+test('a requested skill becomes the first token of the model prompt', async () => {
+  const calls = [];
+  const session = {
+    subscribe() {
+      return () => undefined;
+    },
+    prompt(prompt, options) {
+      calls.push([prompt, options]);
+      return Promise.resolve();
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    dispose() {},
+    messages: [],
+    getLastAssistantText() {
+      return '回答';
+    },
+    getContextUsage: () => undefined,
+    sessionManager: { getEntries: () => [] },
+  };
+  const service = new LlmService(
+    {},
+    {},
+    {
+      getLlmSettings: async () => ({
+        provider: 'deepseek',
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
+      }),
+    },
+    {},
+  );
+  service.createSession = async () => session;
+
+  await collect(
+    service.stream('光合作用', {
+      skillName: 'deep-research',
+      promptContext: '## 资料库检索结果\n证据',
+    }),
+  );
+
+  assert.deepEqual(calls, [
+    [
+      '/skill:deep-research ## 资料库检索结果\n证据\n\n## 用户输入\n光合作用',
+      { expandPromptTemplates: true },
+    ],
   ]);
 });
 

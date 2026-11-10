@@ -14,8 +14,9 @@ related:
   - docs/current/domains/conversations/backend-behavior.md
   - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+  - docs/changes/2026-11-10-deep-research-command/design.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 ---
 
 # Agent Runtime 运行链路
@@ -34,7 +35,7 @@ last_verified: 2026-11-09
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，装载 `pi-memory` 文件扩展并注册持久化钩子。另提供非流式 `generate()` 供演练使用。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，装载 `pi-memory` 文件扩展并注册持久化钩子。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不加载 `pi-memory`、不注册文件工具。 |
 | `pi-memory` 扩展 | 由 `additionalExtensionPaths` 装载的第三方 Pi 扩展：注册 `memory_write`、`memory_read`、`memory_search`、`memory_forget`、`memory_restore`、`scratchpad`、`memory_status`，并在每轮把记忆快照追加到系统提示词。记忆是纯 Markdown，存放于 `SettingsService` 提供的 `<configDir>/memory/`（默认 `~/.tech-forge/memory/`），按用户而非会话隔离。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
@@ -50,7 +51,7 @@ Pi 自动压缩由 SDK 触发，`LlmService` 在 `stream()` 和 `generate()` 的
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
-常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`LlmService` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
 ## 请求与持久化时序
 
@@ -209,6 +210,22 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 7. `pi-memory` 直接读写 `<configDir>/memory/`（默认 `~/.tech-forge/memory/`，由 `LlmService` 以 `PI_MEMORY_DIR` 注入）下的记忆 Markdown；目标是扩展内的固定常量，不接受模型选择的路径，因此不经过 `workspace-file-tools.ts` 的授权检查，也不进入 SQLite、SSE 或历史接口。记忆按用户全局共享，不按会话隔离；把它搬进 workspace、知识库或会话目录，或依赖扩展默认的 `~/.pi/agent/memory/`，都会破坏这条边界。
 8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具、无 `pi-memory`；普通对话只通过一次性 digest（`custom_message` entry + `loadedContext` 标记）与 `contextRefsJson` 读取演练结果。
 
+## 技能装载与探索主题
+
+Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<configDir>/skills`（默认 `~/.tech-forge/skills`）和用户 `<workspace>/skills`。内置 skill 的源模板随 backend 分发在 `assets/skills`（由编译产物 `dist/llm` 解析为 `../../assets/skills`）；`LlmService` 在首次创建 session 前调用 `installBundledSkills()` 把模板复制到 `<configDir>/skills`，目标目录已有 `SKILL.md` 时不覆盖，因此用户编辑过的 skill 不会被升级静默替换。
+
+`noSkills: true` 只关闭默认目录发现，这两条显式路径仍会加载；每次 `resourceLoader.reload()` 后，`LlmService` 用 `getSkills()` 读取名称、描述与路径。`<configDir>/skills` 不随会话工作区删除，用户可直接查看和编辑。
+
+探索主题命令（`/探索主题 <主题>`）的链路：
+
+1. `ChatService` 用 `parseTurnCommand()` 剥掉前导命令；`/探索主题` 与 `/查询资料库` 可组合、顺序不限。研究轮次固定先调 `KnowledgeService.buildContext()`，检索预算、范围、重排、去重和 `contextRefsJson` 与 `/查询资料库` 完全一致。
+2. `ChatService` 把资料块放进 `promptContext`，并向 `LlmService.stream()` 传 `skillName: 'deep-research'`；不新增 Agent、状态机或表。
+3. `LlmService` 在 `createSession()` 中校验 skill 存在（缺失时抛 `Pi skill not found`），然后构造 `/skill:deep-research <promptContext>\n\n## 用户输入\n<主题>` 并传 `expandPromptTemplates: true`。Pi 把 `SKILL.md` 展开为 `<skill>` 块，资料与用户主题成为其参数。
+4. 快照清洗仍以纯主题 `prompt` 为准，因此本轮 skill 正文与资料块不会在下一轮重放；入库消息也只保存主题。
+5. skill 用现有 `read`/`write`/`edit`/`grep` 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，写入回调把它们登记为会话 artifact。skill 不获得新工具，也不放开知识库目录直读。
+
+内置 skill 的硬性约束（见 `SKILL.md`）：资料库分片是主证据，引用带资料名/章节/页码；未覆盖内容标 `[补充背景]`，不确定内容标 `[待核实]`；先写文档并通过自检，再写 SVG；SVG 必须自包含、带 `viewBox`、禁止脚本/`foreignObject`/外部引用。模型漏写其中一个产物时，本轮不会失败，聊天摘要只报告实际生成的文件。
+
 ## 代码入口
 
 - HTTP/SSE 边界：`apps/backend/src/chat/chat.controller.ts`
@@ -217,6 +234,9 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
+- 斜杠命令解析：`apps/backend/src/knowledge/knowledge-command.ts`、`apps/backend/src/chat/deep-research-command.ts`、`apps/backend/src/chat/turn-command.ts`
+- skill 安装与发现：`apps/backend/src/llm/skills.ts`、`SettingsService.getSkillsDirectory()`
+- 内置探索主题 skill 模板：`apps/backend/assets/skills/deep-research/SKILL.md`
 - 第三方文件扩展：`pi-memory`（backend 依赖，经 `additionalExtensionPaths` 装载）；记忆目录 `<configDir>/memory/` 由 `SettingsService.getMemoryDirectory()` 提供
 - SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`、`pi-session-snapshot.entity.ts`
 - Pi session 快照读写与恢复选择：`apps/backend/src/conversations/pi-session-snapshots.service.ts`

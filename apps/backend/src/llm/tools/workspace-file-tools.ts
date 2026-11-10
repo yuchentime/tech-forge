@@ -53,6 +53,14 @@ export interface WorkspaceFileToolPolicy {
     absolutePath: string;
     tool: 'write' | 'edit';
   }) => Promise<void> | void;
+  /** Reports failed file-tool operations without exposing the requested path or file contents. */
+  onFileOperationFailed?: (input: {
+    toolName: 'read' | 'edit' | 'write';
+    operation: 'access' | 'readFile' | 'detectImageMimeType' | 'mkdir' | 'writeFile';
+    pathScope: 'workspace' | 'external' | 'invalid';
+    elapsedMs: number;
+    error: unknown;
+  }) => void;
 }
 
 /** Describes a one-session exception derived from one explicit user path. */
@@ -113,126 +121,188 @@ export async function createWorkspaceFileTools(
   const readGrant = deriveGuardedReadGrant(currentUserRequest, guardedDirectories);
 
   const readOperations: ReadOperations = {
-    access: async (filePath) => {
-      const safePath = await resolveReadableFile(
-        workspaceRoot,
-        filePath,
-        protectedPaths,
-        guardedDirectories,
-        readGrant,
-        fileSystem,
-      );
-      await fileSystem.access(safePath, fsConstants.R_OK);
-    },
-    readFile: async (filePath) => {
-      const safePath = await resolveReadableFile(
-        workspaceRoot,
-        filePath,
-        protectedPaths,
-        guardedDirectories,
-        readGrant,
-        fileSystem,
-      );
-      return fileSystem.readFile(safePath);
-    },
-    detectImageMimeType: async (filePath) => {
-      const safePath = await resolveReadableFile(
-        workspaceRoot,
-        filePath,
-        protectedPaths,
-        guardedDirectories,
-        readGrant,
-        fileSystem,
-      );
-      return sdk.detectSupportedImageMimeTypeFromFile(safePath);
-    },
+    access: async (filePath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'read',
+      'access',
+      filePath,
+      async () => {
+        const safePath = await resolveReadableFile(
+          workspaceRoot,
+          filePath,
+          protectedPaths,
+          guardedDirectories,
+          readGrant,
+          fileSystem,
+        );
+        await fileSystem.access(safePath, fsConstants.R_OK);
+      },
+    ),
+    readFile: async (filePath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'read',
+      'readFile',
+      filePath,
+      async () => {
+        const safePath = await resolveReadableFile(
+          workspaceRoot,
+          filePath,
+          protectedPaths,
+          guardedDirectories,
+          readGrant,
+          fileSystem,
+        );
+        return fileSystem.readFile(safePath);
+      },
+    ),
+    detectImageMimeType: async (filePath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'read',
+      'detectImageMimeType',
+      filePath,
+      async () => {
+        const safePath = await resolveReadableFile(
+          workspaceRoot,
+          filePath,
+          protectedPaths,
+          guardedDirectories,
+          readGrant,
+          fileSystem,
+        );
+        return sdk.detectSupportedImageMimeTypeFromFile(safePath);
+      },
+    ),
   };
 
   const editOperations: EditOperations = {
-    access: async (filePath) => {
-      const safePath = await resolveWritableFile(
-        workspaceRoot,
-        filePath,
-        protectedPaths,
-        externalGrant,
-        fileSystem,
-        false,
-      );
-      await fileSystem.access(safePath, fsConstants.R_OK | fsConstants.W_OK);
-    },
-    readFile: async (filePath) => {
-      const safePath = await resolveWritableFile(
-        workspaceRoot,
-        filePath,
-        protectedPaths,
-        externalGrant,
-        fileSystem,
-        false,
-      );
-      return fileSystem.readFile(safePath);
-    },
+    access: async (filePath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'edit',
+      'access',
+      filePath,
+      async () => {
+        const safePath = await resolveWritableFile(
+          workspaceRoot,
+          filePath,
+          protectedPaths,
+          externalGrant,
+          fileSystem,
+          false,
+        );
+        await fileSystem.access(safePath, fsConstants.R_OK | fsConstants.W_OK);
+      },
+    ),
+    readFile: async (filePath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'edit',
+      'readFile',
+      filePath,
+      async () => {
+        const safePath = await resolveWritableFile(
+          workspaceRoot,
+          filePath,
+          protectedPaths,
+          externalGrant,
+          fileSystem,
+          false,
+        );
+        return fileSystem.readFile(safePath);
+      },
+    ),
     writeFile: async (filePath, content) => {
-      const safePath = await resolveWritableFile(
+      const safePath = await runLoggedFileOperation(
+        policy,
         workspaceRoot,
+        'edit',
+        'writeFile',
         filePath,
-        protectedPaths,
-        externalGrant,
-        fileSystem,
-        true,
+        async () => {
+          const safePath = await resolveWritableFile(
+            workspaceRoot,
+            filePath,
+            protectedPaths,
+            externalGrant,
+            fileSystem,
+            true,
+          );
+          await fileSystem.writeFile(safePath, content, 'utf8');
+          return safePath;
+        },
       );
-      await fileSystem.writeFile(safePath, content, 'utf8');
       await policy.onFileWritten?.({ absolutePath: safePath, tool: 'edit' });
     },
   };
 
   const writeOperations: WriteOperations = {
-    mkdir: async (directoryPath) => {
-      const requestedPath = resolve(workspaceRoot, directoryPath);
-      if (isPathWithin(workspaceRoot, requestedPath)) {
-        await ensureWorkspaceDirectory(
-          workspaceRoot,
-          requestedPath,
-          fileSystem,
-        );
-        return;
-      }
-
-      if (
-        externalGrant?.kind !== 'directory' ||
-        !isPathWithin(externalGrant.path, requestedPath)
-      ) {
-        // Pi's native write tool calls mkdir(parent) even for an exact-file
-        // grant. Permit only a no-op check of that already-existing parent.
-        if (
-          externalGrant?.kind === 'file' &&
-          areSamePath(dirname(externalGrant.path), requestedPath)
-        ) {
-          await verifyExistingExternalDirectory(requestedPath, fileSystem);
+    mkdir: async (directoryPath) => runLoggedFileOperation(
+      policy,
+      workspaceRoot,
+      'write',
+      'mkdir',
+      directoryPath,
+      async () => {
+        const requestedPath = resolve(workspaceRoot, directoryPath);
+        if (isPathWithin(workspaceRoot, requestedPath)) {
+          await ensureWorkspaceDirectory(
+            workspaceRoot,
+            requestedPath,
+            fileSystem,
+          );
           return;
         }
-        throw workspaceBoundaryError();
-      }
-      const externalRoot = await prepareGrantedExternalDirectory(
-        externalGrant.path,
-        fileSystem,
-      );
-      const relativePath = relative(externalGrant.path, requestedPath);
-      await ensureWorkspaceDirectory(
-        externalRoot,
-        resolve(externalRoot, relativePath),
-        fileSystem,
-      );
-    },
+
+        if (
+          externalGrant?.kind !== 'directory' ||
+          !isPathWithin(externalGrant.path, requestedPath)
+        ) {
+          // Pi's native write tool calls mkdir(parent) even for an exact-file
+          // grant. Permit only a no-op check of that already-existing parent.
+          if (
+            externalGrant?.kind === 'file' &&
+            areSamePath(dirname(externalGrant.path), requestedPath)
+          ) {
+            await verifyExistingExternalDirectory(requestedPath, fileSystem);
+            return;
+          }
+          throw workspaceBoundaryError();
+        }
+        const externalRoot = await prepareGrantedExternalDirectory(
+          externalGrant.path,
+          fileSystem,
+        );
+        const relativePath = relative(externalGrant.path, requestedPath);
+        await ensureWorkspaceDirectory(
+          externalRoot,
+          resolve(externalRoot, relativePath),
+          fileSystem,
+        );
+      },
+    ),
     writeFile: async (filePath, content) => {
-      const safePath = await resolveWritableFile(
+      const safePath = await runLoggedFileOperation(
+        policy,
         workspaceRoot,
+        'write',
+        'writeFile',
         filePath,
-        protectedPaths,
-        externalGrant,
-        fileSystem,
-        true,
+        async () => {
+          const safePath = await resolveWritableFile(
+            workspaceRoot,
+            filePath,
+            protectedPaths,
+            externalGrant,
+            fileSystem,
+            true,
+          );
+          await fileSystem.writeFile(safePath, content, 'utf8');
+          return safePath;
+        },
       );
-      await fileSystem.writeFile(safePath, content, 'utf8');
       await policy.onFileWritten?.({ absolutePath: safePath, tool: 'write' });
     },
   };
@@ -242,6 +312,45 @@ export async function createWorkspaceFileTools(
     sdk.createEditToolDefinition(workspaceRoot, { operations: editOperations }),
     sdk.createWriteToolDefinition(workspaceRoot, { operations: writeOperations }),
   ];
+}
+
+/** Runs one Pi file operation and reports failures while preserving the original exception. */
+async function runLoggedFileOperation<T>(
+  policy: WorkspaceFileToolPolicy,
+  workspaceRoot: string,
+  toolName: 'read' | 'edit' | 'write',
+  operation: 'access' | 'readFile' | 'detectImageMimeType' | 'mkdir' | 'writeFile',
+  filePath: string,
+  execute: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await execute();
+  } catch (error) {
+    try {
+      policy.onFileOperationFailed?.({
+        toolName,
+        operation,
+        pathScope: getFilePathScope(workspaceRoot, filePath),
+        elapsedMs: Date.now() - startedAt,
+        error,
+      });
+    } catch {
+      // A diagnostic failure must never hide the filesystem or policy error Pi needs to handle.
+    }
+    throw error;
+  }
+}
+
+/** Classifies a requested target without adding its path to logs. */
+function getFilePathScope(
+  workspaceRoot: string,
+  filePath: string,
+): 'workspace' | 'external' | 'invalid' {
+  if (typeof filePath !== 'string' || filePath.trim() === '') return 'invalid';
+  return isPathWithin(workspaceRoot, resolve(workspaceRoot, filePath))
+    ? 'workspace'
+    : 'external';
 }
 
 /** Resolves a read target without restricting it to the workspace root. */

@@ -14,6 +14,7 @@ import {
   Copy as CopyIcon,
   Database,
   FileText,
+  MagnifyingGlass,
   Stack,
   WarningCircle,
   X,
@@ -44,7 +45,11 @@ import {
   sentAttachmentStore,
 } from './attachment-store';
 import { ConversationSidebar, type SidebarView } from './ConversationSidebar';
-import { SlashCommandMenu, useSlashCommandMenu } from './SlashCommandMenu';
+import {
+  SlashCommandMenu,
+  getSlashCommand,
+  useSlashCommandMenu,
+} from './SlashCommandMenu';
 import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
@@ -129,6 +134,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     composerCommandStore.getSnapshot,
     composerCommandStore.getSnapshot,
   );
+  const composerCommandItem = getSlashCommand(composerCommand);
   /** Changes whenever a turn registers another file, so the list refetches after each artifact. */
   const liveArtifactToken = liveActivity.artifacts.map((file) => file.id).join('|');
 
@@ -642,10 +648,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   {composerCommand && (
                     <div className="mb-2 flex items-center">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-0.5 pl-2 pr-1 text-xs font-medium text-emerald-900">
-                        <Database className="h-3.5 w-3.5" aria-hidden />
-                        查询资料库
+                        {composerCommandItem?.icon === 'research' ? (
+                          <MagnifyingGlass className="h-3.5 w-3.5" aria-hidden />
+                        ) : (
+                          <Database className="h-3.5 w-3.5" aria-hidden />
+                        )}
+                        {composerCommandItem?.label ?? composerCommand}
                         <button
-                          aria-label="移除资料库查询"
+                          aria-label={`移除${composerCommandItem?.label ?? '命令'}`}
                           className="rounded-full p-0.5 text-emerald-700 transition hover:bg-emerald-100"
                           onClick={() => composerCommandStore.reset()}
                           type="button"
@@ -660,7 +670,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
                     disabled={isLoadingEarlierMessages}
                     onKeyDown={slashMenu.handleKeyDown}
-                    placeholder="写下你正在准备的内容或问题…输入 / 可查询本地上传的资料库"
+                    placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
                     ref={composerInputRef}
                     rows={3}
                     submitMode="ctrlEnter"
