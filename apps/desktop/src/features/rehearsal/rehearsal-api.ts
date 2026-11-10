@@ -110,6 +110,21 @@ export interface RehearsalDetail {
   createdAt: string;
 }
 
+/** Real phases of an in-flight start, as reported by the backend. */
+export type RehearsalPreparingPhase =
+  | 'history'
+  | 'prior_summaries'
+  | 'session'
+  | 'plan'
+  | 'repair'
+  | 'saving';
+
+/** Read-only preparing snapshot; null means the request has not registered or already settled. */
+export interface RehearsalPreparing {
+  rehearsalId: string;
+  phase: RehearsalPreparingPhase;
+}
+
 export interface RehearsalSummary {
   rehearsalId: string;
   status: RehearsalStatus;
@@ -180,6 +195,16 @@ export function getLatestRehearsal(
   conversationId: string,
 ): Promise<RehearsalDetail | null> {
   return request(`/api/conversations/${conversationId}/rehearsals/latest`, 'GET');
+}
+
+/** Reads the in-flight preparing phase; null when no start is running. */
+export function getRehearsalPreparing(
+  conversationId: string,
+): Promise<RehearsalPreparing | null> {
+  return request(
+    `/api/conversations/${conversationId}/rehearsals/preparing`,
+    'GET',
+  );
 }
 
 /** Reads one rehearsal with turns and report. */

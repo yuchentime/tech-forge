@@ -198,3 +198,18 @@ export interface RehearsalWithTurns {
   rehearsal: RehearsalEntity;
   turns: RehearsalTurnEntity[];
 }
+
+/** Real phases of an in-flight start; the renderer names what it is waiting on. */
+export type RehearsalPreparingPhase =
+  | 'history'
+  | 'prior_summaries'
+  | 'session'
+  | 'plan'
+  | 'repair'
+  | 'saving';
+
+/** Read-only phase snapshot for one in-flight start; never persisted. */
+export interface RehearsalPreparingView {
+  rehearsalId: string;
+  phase: RehearsalPreparingPhase;
+}

@@ -49,6 +49,17 @@ last_verified: 2026-11-09
   - 同一 `startRequestId` 重放返回已有状态；失败且无 turn 的旧行会原地重试规划。
 - **错误**：400 画像超长；404 conversation 不存在；409 已有进行中演练或普通对话仍有 pending turn；422 没有足够普通历史/模型输出非法（3 次尝试后仍非法）；502 Provider 失败；504 超时（供应方暂不可用）。
 
+### Read the in-flight preparing phase
+
+- **方法**：`GET`
+- **路径**：`/api/conversations/:conversationId/rehearsals/preparing`
+- **响应**：`{ "rehearsalId": "uuid", "phase": "plan" }`，或 `null`。
+- **语义**：
+  - 只读诊断端点：不读数据库、不执行 reconciliation、不写任何行；轮询不会更新 `updatedAt`。
+  - `phase` 取 `history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`，只用于准备画面的状态文案；进度条本身按预计时长推进，不使用这些阶段。
+  - 没有进行中的 start、未知 conversation、进程重启导致内存态丢失时返回 `null`，不返回 404。
+  - 响应只用于准备画面；不改变任何状态或错误映射。
+
 ### Get latest rehearsal
 
 - **方法**：`GET`

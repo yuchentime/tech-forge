@@ -110,6 +110,13 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
   loadMemory?: boolean;
   /** Abort the provider call after this many milliseconds. */
   timeoutMs?: number;
+  /**
+   * Reports the coarse phase of this call before each expensive step.
+   *
+   * Rehearsal uses it to name what the preparing screen is waiting on; chat never passes it.
+   * The callback is diagnostic only and must not influence the call.
+   */
+  onPhase?: (phase: 'session' | 'provider') => void;
 }
 
 /** Controls how one Pi session is assembled without changing business-level request options. */
@@ -593,8 +600,17 @@ export class LlmService {
       promptLength: Array.from(prompt).length,
       historyMessageCount: options.conversation?.history.length ?? 0,
     });
+    // Phase reporting is diagnostic; a faulty callback must never break generation.
+    const reportPhase = (phase: 'session' | 'provider'): void => {
+      try {
+        options.onPhase?.(phase);
+      } catch {
+        // Ignore: the caller's UI hint is not part of the call contract.
+      }
+    };
 
     try {
+      reportPhase("session");
       const modelSettings = await this.settings.getLlmSettings();
       const resolved: LlmGenerateOptions = {
         ...options,
@@ -643,6 +659,7 @@ export class LlmService {
       try {
         if (options.signal?.aborted) abortSession();
         phase = "provider_run";
+        reportPhase("provider");
         const modelPrompt = composeModelPrompt(prompt, options.promptContext);
         const run = session.prompt(modelPrompt, { expandPromptTemplates: false });
         // The abort race may settle first; keep the provider promise from becoming unhandled.

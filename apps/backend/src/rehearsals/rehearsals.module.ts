@@ -8,6 +8,7 @@ import {
   RehearsalPersonaController,
   RehearsalsController,
 } from './rehearsals.controller';
+import { RehearsalPreparingRegistry } from './rehearsal-preparing-registry';
 import { RehearsalRunRegistry } from './rehearsal-run-registry';
 import { RehearsalTurnEntity } from './rehearsal-turn.entity';
 import { RehearsalEntity } from './rehearsal.entity';
@@ -26,7 +27,7 @@ import { RehearsalsService } from './rehearsals.service';
     RehearsalsController,
     RehearsalPersonaController,
   ],
-  providers: [RehearsalsService, RehearsalRunRegistry],
+  providers: [RehearsalsService, RehearsalRunRegistry, RehearsalPreparingRegistry],
   exports: [RehearsalsService],
 })
 export class RehearsalsModule {}

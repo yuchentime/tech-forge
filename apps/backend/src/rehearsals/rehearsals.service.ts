@@ -67,6 +67,7 @@ import {
   buildReportPrompt,
   buildSkipPrompt,
 } from './rehearsal-prompts';
+import { RehearsalPreparingRegistry } from './rehearsal-preparing-registry';
 import { RehearsalRunRegistry } from './rehearsal-run-registry';
 import { RehearsalTurnEntity } from './rehearsal-turn.entity';
 import { RehearsalEntity } from './rehearsal.entity';
@@ -76,6 +77,8 @@ import type {
   RehearsalListView,
   RehearsalPlan,
   RehearsalPlanUpdate,
+  RehearsalPreparingPhase,
+  RehearsalPreparingView,
   RehearsalProgress,
   RehearsalQuestionView,
   RehearsalReport,
@@ -95,6 +98,9 @@ import type {
 
 /** Default page size for the history list. */
 const DEFAULT_LIST_LIMIT = 20;
+
+/** Reports one real start phase to the in-flight preparing screen. */
+type RehearsalPhaseReporter = (phase: RehearsalPreparingPhase) => void;
 
 /** Proves the conversation has something to drill before a model call is made. */
 function hasUserAndAssistant(
@@ -198,6 +204,7 @@ export class RehearsalsService {
     private readonly llm: LlmService,
     private readonly settings: SettingsService,
     private readonly runs: RehearsalRunRegistry,
+    private readonly preparing: RehearsalPreparingRegistry,
   ) {}
 
   /**
@@ -212,6 +219,7 @@ export class RehearsalsService {
     logContext: RequestLogContext,
   ): Promise<RehearsalDetailView> {
     const startedAt = Date.now();
+    let preparingToken: string | null = null;
     const personaText = input.persona?.trim() || null;
     writeStructuredEvent(this.logger, 'log', 'rehearsal.start.started', {
       ...logContext,
@@ -241,12 +249,19 @@ export class RehearsalsService {
             if (active && active.id !== existing.id) {
               throw new ConflictException('已有进行中的演练，请先完成或结束。');
             }
+            preparingToken = this.preparing.begin(conversationId, existing.id);
+            const reportPhase = this.preparingReporter(
+              conversationId,
+              preparingToken,
+            );
             let detail: RehearsalDetailView;
             try {
               detail = await this.planAndCreateFirstTurn(
                 existing,
                 personaText ?? existing.personaText,
                 logContext,
+                undefined,
+                reportPhase,
               );
             } catch (error) {
               await repository.update(
@@ -283,6 +298,13 @@ export class RehearsalsService {
         throw new ConflictException('已有进行中的演练，请先完成或结束。');
       }
 
+      // Claim the phase slot before the first expensive read so the preparing screen can name it.
+      const rehearsalId = randomUUID();
+      preparingToken = this.preparing.begin(conversationId, rehearsalId);
+      const reportPhase = this.preparingReporter(
+        conversationId,
+        preparingToken,
+      );
       const restorable = await this.conversations.getRestorableHistory(
         conversationId,
         undefined,
@@ -295,7 +317,7 @@ export class RehearsalsService {
       }
 
       const rehearsal = repository.create({
-        id: randomUUID(),
+        id: rehearsalId,
         conversationId,
         status: 'preparing',
         startRequestId: input.startRequestId,
@@ -333,6 +355,7 @@ export class RehearsalsService {
           personaText,
           logContext,
           restorable,
+          reportPhase,
         );
       } catch (error) {
         await repository.update(
@@ -361,6 +384,10 @@ export class RehearsalsService {
         },
       );
       throw error;
+    } finally {
+      if (preparingToken) {
+        this.preparing.finish(conversationId, preparingToken);
+      }
     }
   }
 
@@ -393,6 +420,15 @@ export class RehearsalsService {
     }
     const turns = await this.loadTurns(rehearsalId);
     return this.toDetailView(rehearsal, turns);
+  }
+
+  /**
+   * Returns the read-only preparing phase for one in-flight start, or null.
+   *
+   * This is a pure diagnostic read: no database access, no reconciliation, no state change.
+   */
+  getPreparingPhase(conversationId: string): RehearsalPreparingView | null {
+    return this.preparing.read(conversationId);
   }
 
   /** Lists a conversation's rehearsal summaries with an opaque id cursor. */
@@ -1155,7 +1191,9 @@ export class RehearsalsService {
     personaText: string | null,
     logContext: RequestLogContext,
     knownHistory?: RestorableConversationHistory,
+    onPhase?: RehearsalPhaseReporter,
   ): Promise<RehearsalDetailView> {
+    // `begin()` already reports `history`; a fresh read here is only the retried-row path.
     const history =
       knownHistory ??
       (await this.conversations.getRestorableHistory(
@@ -1168,6 +1206,7 @@ export class RehearsalsService {
         '当前对话还没有足够的学习内容，先聊几轮再开始演练。',
       );
     }
+    onPhase?.('prior_summaries');
     const prior = await this.loadDigestItems(rehearsal.conversationId);
     const planPrompt = buildPlanPrompt({
       priorSummaries: renderPriorRehearsalSummaries(prior),
@@ -1188,6 +1227,7 @@ export class RehearsalsService {
           requestId: logContext.requestId,
           logContext,
           label: 'plan',
+          onPhase,
         },
       );
     } catch (error) {
@@ -1211,6 +1251,8 @@ export class RehearsalsService {
       generatedAt: new Date().toISOString(),
     });
     const now = new Date();
+    onPhase?.('saving');
+    let firstTurn: RehearsalTurnEntity | null = null;
     await this.dataSource.transaction(async (manager) => {
       const rehearsalRepository = manager.getRepository(RehearsalEntity);
       const turnRepository = manager.getRepository(RehearsalTurnEntity);
@@ -1232,28 +1274,49 @@ export class RehearsalsService {
         },
       );
       await turnRepository.delete({ rehearsalId: rehearsal.id });
-      await turnRepository.save(
-        turnRepository.create({
-          id: randomUUID(),
-          rehearsalId: rehearsal.id,
-          sequenceNo: 1,
-          kind: 'base',
-          baseSequenceNo: 1,
-          followUpDepth: 0,
-          pointId: null,
-          question: plan.firstQuestion,
-          answer: null,
-          evaluationJson: null,
-          status: 'awaiting_answer',
-          answerRequestId: null,
-          askedAt: now,
-          answeredAt: null,
-          evaluatedAt: null,
-        }),
-      );
+      firstTurn = turnRepository.create({
+        id: randomUUID(),
+        rehearsalId: rehearsal.id,
+        sequenceNo: 1,
+        kind: 'base',
+        baseSequenceNo: 1,
+        followUpDepth: 0,
+        pointId: null,
+        question: plan.firstQuestion,
+        answer: null,
+        evaluationJson: null,
+        status: 'awaiting_answer',
+        answerRequestId: null,
+        askedAt: now,
+        answeredAt: null,
+        evaluatedAt: null,
+      });
+      await turnRepository.save(firstTurn);
     });
+    if (!firstTurn) {
+      throw new InternalServerErrorException('演练计划写入失败，请重试。');
+    }
 
-    return this.getById(rehearsal.id, logContext);
+    // The rows just written describe the detail exactly; re-reading them would add three queries
+    // without changing the response. An equality test pins this to `getById()`.
+    return this.toDetailView(
+      {
+        ...rehearsal,
+        status: 'awaiting_answer',
+        personaText,
+        contextUpToSequenceNo:
+          rehearsal.contextUpToSequenceNo ?? history.maxSequenceNo,
+        planJson,
+        askedQuestionCount: 1,
+        baseQuestionCount: 1,
+        skippedCount: 0,
+        overallEvaluationJson: null,
+        endReason: null,
+        startedAt: now,
+        endedAt: null,
+      },
+      [firstTurn],
+    );
   }
 
   /**
@@ -1274,8 +1337,10 @@ export class RehearsalsService {
       logContext: RequestLogContext;
       label: string;
       signal?: AbortSignal;
+      onPhase?: RehearsalPhaseReporter;
     },
   ): Promise<T> {
+    const reportPhase = options.onPhase;
     const callOptions: LlmGenerateOptions = {
       systemPromptAppend: options.systemPromptAppend,
       tools: [],
@@ -1283,6 +1348,10 @@ export class RehearsalsService {
       timeoutMs: GENERATE_TIMEOUT_MS,
       requestId: options.requestId,
       signal: options.signal,
+      // The preparing screen names the provider run as "plan": it is generating the plan.
+      onPhase: reportPhase
+        ? (phase) => reportPhase(phase === 'provider' ? 'plan' : 'session')
+        : undefined,
       ...(options.conversation
         ? { conversation: options.conversation }
         : {}),
@@ -1313,6 +1382,7 @@ export class RehearsalsService {
       logContext: RequestLogContext;
       label: string;
       signal?: AbortSignal;
+      onPhase?: RehearsalPhaseReporter;
     },
     attempt: number,
   ): Promise<T> {
@@ -1365,6 +1435,7 @@ export class RehearsalsService {
           describeInvalidModelOutput(options.label),
         );
       }
+      options.onPhase?.('repair');
       return this.generateValidatedAttempt(
         basePrompt,
         `${basePrompt}\n\n上一次输出无法解析：${parseError}。` +
@@ -1882,6 +1953,15 @@ export class RehearsalsService {
       'rehearsals',
       `${rehearsal.id}.md`,
     );
+  }
+
+  /** Returns a phase reporter bound to the claimed start, or undefined when reporting is off. */
+  private preparingReporter(
+    conversationId: string,
+    token: string | null,
+  ): RehearsalPhaseReporter | undefined {
+    if (!token) return undefined;
+    return (phase) => this.preparing.setPhase(conversationId, token, phase);
   }
 
   /**

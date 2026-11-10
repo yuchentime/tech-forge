@@ -61,6 +61,26 @@ routes:
     history_on_demand:
       - docs/changes/2026-11-09-chat-attachments/design.md
       - docs/changes/2026-11-07-conversation-session-persistence/design.md
+  rehearsal-start-latency:
+    description: "Make 开始演练 wait less anxious without side effects: measure with existing logs, expose the real preparing phase through an additive read-only endpoint and polling, render a dedicated preparing screen with a real-phase progress bar and status copy, fix the stale-start race, and keep session-bootstrap trimming, async start and model-input changes behind explicit approval and differential evidence"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/rehearsals/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/conversations/**"
+      - "apps/backend/test/rehearsal*.test.cjs"
+      - "apps/desktop/src/features/rehearsal/**"
+      - "apps/desktop/test/rehearsal-store.test.cjs"
+    required:
+      - docs/current/index.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/changes/2026-11-10-rehearsal-start-latency/design.md
+    optional:
+      - docs/current/domains/rehearsals/api-contract.md
+      - docs/current/platform/agent-runtime.md
+      - docs/changes/2026-11-10-rehearsal-start-latency/brief.md
+      - docs/changes/2026-11-10-rehearsal-start-latency/verification.md
+    history_on_demand: []
   conversation-deletion:
     description: "Physically delete a conversation: rows (messages, snapshots, derived tables) in one transaction plus the local session directory, triggered from the sidebar hover menu"
     token_budget: 12000
@@ -448,3 +468,18 @@ routes:
     history_on_demand:
       - docs/changes/2026-11-07-conversation-history-sidebar/design.md
       - docs/changes/2026-11-07-conversation-session-persistence/design.md
+  knowledge-profile-discussion:
+    description: "Discuss and define the cross-rehearsal teacher knowledge profile: positioning, evidence rules, information structure, naming, scope, and open product decisions"
+    token_budget: 12000
+    code_globs:
+      - "apps/backend/src/rehearsals/**"
+      - "apps/desktop/src/features/rehearsal/**"
+      - "apps/desktop/src/features/agent/**"
+    required:
+      - docs/source/知识画像产品讨论.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/source/需求文档.md
+    optional:
+      - docs/source/功能设计文档.md
+      - docs/current/index.md
+    history_on_demand: []

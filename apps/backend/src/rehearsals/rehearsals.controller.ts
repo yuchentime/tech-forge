@@ -28,6 +28,7 @@ import { RehearsalsService } from './rehearsals.service';
 import type {
   RehearsalDetailView,
   RehearsalListView,
+  RehearsalPreparingView,
   RehearsalTurnResultView,
 } from './rehearsal.types';
 
@@ -81,6 +82,15 @@ export class ConversationRehearsalsController {
       });
       throw error;
     }
+  }
+
+  /** Returns the read-only phase of an in-flight start; null when nothing is preparing. */
+  @Get('preparing')
+  preparing(
+    @Param('conversationId', new ParseUUIDPipe({ version: '4' }))
+    conversationId: string,
+  ): RehearsalPreparingView | null {
+    return this.rehearsals.getPreparingPhase(conversationId);
   }
 
   /** Returns the latest rehearsal for the conversation, or null. */

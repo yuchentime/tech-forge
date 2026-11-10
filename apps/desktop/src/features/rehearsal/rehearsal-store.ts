@@ -6,12 +6,14 @@ import {
   getLatestRehearsal,
   getRehearsal,
   getRehearsalPersona,
+  getRehearsalPreparing,
   listRehearsals,
   saveRehearsalPersona,
   skipRehearsal,
   startRehearsal,
   type RehearsalDetail,
   type RehearsalList,
+  type RehearsalPreparing,
 } from './rehearsal-api';
 
 export type RehearsalView =
@@ -28,6 +30,10 @@ export interface RehearsalSnapshot {
   detail: RehearsalDetail | null;
   view: RehearsalView;
   isStarting: boolean;
+  /** Real phase of the in-flight start; null before the backend registers or after it settles. */
+  preparing: RehearsalPreparing | null;
+  /** True for the brief window where the bar fills to 100% before the view swaps. */
+  preparingComplete: boolean;
   isSubmitting: boolean;
   isEnding: boolean;
   pendingAnswer: {
@@ -56,6 +62,8 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   detail: null,
   view: 'start',
   isStarting: false,
+  preparing: null,
+  preparingComplete: false,
   isSubmitting: false,
   isEnding: false,
   pendingAnswer: null,
@@ -70,6 +78,9 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   historyDetailError: null,
   completionVersion: 0,
 };
+
+/** How long the filled bar stays before the view swaps, so progress never jumps mid-way. */
+const PREPARING_COMPLETE_HOLD_MS = 450;
 
 /** Chooses the first view for a loaded rehearsal row. */
 function viewFor(detail: RehearsalDetail): RehearsalView {
@@ -94,6 +105,8 @@ function requestId(): string {
 export class RehearsalStore {
   private readonly listeners = new Set<() => void>();
   private snapshot: RehearsalSnapshot = INITIAL_SNAPSHOT;
+  /** Invalidates an older preparing poll loop after the start settles or the conversation changes. */
+  private preparingPollToken = 0;
 
   /** Subscribes React consumers to immutable snapshots. */
   subscribe = (listener: () => void): (() => void) => {
@@ -209,21 +222,36 @@ export class RehearsalStore {
   /** Starts a new batch, reusing the persona supplied by the start/report view. */
   async start(persona: string): Promise<void> {
     const conversationId = this.snapshot.conversationId;
-    if (!conversationId) return;
+    if (!conversationId || this.snapshot.isStarting) return;
+    const pollToken = (this.preparingPollToken += 1);
     this.update({
       isStarting: true,
+      preparing: null,
       error: null,
       answerError: null,
       pendingAnswer: null,
     });
+    void this.pollPreparing(conversationId, pollToken);
     try {
       const detail = await startRehearsal(
         conversationId,
         persona,
         requestId(),
       );
+      // A switch during the request must not write another conversation's state.
+      if (this.snapshot.conversationId !== conversationId) return;
+      // The backend is done; stop polling and let the bar fill before the view swaps, so it never
+      // disappears mid-way and reads as "finished" instead of "cancelled".
+      this.preparingPollToken += 1;
+      this.update({ preparingComplete: true });
+      const hold = Promise.withResolvers<void>();
+      setTimeout(hold.resolve, PREPARING_COMPLETE_HOLD_MS);
+      await hold.promise;
+      if (this.snapshot.conversationId !== conversationId) return;
       this.update({
         isStarting: false,
+        preparing: null,
+        preparingComplete: false,
         detail,
         view: viewFor(detail),
         history: null,
@@ -231,10 +259,47 @@ export class RehearsalStore {
         historyError: null,
       });
     } catch (error) {
+      if (this.snapshot.conversationId !== conversationId) return;
       this.update({
         isStarting: false,
+        preparingComplete: false,
+        preparing: null,
         error: describeFailure(error, '开始演练失败。'),
       });
+    } finally {
+      this.preparingPollToken += 1;
+    }
+  }
+
+  /**
+   * Polls the read-only preparing phase until the start settles.
+   *
+   * The feed only names the current backend phase; a failed poll leaves the generic copy in place,
+   * and switching conversations stops the loop without writing into the new snapshot.
+   */
+  private async pollPreparing(
+    conversationId: string,
+    token: number,
+  ): Promise<void> {
+    while (this.preparingPollToken === token) {
+      if (this.snapshot.conversationId !== conversationId) return;
+      try {
+        const preparing = await getRehearsalPreparing(conversationId);
+        if (
+          this.preparingPollToken !== token ||
+          this.snapshot.conversationId !== conversationId
+        ) {
+          return;
+        }
+        if (preparing) this.update({ preparing });
+      } catch {
+        // Diagnostic only: the preparing screen keeps its generic copy.
+      }
+      const hidden =
+        typeof document !== 'undefined' && document.visibilityState !== 'visible';
+      const delay = Promise.withResolvers<void>();
+      setTimeout(delay.resolve, hidden ? 5_000 : 1_000);
+      await delay.promise;
     }
   }
 

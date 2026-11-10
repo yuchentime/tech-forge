@@ -25,6 +25,9 @@ const { ConversationsService } = load('conversations/conversations.service.js');
 const { ConversationEntity } = load('conversations/conversation.entity.js');
 const { MessageEntity } = load('conversations/message.entity.js');
 const { RehearsalsService } = load('rehearsals/rehearsals.service.js');
+const { RehearsalPreparingRegistry } = load(
+  'rehearsals/rehearsal-preparing-registry.js',
+);
 const { RehearsalRunRegistry } = load(
   'rehearsals/rehearsal-run-registry.js',
 );
@@ -133,6 +136,7 @@ async function createContext() {
         join(configDirectory, 'sessions', conversationId),
     },
     new RehearsalRunRegistry(),
+    new RehearsalPreparingRegistry(),
   );
 
   return {
@@ -231,6 +235,14 @@ test('start is idempotent, leaves messages/snapshot alone and exposes a history 
     assert.equal(detail.currentQuestion.text, PLAN.firstQuestion);
     assert.equal(detail.progress.asked, 1);
     assert.equal(detail.progress.remaining, 14);
+    // The start response is assembled from the written rows; it must equal a fresh read.
+    assert.deepEqual(
+      detail,
+      await ctx.service.getById(detail.rehearsalId, {
+        requestId: randomUUID(),
+        conversationId,
+      }),
+    );
 
     const replay = await ctx.service.start(
       conversationId,
@@ -926,6 +938,114 @@ test('a cancelled model call is never retried', async () => {
       },
     );
     assert.equal(calls, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+/** Polls the in-flight preparing phase until it reaches the expected stage. */
+async function waitForPhase(service, conversationId, phase) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (service.getPreparingPhase(conversationId)?.phase === phase) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`phase ${phase} was not observed`);
+}
+
+test('the preparing registry maps phases and isolates tokens', () => {
+  const registry = new RehearsalPreparingRegistry();
+  assert.equal(registry.read('conversation-1'), null);
+
+  const token = registry.begin('conversation-1', 'rehearsal-1');
+  assert.ok(token);
+  assert.deepEqual(registry.read('conversation-1'), {
+    rehearsalId: 'rehearsal-1',
+    phase: 'history',
+  });
+
+  // A second claim cannot take over a live entry.
+  assert.equal(registry.begin('conversation-1', 'rehearsal-2'), null);
+  // Foreign tokens cannot move or clear the live entry.
+  registry.setPhase('conversation-1', 'foreign-token', 'saving');
+  assert.equal(registry.read('conversation-1').phase, 'history');
+  registry.finish('conversation-1', 'foreign-token');
+  assert.ok(registry.read('conversation-1'));
+
+  registry.setPhase('conversation-1', token, 'repair');
+  assert.equal(registry.read('conversation-1').phase, 'repair');
+  registry.setPhase('conversation-1', token, 'saving');
+  assert.equal(registry.read('conversation-1').phase, 'saving');
+
+  registry.finish('conversation-1', token);
+  assert.equal(registry.read('conversation-1'), null);
+});
+
+test('the preparing phase reports real stages and clears when start settles', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  let releaseSession;
+  let releaseProvider;
+  const sessionGate = new Promise((resolve) => {
+    releaseSession = resolve;
+  });
+  const providerGate = new Promise((resolve) => {
+    releaseProvider = resolve;
+  });
+  try {
+    ctx.llm.generate = async (_prompt, options) => {
+      options?.onPhase?.('session');
+      await sessionGate;
+      options?.onPhase?.('provider');
+      await providerGate;
+      return JSON.stringify(PLAN);
+    };
+
+    const startPromise = ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+
+    await waitForPhase(ctx.service, conversationId, 'session');
+    const sessionPhase = ctx.service.getPreparingPhase(conversationId);
+    assert.equal(sessionPhase.phase, 'session');
+
+    releaseSession();
+    await waitForPhase(ctx.service, conversationId, 'plan');
+    assert.equal(ctx.service.getPreparingPhase(conversationId).phase, 'plan');
+
+    releaseProvider();
+    const detail = await startPromise;
+    assert.equal(detail.currentQuestion.text, PLAN.firstQuestion);
+    assert.equal(ctx.service.getPreparingPhase(conversationId), null);
+  } finally {
+    releaseSession?.();
+    releaseProvider?.();
+    await ctx.close();
+  }
+});
+
+test('a failed start clears its preparing phase', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    ctx.llm.generate = async (_prompt, options) => {
+      options?.onPhase?.('session');
+      throw new Error('fetch failed');
+    };
+    await assert.rejects(
+      () =>
+        ctx.service.start(
+          conversationId,
+          { startRequestId: randomUUID() },
+          { requestId: randomUUID(), conversationId },
+        ),
+      (error) => {
+        assert.equal(error.getStatus(), 502);
+        return true;
+      },
+    );
+    assert.equal(ctx.service.getPreparingPhase(conversationId), null);
   } finally {
     await ctx.close();
   }

@@ -4,6 +4,10 @@ const { RehearsalStore } = require('../dist-electron/src/features/rehearsal/rehe
 const {
   hasCompletedConversationRound,
 } = require('../dist-electron/src/features/rehearsal/rehearsal-availability.js');
+const {
+  estimatePreparingPercent,
+  PREPARING_TIME_CAP,
+} = require('../dist-electron/src/features/rehearsal/rehearsal-preparing-progress.js');
 
 const PLAN = {
   topic: '金字塔原理',
@@ -184,6 +188,12 @@ function installBridge() {
         }
         if (method === 'GET' && path === '/api/conversations/c1/rehearsals/latest') {
           return { status: 200, data: detail() };
+        }
+        if (method === 'GET' && path === '/api/conversations/c1/rehearsals/preparing') {
+          return { status: 200, data: null };
+        }
+        if (method === 'GET' && path === '/api/conversations/c2/rehearsals/latest') {
+          return { status: 200, data: null };
         }
         if (method === 'POST' && path === '/api/conversations/c1/rehearsals') {
           return { status: 201, data: detail({ rehearsalId: 'r3' }) };
@@ -479,4 +489,102 @@ test('a failed report lands on the report view so the retry action stays visible
   assert.equal(state.detail.status, 'failed');
   assert.match(state.error, /重试结束/);
   assert.match(state.error, /设置/);
+});
+
+/** Waits until a store condition holds, so tests never depend on a fixed sleep. */
+async function waitUntil(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('condition was not observed');
+}
+
+test('the preparing estimate rises smoothly and caps before completion', () => {
+  assert.equal(estimatePreparingPercent(0), 0);
+  assert.equal(estimatePreparingPercent(Number.NaN), 0);
+  let previous = 0;
+  for (let seconds = 0; seconds <= 180; seconds += 1) {
+    const value = estimatePreparingPercent(seconds * 1000);
+    assert.ok(value >= previous, `progress regressed at ${seconds}s`);
+    assert.ok(value <= PREPARING_TIME_CAP + 1e-9);
+    previous = value;
+  }
+  assert.ok(estimatePreparingPercent(5_000) < 45);
+  assert.ok(estimatePreparingPercent(20_000) > 80);
+  assert.ok(estimatePreparingPercent(60_000) > 88);
+});
+
+test('the preparing screen state follows the polled backend phase', async () => {
+  installBridge();
+  const baseRequest = global.window.teachforge.request;
+  const startGate = Promise.withResolvers();
+  global.window.teachforge.request = async (input) => {
+    if (
+      input.method === 'GET' &&
+      input.path === '/api/conversations/c1/rehearsals/preparing'
+    ) {
+      return {
+        status: 200,
+        data: { rehearsalId: 'r3', phase: 'plan' },
+      };
+    }
+    if (
+      input.method === 'POST' &&
+      input.path === '/api/conversations/c1/rehearsals'
+    ) {
+      await startGate.promise;
+      return { status: 201, data: detail({ rehearsalId: 'r3' }) };
+    }
+    return baseRequest(input);
+  };
+
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+  const startPromise = store.start('');
+
+  await waitUntil(() => store.getSnapshot().preparing?.phase === 'plan');
+  assert.equal(store.getSnapshot().isStarting, true);
+
+  startGate.resolve();
+  await waitUntil(() => store.getSnapshot().preparingComplete);
+  assert.equal(store.getSnapshot().isStarting, true);
+  await startPromise;
+  const state = store.getSnapshot();
+  assert.equal(state.preparing, null);
+  assert.equal(state.preparingComplete, false);
+  assert.equal(state.view, 'session');
+  assert.equal(state.detail.rehearsalId, 'r3');
+});
+
+test('a start that settles after a switch does not write the new conversation', async () => {
+  installBridge();
+  const baseRequest = global.window.teachforge.request;
+  const startGate = Promise.withResolvers();
+  global.window.teachforge.request = async (input) => {
+    if (
+      input.method === 'POST' &&
+      input.path === '/api/conversations/c1/rehearsals'
+    ) {
+      await startGate.promise;
+      return { status: 201, data: detail({ rehearsalId: 'r3' }) };
+    }
+    return baseRequest(input);
+  };
+
+  const store = new RehearsalStore();
+  await store.loadForConversation('c1');
+  const startPromise = store.start('');
+  await waitUntil(() => store.getSnapshot().isStarting);
+  await store.loadForConversation('c2');
+
+  startGate.resolve();
+  await startPromise;
+
+  const state = store.getSnapshot();
+  assert.equal(state.conversationId, 'c2');
+  assert.equal(state.detail, null);
+  assert.equal(state.isStarting, false);
+  assert.equal(state.error, null);
 });

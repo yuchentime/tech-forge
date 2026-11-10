@@ -30,6 +30,16 @@ last_verified: 2026-11-09
 - 学生画像可选，最多 1000 字符；它只影响提问视角，不覆盖输出格式与规则。
 - 学生画像持久化在 `<configDir>/rehearsal-persona.txt`（默认 `~/.tech-forge/rehearsal-persona.txt`），不建表、不按会话隔离：任何会话进入演练模式都读取同一份文本，编辑器失焦时通过 `PUT /api/rehearsal-persona` 原子写回；空文件等价于"没有画像"，此时使用默认好奇学生画像。每次开始演练仍把当时的文本作为 `persona` 传给 start 接口，历史演练保留各自投递时的 `personaText`。
 
+### 准备画面
+
+- `POST` 仍是同步请求；桌面端在 `isStarting` 时用独立准备画面替换开始表单（「开始演练」与「开始新的演练」共用），不进入 session 壳层。
+- 画面元素：标题、进度条、进度条下的状态文案、底部说明；**不显示已用时间或预计时长**。
+- 状态文案来自只读端点 `GET /api/conversations/:id/rehearsals/preparing` 的 `phase`：`history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`。进度条按预计时长平滑推进，上限 90%，不显示百分比或时间数字；start 返回后才补到 100%。
+- start 返回后先停止轮询并把进度条补到 100%、显示「准备完成，正在进入演练…」，约 450ms 后才切到 session，避免停在半途直接跳走。
+- 轮询间隔 1s（页面不可见 5s），start resolve/reject 后停止；端点不读库、不做 reconciliation，未登记返回 `null`，此时显示「正在准备第一道题…」。
+- 失败后离开准备画面，回到开始页显示既有可执行文案；不提供取消（同步请求没有服务端 abort 入口）。
+- 准备中切换会话时，旧 start 的结果不会写入新会话：`RehearsalStore.start()` 在 await 返回后校验 `conversationId`。
+
 ### 状态机
 
 ```mermaid
@@ -119,6 +129,7 @@ stateDiagram-v2
 ## 代码入口
 
 - 状态机、digest、transcript、恢复：`apps/backend/src/rehearsals/rehearsals.service.ts`
+- 准备阶段（进程内只读）：`rehearsal-preparing-registry.ts`
 - 模型 prompt 与 JSON 校验：`rehearsal-prompts.ts`、`rehearsal-json.ts`
 - 每 Rehearsal 锁与 abort：`rehearsal-run-registry.ts`
 - HTTP 边界：`rehearsals.controller.ts`

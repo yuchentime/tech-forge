@@ -2,6 +2,7 @@ import { CircleNotch, ListBullets } from '@phosphor-icons/react';
 import { useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
 import { RehearsalHistory } from './RehearsalHistory';
+import { RehearsalPreparing } from './RehearsalPreparing';
 import { RehearsalReport } from './RehearsalReport';
 import { RehearsalSession } from './RehearsalSession';
 import { RehearsalStart } from './RehearsalStart';
@@ -138,7 +139,12 @@ export function RehearsalMode({
       )}
 
       <div className="min-h-0 flex-1">
-        {state.view === 'history' ? (
+        {state.isStarting ? (
+          <RehearsalPreparing
+            complete={state.preparingComplete}
+            preparing={state.preparing}
+          />
+        ) : state.view === 'history' ? (
           <RehearsalHistory
             currentDetail={state.detail}
             error={state.historyError}
