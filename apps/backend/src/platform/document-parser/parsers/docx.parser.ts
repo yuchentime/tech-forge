@@ -9,6 +9,7 @@ import type {
 /** Conversion artifacts that pollute tokenization and character offsets. */
 const HTML_ANCHOR = /<a\s+[^>]*>\s*<\/a>/gi;
 const INVISIBLE = /[\u200B-\u200D\uFEFF\u2060]/g;
+const EMBEDDED_IMAGE = /!\[([^\]]*)\]\(data:image\/[^;\s)]+;base64,[A-Za-z0-9+/=\r\n]+\)/gi;
 /** A paragraph made only of bold text, within this length, is treated as a heading. */
 const BOLD_ONLY = /^\s*(?:__(?!_)(.+?)__|\*\*(.+?)\*\*)\s*$/;
 const PSEUDO_HEADING_MAX_CHARS = 40;
@@ -63,8 +64,13 @@ function countTables(root: unknown): number {
 }
 
 /** Removes conversion artifacts that would otherwise reach the chunker and the index. */
-function cleanMarkdown(markdown: string): string {
-  return markdown.replace(HTML_ANCHOR, '').replace(INVISIBLE, '');
+export function cleanMarkdown(markdown: string): string {
+  return markdown
+    .replace(HTML_ANCHOR, '')
+    .replace(INVISIBLE, '')
+    // A DOCX image can become a megabyte-scale data URL. The library is text-first, so retaining
+    // its bytes makes Markdown readers fail without adding searchable evidence.
+    .replace(EMBEDDED_IMAGE, (_match, alt: string) => `> [原文图片已省略${alt ? `：${alt}` : ''}]`);
 }
 
 /**

@@ -50,6 +50,25 @@ export class DocumentVersionEntity {
   @Column({ type: 'text', nullable: true })
   processingError!: string | null;
 
+  /** Derived catalog state; source bytes remain available even if provider summarisation fails. */
+  @Column({ type: 'varchar', default: 'pending' })
+  catalogStatus!: string;
+
+  @Column({ type: 'text', nullable: true })
+  catalogSummary!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  catalogKeywordsJson!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  catalogDocumentType!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  catalogError!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  catalogedAt!: Date | null;
+
   @CreateDateColumn({ type: 'datetime' })
   createdAt!: Date;
 

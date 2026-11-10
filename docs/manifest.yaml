@@ -191,6 +191,42 @@ routes:
     history_on_demand:
       - docs/changes/2026-11-08-knowledge-retrieval/worklog.md
       - docs/changes/2026-11-08-knowledge-retrieval/verification.md
+  directory-knowledge-library:
+    description: "Replace the active vector/FTS knowledge path with an AI-summarized file catalog and Agent-directed on-demand reads; retain the legacy knowledge modules during observation"
+    token_budget: 30000
+    code_globs:
+      - "apps/backend/src/documents/**"
+      - "apps/backend/src/llm/**"
+      - "apps/backend/src/chat/**"
+      - "apps/backend/src/knowledge/**"
+      - "apps/backend/src/retrieval/**"
+      - "apps/backend/src/embedding/**"
+      - "apps/backend/src/settings/**"
+      - "apps/backend/src/database/migrations/**"
+      - "apps/backend/assets/**"
+      - "apps/backend/test/document-ingest.test.cjs"
+      - "apps/backend/test/knowledge-library.test.cjs"
+      - "apps/backend/test/workspace-file-tools.test.cjs"
+      - "apps/backend/test/agent-stream.test.cjs"
+      - "apps/backend/test/deep-research.test.cjs"
+      - "apps/desktop/src/features/knowledge/**"
+      - "apps/desktop/src/features/agent/**"
+    required:
+      - docs/current/index.md
+      - docs/current/domains/documents/index.md
+      - docs/current/domains/retrieval/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/changes/2026-11-10-directory-knowledge-library/brief.md
+      - docs/changes/2026-11-10-directory-knowledge-library/design.md
+      - docs/changes/2026-11-10-directory-knowledge-library/verification.md
+    optional:
+      - docs/changes/2026-11-10-directory-knowledge-library/tasks.md
+      - docs/changes/2026-11-10-directory-knowledge-library/handoff.md
+      - docs/changes/2026-11-09-knowledge-storage-isolation/brief.md
+      - docs/changes/2026-11-08-knowledge-retrieval/design.md
+      - docs/changes/2026-11-10-deep-research-command/design.md
+    history_on_demand: []
   frontend-backend-code-placement:
     description: "Current Electron, React, NestJS runtime and code-placement guide"
     token_budget: 10000

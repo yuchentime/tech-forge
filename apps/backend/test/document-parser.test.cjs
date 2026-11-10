@@ -9,7 +9,7 @@ const { deflateRawSync } = require('node:zlib');
 const buildDirectory = resolve(__dirname, '..', process.env.BACKEND_TEST_BUILD_DIR ?? '.test-dist');
 const { DocumentParserService } = require(join(buildDirectory, 'platform/document-parser/document-parser.service.js'));
 const { PdfTextParser } = require(join(buildDirectory, 'platform/document-parser/parsers/pdf-text.parser.js'));
-const { DocxParser } = require(join(buildDirectory, 'platform/document-parser/parsers/docx.parser.js'));
+const { DocxParser, cleanMarkdown } = require(join(buildDirectory, 'platform/document-parser/parsers/docx.parser.js'));
 const { PlainTextParser } = require(join(buildDirectory, 'platform/document-parser/parsers/plain-text.parser.js'));
 
 /** Creates the adapter under test; limits are overridable per assertion. */
@@ -127,6 +127,14 @@ test('converts DOCX, promoting bold-only headings and flagging flattened tables'
   assert.match(result.text, /^# 第一章 光合作用/m);
   assert.match(result.text, /^## 重点提示/m);
   assert.ok(result.warnings.some((warning) => warning.code === 'UNSTRUCTURED_TABLE'));
+});
+
+test('drops enormous DOCX data URLs instead of emitting unreadable Markdown lines', () => {
+  const markdown = `before\n\n![diagram](data:image/png;base64,${'A'.repeat(700000)})\n\nafter`;
+  const cleaned = cleanMarkdown(markdown);
+  assert.match(cleaned, /\[原文图片已省略：diagram\]/);
+  assert.doesNotMatch(cleaned, /data:image\/png;base64/);
+  assert.ok(Math.max(...cleaned.split('\n').map((line) => line.length)) < 1000);
 });
 
 test('rejects renamed files, oversized files, relative paths and unsupported types', async () => {

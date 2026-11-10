@@ -45,6 +45,7 @@ import { ConversationDocumentEntity } from './conversation-document.entity';
 import { DocumentChunkEntity } from './document-chunk.entity';
 import { DocumentVersionEntity } from './document-version.entity';
 import { DocumentEntity } from './document.entity';
+import { DocumentCatalogIndexService, DocumentCatalogService } from './document-catalog.service';
 
 /** Storage root for copied source files; defaults to the backend data directory. */
 export const DOCUMENTS_STORAGE_ROOT = 'DOCUMENTS_STORAGE_ROOT';
@@ -56,7 +57,7 @@ export const DOCUMENTS_STORAGE_ROOT = 'DOCUMENTS_STORAGE_ROOT';
  * full-text search. `ready` means dense vectors are committed too. A version that fails only during
  * embedding stays at `indexed`: the content remains usable and can be re-embedded later.
  */
-export type DocumentProcessingStatus = 'parsing' | 'chunking' | 'indexed' | 'ready' | 'failed';
+export type DocumentProcessingStatus = 'parsing' | 'cataloging' | 'chunking' | 'indexed' | 'ready' | 'failed';
 
 /** Caller input for one ingest run: a complete local file path, plus an optional target document. */
 export interface IngestDocumentInput {
@@ -155,9 +156,11 @@ export class DocumentsService implements OnModuleInit {
     private readonly parser: DocumentParserService,
     private readonly embeddings: EmbeddingService,
     private readonly settings: SettingsService,
+    private readonly catalog: DocumentCatalogService,
+    private readonly catalogIndex: DocumentCatalogIndexService,
     @Optional() @Inject(DOCUMENTS_STORAGE_ROOT) storageRoot?: string,
   ) {
-    this.storageRoot = storageRoot ?? resolveTeachForgeDataDirectory();
+    this.storageRoot = storageRoot ?? this.settings.getKnowledgeDirectory();
   }
 
   /**
@@ -264,59 +267,46 @@ export class DocumentsService implements OnModuleInit {
       );
     }
 
-    await this.updateStatus(version.id, 'chunking');
-
-    let chunkCount: number;
-    let persisted: Array<{ chunkId: string; content: string }>;
+    await this.updateStatus(version.id, 'cataloging');
+    let summary;
     try {
-      const chunks = chunkDocument({
-        pages: parsed.pages,
-        warnings: parsed.warnings,
-        format: parsed.format,
-        countTokens: getChunkTokenCounter().count,
-      });
-      chunkCount = chunks.length;
-      persisted = await this.persistChunks(version.id, chunks, document.title);
+      summary = await this.catalog.summarize(document.title, joinParsedPages(parsed.pages));
     } catch (error) {
-      await this.markFailed(version.id, describeError(error));
-      throw error;
+      await this.versions.update(version.id, {
+        processingStatus: 'failed',
+        processingError: null,
+        catalogStatus: 'failed',
+        catalogError: describeError(error).slice(0, 1000),
+      });
+      return {
+        documentId: document.id,
+        documentVersionId: version.id,
+        versionNo,
+        chunkCount: 0,
+        status: 'failed',
+        duplicate: false,
+        warnings: [
+          ...parsed.warnings.map((warning) => ({ code: String(warning.code), message: warning.message })),
+          { code: 'CATALOG_FAILED', message: '资料已保存，但目录摘要生成失败，可在资料库中重试。' },
+        ],
+      };
     }
+    await this.versions.update(version.id, {
+      processingStatus: 'ready', processingError: null, catalogStatus: 'ready',
+      catalogSummary: summary.summary, catalogKeywordsJson: JSON.stringify(summary.keywords),
+      catalogDocumentType: summary.documentType, catalogError: null, catalogedAt: new Date(),
+    });
+    await this.rebuildCatalogIndex();
 
-    const warnings = parsed.warnings.map((warning) => ({
-      code: String(warning.code),
-      message: warning.message,
-    }));
+    const warnings = parsed.warnings.map((warning) => ({ code: String(warning.code), message: warning.message }));
     if (convertedMarkdownWarning) warnings.push(convertedMarkdownWarning);
-
-    // Dense vectors are a separate phase on purpose: a failure here must not discard the lexical
-    // index that was already committed, so the version stays `indexed` and reports a warning.
-    let status: DocumentProcessingStatus = 'indexed';
-    try {
-      const vectors = await this.embeddings.embed(persisted.map((chunk) => chunk.content));
-      await this.persistVectors(
-        document.id,
-        version.id,
-        persisted.map((chunk, index) => ({ chunkId: chunk.chunkId, vector: vectors[index] })),
-      );
-      await this.updateStatus(version.id, 'ready');
-      status = 'ready';
-    } catch (error) {
-      const message = describeError(error);
-      // The warning is shown in the knowledge library, so it carries user-facing copy; the
-      // technical detail stays on the version row for diagnostics.
-      warnings.push({
-        code: 'EMBEDDING_FAILED',
-        message: '这份资料暂时只能用关键词搜索，还不能按意思搜索。',
-      });
-      await this.versionRepositoryErrorNote(version.id, message);
-    }
 
     return {
       documentId: document.id,
       documentVersionId: version.id,
       versionNo,
-      chunkCount,
-      status,
+      chunkCount: 0,
+      status: 'ready',
       duplicate: false,
       warnings,
     };
@@ -361,34 +351,16 @@ export class DocumentsService implements OnModuleInit {
         });
       }
 
-      const knowledgeDirectory = this.settings.getKnowledgeDirectory();
-      const stagingDirectory = join(knowledgeDirectory, '.importing', randomUUID());
-      const stagedPath = join(stagingDirectory, originalName);
-      try {
-        mkdirSync(stagingDirectory, { recursive: true });
-        copyFileSync(sourcePath, stagedPath);
-      } catch (error) {
-        this.removeDirectory(stagingDirectory, 'import_staging_failed');
-        this.logger.error(
-          `documents.import.staging_failed ${JSON.stringify({ detail: describeDetail(error) })}`,
-        );
-        throw new InternalServerErrorException({
-          statusCode: 500,
-          code: 'WORKSPACE_UNWRITABLE',
-          message: '没能把资料保存到知识库目录，请确认本机磁盘可写或稍后重试。',
-          detail: describeDetail(error),
-        });
-      }
-
       let result: IngestDocumentResult;
       try {
         result = await this.ingestFile({
-          filePath: stagedPath,
+          // The canonical versioned copy is written by ingestFile. Keeping a second promoted
+          // upload copy at `<knowledge>/<documentId>` made delete and directory routing ambiguous.
+          filePath: sourcePath,
           title: input.title,
           isShared: true,
         });
       } catch (error) {
-        this.removeDirectory(stagingDirectory, 'import_failed');
         // Parse and chunk failures are about the file's content, so surface the reason instead of
         // the generic 500 the default exception filter would return.
         if (error instanceof HttpException) throw error;
@@ -405,39 +377,18 @@ export class DocumentsService implements OnModuleInit {
       }
 
       if (result.duplicate) {
-        this.removeDirectory(stagingDirectory, 'import_duplicate');
         return { ...result, storedPath: null };
       }
-
-      const targetDirectory = join(knowledgeDirectory, result.documentId);
-      try {
-        this.removeDirectory(targetDirectory, 'import_replace_existing_copy');
-        mkdirSync(dirname(targetDirectory), { recursive: true });
-        renameSync(stagingDirectory, targetDirectory);
-      } catch (error) {
-        // The ingest is committed and searchable, so this must not fail the request.
-        this.removeDirectory(stagingDirectory, 'import_promote_failed');
-        this.logger.error(
-          `documents.import.upload_copy_failed ${JSON.stringify({
-            documentId: result.documentId,
-            detail: describeDetail(error),
-          })}`,
-        );
-        return {
-          ...result,
-          storedPath: null,
-          warnings: [
-            ...result.warnings,
-            {
-              code: 'UPLOAD_COPY_FAILED',
-              message:
-                '资料已经可以搜索，但原文件没能另存到知识库目录，删除这份资料时不会连带删除那个文件。',
-            },
-          ],
-        };
-      }
-
-      return { ...result, storedPath: join(targetDirectory, originalName) };
+      return {
+        ...result,
+        storedPath: join(
+          this.settings.getKnowledgeDirectory(),
+          'documents',
+          result.documentId,
+          `v${result.versionNo}`,
+          originalName,
+        ),
+      };
     });
   }
 
@@ -485,6 +436,9 @@ export class DocumentsService implements OnModuleInit {
         await manager.delete(ConversationDocumentEntity, { documentId });
         await manager.delete(DocumentEntity, { id: document.id });
       });
+      // The directory is a projection, so rebuilding after the short DB transaction prevents a
+      // deleted document from remaining Agent-readable even when file cleanup is partial.
+      await this.rebuildCatalogIndex();
 
       const storageCopyRemoved = this.removeDirectory(
         join(this.storageRoot, 'documents', documentId),
@@ -522,6 +476,22 @@ export class DocumentsService implements OnModuleInit {
       );
       return false;
     }
+  }
+
+  /** Rebuilds the catalog only from latest ready versions; index.md is never the source of truth. */
+  private async rebuildCatalogIndex(): Promise<void> {
+    const documents = await this.documents.find();
+    const versions = await this.versions.find({ order: { versionNo: 'DESC' } });
+    const latest = new Map<string, DocumentVersionEntity>();
+    for (const version of versions) {
+      if (!latest.has(version.documentId)) latest.set(version.documentId, version);
+    }
+    await this.catalogIndex.rebuild(
+      documents.flatMap((document) => {
+        const version = latest.get(document.id);
+        return version?.catalogStatus === 'ready' ? [{ document, version }] : [];
+      }),
+    );
   }
 
   /** Lists documents with their latest version and chunk counts. */
