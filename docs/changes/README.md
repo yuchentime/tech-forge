@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/README.md
   - docs/manifest.yaml
-last_verified: 2026-11-08
+last_verified: 2026-11-10
 ---
 
 # 变更记录
@@ -20,6 +20,7 @@ last_verified: 2026-11-08
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| 会话知识掌握卡片（mock 实现） | 三种掌握状态的会话卡片、摘要/详情和会话跳转；只读 mock API | [简报](2026-11-10-knowledge-session-cards/brief.md) · [设计](2026-11-10-knowledge-session-cards/design.md) · [验收](2026-11-10-knowledge-session-cards/verification.md) · [实施记录](2026-11-10-knowledge-session-cards/worklog.md) |
 | 演练模式（已实现） | 独立 Rehearsal 状态机；学生画像；15 问总限额与单题 2 次追问；跳过/手动结束/上限报告；历史演练列表与只读详情；普通对话摘要注入，报告从演练模式历史查看 | [简报](2026-11-09-rehearsal-mode/brief.md) · [设计](2026-11-09-rehearsal-mode/design.md) · [任务](2026-11-09-rehearsal-mode/tasks.md) · [验收](2026-11-09-rehearsal-mode/verification.md) · [实施记录](2026-11-09-rehearsal-mode/worklog.md) |
 | 演练评估一次性投递 | 摘要不再每轮拼进 user 消息：`loadedContext` 只放行未投递的已完成演练，摘要以 `custom_message` entry 进入 Pi 上下文并随快照持久化，不参与快照清洗 | [简报](2026-11-09-rehearsal-digest-delivery/brief.md) · [设计](2026-11-09-rehearsal-digest-delivery/design.md) · [验收](2026-11-09-rehearsal-digest-delivery/verification.md) |
 | 开始演练延迟与等待体验（已实施） | 独立准备画面（真实阶段进度条 + 状态文案，无时长显示）、只读阶段端点与轮询、A2 竞态守卫、等价 detail 组装；session 引导裁剪、异步 start、模型输入调整仍待单独批准 | [简报](2026-11-10-rehearsal-start-latency/brief.md) · [设计](2026-11-10-rehearsal-start-latency/design.md) · [验收](2026-11-10-rehearsal-start-latency/verification.md) |

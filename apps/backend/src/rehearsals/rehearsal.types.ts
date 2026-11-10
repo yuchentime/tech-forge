@@ -26,6 +26,40 @@ export type RehearsalAction = 'follow_up' | 'next_question';
 export type AssessmentLevel = 'correct' | 'partial' | 'incorrect' | 'uncertain';
 export type PlanPointStatus = 'pending' | 'covered' | 'weak';
 export type MasteryStatus = 'mastered' | 'partial' | 'weak' | 'unverified';
+/** One knowledge point in the fact-shaped mock knowledge-card response. */
+export interface KnowledgeCardPointView {
+  name: string;
+  masteryLevel: 'proficient' | 'basic' | 'needs_improvement' | null;
+  evidenceStatus: 'sufficient' | 'insufficient' | 'conflicting';
+  details: string;
+  changeDescription: string;
+  lastAssessedAt: string | null;
+  evidenceRefs: Array<{ rehearsalId: string; pointId: string }>;
+}
+
+/** One published fact value carried by the knowledge-card mock API. */
+export interface KnowledgeCardFactView {
+  summary: string | null;
+  knowledgePointDetails: KnowledgeCardPointView[] | null;
+  tags: string[] | null;
+  masteryLevel: 'proficient' | 'basic' | 'needs_improvement' | null;
+  generationStatus: 'pending' | 'running' | 'completed' | 'failed';
+  lastError: string | null;
+  generatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One conversation-scoped item returned by the knowledge-card mock API. */
+export interface KnowledgeCardView {
+  conversationId: string;
+  fact: KnowledgeCardFactView | null;
+}
+
+/** Collection returned by the local knowledge-profile mock endpoint. */
+export interface KnowledgeCardsView {
+  items: KnowledgeCardView[];
+}
 
 /** One planned knowledge point; the model may update status as the drill progresses. */
 export interface RehearsalPlanPoint {

@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/current/platform/index.md
   - docs/source/index.md
-last_verified: 2026-11-06
+last_verified: 2026-11-10
 ---
 
 # TeachForge 工程文档入口
@@ -25,3 +25,5 @@ last_verified: 2026-11-06
 - [复杂变更工作流](changes/README.md)：何时建立正式变更记录，以及变更目录的生命周期。
 - [已接受决策索引](decisions/index.md)：长期有效的已接受权衡。
 - [故障复盘与复用经验](postmortems/index.md)：运行失败的证据、根因及防复发验收。
+
+- [会话知识掌握卡片实施记录](changes/2026-11-10-knowledge-session-cards/design.md)：当前为只读 mock 卡片视图，真实评估数据尚未接入。

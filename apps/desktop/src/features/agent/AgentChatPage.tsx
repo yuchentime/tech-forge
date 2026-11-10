@@ -49,6 +49,7 @@ import { composerCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
+import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage';
 import { hasCompletedConversationRound } from '../rehearsal/rehearsal-availability';
 import { RehearsalMode } from '../rehearsal/RehearsalMode';
 import { SettingsPage } from '../settings/SettingsPage';
@@ -482,6 +483,15 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         <SettingsPage />
       ) : activeView === 'knowledge' ? (
         <KnowledgeBasePage />
+      ) : activeView === 'knowledgeProfile' ? (
+        <KnowledgeProfilePage
+          conversations={conversationState.conversations}
+          onSelectConversation={(conversationId) => {
+            setActiveView('chat');
+            setConversationDisplayMode('conversation');
+            void loadConversation(conversationId);
+          }}
+        />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">

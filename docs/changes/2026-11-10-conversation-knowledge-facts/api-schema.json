@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposed Conversation Knowledge Facts Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conversationId",
+    "fact"
+  ],
+  "properties": {
+    "conversationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "fact": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/Fact"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "Fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "knowledgePointDetails",
+        "tags",
+        "masteryLevel",
+        "generationStatus",
+        "lastError",
+        "generatedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "knowledgePointDetails": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/KnowledgePoint"
+          }
+        },
+        "tags": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "masteryLevel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "proficient",
+            "basic",
+            "needs_improvement",
+            null
+          ]
+        },
+        "generationStatus": {
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed"
+          ]
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "generatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "generatedAt": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "summary": {
+                "type": "null"
+              },
+              "knowledgePointDetails": {
+                "type": "null"
+              },
+              "tags": {
+                "type": "null"
+              },
+              "masteryLevel": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "knowledgePointDetails": {
+                "type": "array"
+              },
+              "tags": {
+                "type": "array"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "generationStatus": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generatedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "lastError": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "generationStatus": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "lastError": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "lastError": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "KnowledgePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "masteryLevel",
+        "evidenceStatus",
+        "details",
+        "changeDescription",
+        "lastAssessedAt",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "masteryLevel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "proficient",
+            "basic",
+            "needs_improvement",
+            null
+          ]
+        },
+        "evidenceStatus": {
+          "enum": [
+            "sufficient",
+            "insufficient",
+            "conflicting"
+          ]
+        },
+        "details": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changeDescription": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lastAssessedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "evidenceStatus": {
+                "const": "insufficient"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "masteryLevel": {
+                "type": "null"
+              },
+              "lastAssessedAt": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidenceStatus": {
+                "const": "sufficient"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "masteryLevel": {
+                "type": "string",
+                "enum": [
+                  "proficient",
+                  "basic",
+                  "needs_improvement"
+                ]
+              },
+              "lastAssessedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rehearsalId",
+        "pointId"
+      ],
+      "properties": {
+        "rehearsalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "pointId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "KnowledgeCardsView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#"
+          }
+        }
+      }
+    }
+  }
+}

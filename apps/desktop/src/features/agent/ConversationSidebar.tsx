@@ -5,6 +5,7 @@ import {
   DotsThree,
   GearSix,
   NotePencil,
+  Stack,
 } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -13,7 +14,7 @@ import type {
 } from './conversation-store';
 
 /** Views the sidebar can switch the main area to; `chat` is the conversation view. */
-export type SidebarView = 'chat' | 'settings' | 'knowledge';
+export type SidebarView = 'chat' | 'settings' | 'knowledge' | 'knowledgeProfile';
 
 /** Renders the conversation list and actions without owning API or runtime state. */
 export function ConversationSidebar({
@@ -85,6 +86,20 @@ export function ConversationSidebar({
         >
           <Books aria-hidden="true" className="size-4 shrink-0" />
           <span className="truncate">资料库</span>
+        </button>
+        <button
+          aria-pressed={activeView === 'knowledgeProfile'}
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 ${
+            activeView === 'knowledgeProfile'
+              ? 'bg-stone-200 text-stone-900'
+              : 'text-stone-600 hover:bg-stone-200/70 hover:text-stone-900'
+          }`}
+          onClick={() => onSelectView('knowledgeProfile')}
+          title="知识掌握"
+          type="button"
+        >
+          <Stack aria-hidden="true" className="size-4 shrink-0" />
+          <span className="truncate">知识掌握</span>
         </button>
       </header>
 

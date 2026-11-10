@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/index.md
   - docs/current/platform/index.md
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 ---
 
 # 当前实现文档
@@ -18,6 +18,7 @@ last_verified: 2026-11-09
 - [业务域文档组织](domains/README.md)：当前业务行为文档的责任划分；业务行为经代码验证后再添加。
 - [Conversation 对话持久化与历史读取](domains/conversations/index.md)：Agent 对话写入 SQLite、会话侧栏列表和选中会话消息读取的当前行为。
 - [演练模式](domains/rehearsals/index.md)：独立 Rehearsal 状态机、15 问限额、学生画像、逐题/总体评估、历史列表，以及普通对话 digest 同步。
+- [知识掌握](domains/knowledge-profile/index.md)：按会话展示掌握状态、评估摘要和详情；当前使用只读 mock 数据。
 - [资料入库](domains/documents/index.md)：本机文件解析、500-token 分块、词法索引与向量写入、入库状态机、知识库导入/删除 API 与读取模型。
 - [知识库检索](domains/retrieval/index.md)：词法 + 向量双通道、RRF 融合、单字回退、可选查询扩展，以及 `/查询资料库` 命令触发的分片注入、去重与注入位置（user message，而非 system prompt）。
 - [Artifact 会话产出文件](domains/artifacts/index.md)：模型写入文件的登记、`session`/`external` 路径解析、预览与删除记录接口，以及文件侧边栏（缺失文件的记录可删除）。

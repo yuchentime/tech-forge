@@ -483,3 +483,28 @@ routes:
       - docs/source/功能设计文档.md
       - docs/current/index.md
     history_on_demand: []
+  knowledge-session-cards:
+    description: "Show one compact knowledge-assessment card per conversation from a read-only mock API; items reuse the conversation fact schema, titles join from conversation summaries, cards sort by mastery then latest assessed time, and long details open in a separate view with a back action"
+    token_budget: 24000
+    code_globs:
+      - "apps/backend/src/rehearsals/rehearsals.controller.ts"
+      - "apps/backend/src/rehearsals/rehearsal.types.ts"
+      - "apps/backend/src/conversations/conversations.service.ts"
+      - "apps/desktop/src/features/knowledge-profile/**"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+      - "apps/desktop/src/features/agent/ConversationSidebar.tsx"
+      - "apps/desktop/src/features/agent/conversation-store.ts"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/knowledge-profile/index.md
+      - docs/current/domains/knowledge-profile/api-contract.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/changes/2026-11-10-knowledge-session-cards/design.md
+      - docs/changes/2026-11-10-knowledge-session-cards/verification.md
+      - docs/changes/2026-11-10-conversation-knowledge-facts/api-schema.json
+    optional:
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-10-knowledge-session-cards/brief.md
+      - docs/changes/2026-11-10-knowledge-session-cards/worklog.md
+    history_on_demand: []
