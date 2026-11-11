@@ -8,6 +8,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
   nativeImage,
   shell,
@@ -642,6 +643,16 @@ function cancelAllChatStreams(): void {
   }
 }
 
+/**
+ * Removes Electron's default File/Edit/View/Window menu bar on Windows and Linux; that bar is
+ * developer scaffolding and its items act on Renderer state the product does not expose.
+ * macOS keeps the standard app menu because it owns Cmd+Q/Cmd+W and the app-level items.
+ */
+function configureApplicationMenu(): void {
+  if (process.platform === 'darwin') return;
+  Menu.setApplicationMenu(null);
+}
+
 /** Creates the isolated Renderer window and opens DevTools in development. */
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -687,6 +698,7 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   configureDevelopmentDockIcon();
+  configureApplicationMenu();
   registerBackendIpc();
   try {
     await startBackend();
