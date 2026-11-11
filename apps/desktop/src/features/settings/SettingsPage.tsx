@@ -33,6 +33,9 @@ interface MemoryEntryView {
   createdAt: string;
 }
 
+/** Number of memories rendered before the teacher asks for the rest. */
+const MEMORY_PREVIEW_LIMIT = 3;
+
 /** Renders and persists the local model, workspace and style settings. */
 export function SettingsPage() {
   const [settings, setSettings] = useState<LocalSettingsView | null>(null);
@@ -51,6 +54,7 @@ export function SettingsPage() {
   const [memoryStatus, setMemoryStatus] = useState<string | null>(null);
   const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
   const [isClearingMemory, setIsClearingMemory] = useState(false);
+  const [isMemoryExpanded, setIsMemoryExpanded] = useState(false);
 
   /** Loads the saved local configuration when the settings view is opened. */
   const loadSettings = useCallback(async () => {
@@ -285,6 +289,14 @@ export function SettingsPage() {
     setSettings((current) => (current ? { ...current, souls: value } : current));
   }, []);
 
+  // Expanded only matters while there are hidden rows, so deleting down to the
+  // preview size collapses the list on its own.
+  const hiddenMemoryCount = Math.max(memories.length - MEMORY_PREVIEW_LIMIT, 0);
+  const isMemoryListExpanded = isMemoryExpanded && hiddenMemoryCount > 0;
+  const visibleMemories = isMemoryListExpanded
+    ? memories
+    : memories.slice(0, MEMORY_PREVIEW_LIMIT);
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
@@ -471,26 +483,52 @@ export function SettingsPage() {
                     暂无长期记忆。当你明确要求助手记住偏好或事实时，它会出现在这里。
                   </p>
                 ) : (
-                  <ul className="divide-y divide-stone-100">
-                    {memories.map((memory) => (
-                      <li className="flex items-start justify-between gap-4 py-3" key={memory.id}>
-                        <div className="min-w-0">
-                          <p className="text-sm leading-6 text-stone-800">{memory.content}</p>
-                          <p className="mt-1 text-xs text-stone-400">
-                            {formatMemoryDate(memory.createdAt)}
-                          </p>
-                        </div>
-                        <button
-                          className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-50"
-                          disabled={busyMemoryId === memory.id}
-                          onClick={() => void deleteMemory(memory.id)}
-                          type="button"
-                        >
-                          {busyMemoryId === memory.id ? '删除中…' : '删除'}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {/* The scroll container only caps the list itself, so expanding
+                        keeps the page scroll position and never grows unbounded. */}
+                    <div
+                      className={
+                        isMemoryListExpanded
+                          ? 'max-h-96 overflow-y-auto overscroll-contain pr-2'
+                          : undefined
+                      }
+                      id="memory-list"
+                    >
+                      <ul className="divide-y divide-stone-100">
+                        {visibleMemories.map((memory) => (
+                          <li className="flex items-start justify-between gap-4 py-3" key={memory.id}>
+                            <div className="min-w-0">
+                              <p className="text-sm leading-6 text-stone-800">{memory.content}</p>
+                              <p className="mt-1 text-xs text-stone-400">
+                                {formatMemoryDate(memory.createdAt)}
+                              </p>
+                            </div>
+                            <button
+                              className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-50"
+                              disabled={busyMemoryId === memory.id}
+                              onClick={() => void deleteMemory(memory.id)}
+                              type="button"
+                            >
+                              {busyMemoryId === memory.id ? '删除中…' : '删除'}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    {hiddenMemoryCount > 0 && (
+                      <button
+                        aria-controls="memory-list"
+                        aria-expanded={isMemoryListExpanded}
+                        className="mt-2 flex w-full items-center justify-center rounded-lg border border-stone-200 py-2 text-sm font-medium text-stone-600 transition hover:border-stone-300 hover:bg-stone-50"
+                        onClick={() => setIsMemoryExpanded((current) => !current)}
+                        type="button"
+                      >
+                        {isMemoryListExpanded
+                          ? '收起'
+                          : `展开其余 ${hiddenMemoryCount} 条`}
+                      </button>
+                    )}
+                  </>
                 )}
               </section>
 
