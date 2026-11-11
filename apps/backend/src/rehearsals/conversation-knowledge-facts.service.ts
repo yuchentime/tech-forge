@@ -721,7 +721,6 @@ export class ConversationKnowledgeFactsService
       const text = await this.llm.generate('', {
         systemPromptAppend: KNOWLEDGE_FACTS_SYSTEM_PROMPT,
         tools: [],
-        loadMemory: false,
         timeoutMs: GENERATE_TIMEOUT_MS,
         signal,
         buildPrompt: ({ contextWindow }) => {

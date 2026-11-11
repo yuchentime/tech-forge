@@ -111,13 +111,6 @@ export class SettingsService implements OnModuleInit {
    * skill is seeded here on first use; existing files are never overwritten.
    */
   private readonly skillsDirectory = join(this.configDirectory, 'skills');
-  /**
-   * Agent long-term memory owned by the pi-memory extension.
-   *
-   * Kept beside config/knowledge instead of the extension's default `~/.pi/agent/memory`, so all
-   * TeachForge state lives under one root and `TEACHFORGE_CONFIG_DIR` relocates it too.
-   */
-  private readonly memoryDirectory = join(this.configDirectory, 'memory');
   private initializationPromise?: Promise<void>;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -188,16 +181,6 @@ export class SettingsService implements OnModuleInit {
    */
   getSkillsDirectory(): string {
     return this.skillsDirectory;
-  }
-
-  /**
-   * Returns the pi-memory storage root.
-   *
-   * The Agent layer passes it to the extension as `PI_MEMORY_DIR`; the extension creates the
-   * directory itself on first use.
-   */
-  getMemoryDirectory(): string {
-    return this.memoryDirectory;
   }
 
   /**

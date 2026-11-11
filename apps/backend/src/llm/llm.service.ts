@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   AgentSession as PiAgentSession,
   AgentSessionEvent as PiAgentSessionEvent,
@@ -143,8 +143,6 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
   systemPromptAppend?: string;
   /** Explicit tool allowlist; rehearsal passes an empty array. */
   tools?: readonly string[];
-  /** Whether to load pi-memory; rehearsal disables it to keep the student role isolated. */
-  loadMemory?: boolean;
   /** Abort the provider call after this many milliseconds. */
   timeoutMs?: number;
   /**
@@ -168,40 +166,16 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
 interface PiSessionBuildOptions {
   systemPromptAppend?: string;
   tools?: readonly string[];
-  loadMemory?: boolean;
   /** Publishes the resolved model's context window to the caller that builds the prompt. */
   onModelResolved?: (contextWindow: number | null) => void;
 }
 
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 
-/**
- * Pi tool names registered by pi-memory.
- *
- * The `tools` list passed to `createAgentSession` is an allowlist for every registered tool,
- * extension tools included, so leaving these out silently filters them away from the model.
- */
-const PI_MEMORY_TOOL_PATTERNS = ["memory_*", "scratchpad"];
-
 // The backend is compiled as CommonJS while Pi publishes an ESM-only entry point.
 const importPiSdk = new Function("specifier", "return import(specifier)") as (
   specifier: string,
 ) => Promise<PiSdk>;
-
-/**
- * Resolves the installed pi-memory extension entry for the Pi resource loader.
- *
- * pi-memory ships untranspiled TypeScript and is ESM-only, so this CommonJS backend cannot import
- * it directly. The Pi loader compiles extension files itself (jiti), which is how a path inside
- * `node_modules` becomes a loaded extension.
- */
-function resolvePiMemoryExtensionPath(): string {
-  const packageRoot = dirname(require.resolve("pi-memory/package.json"));
-  return join(packageRoot, "index.ts");
-}
-
-/** Absolute path of pi-memory's entry file, resolved once per process. */
-const PI_MEMORY_EXTENSION_PATH = resolvePiMemoryExtensionPath();
 
 /** Identifies which stored context the Pi session was rebuilt from. */
 type SessionRestoreSource = "session_snapshot" | "rebuilt_history";
@@ -697,7 +671,6 @@ export class LlmService {
       session = await this.createSession(resolved, modelSettings, undefined, {
         systemPromptAppend: options.systemPromptAppend,
         tools: options.tools,
-        loadMemory: options.loadMemory,
         onModelResolved: (contextWindow) => {
           resolvedContextWindow = contextWindow;
         },
@@ -958,8 +931,8 @@ export class LlmService {
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
       // already-built context block into this request.
       const customTools = [...workspaceFileTools];
-      // pi-memory is loaded as a real extension (see PI_MEMORY_EXTENSION_PATH) so it can register
-      // its tools and inject the memory snapshot into the system prompt.
+      // The only extension is the in-process conversation persistence hook. `noExtensions` keeps
+      // Pi from discovering packages, so a session registers exactly the allowlisted tools.
       const extensionFactories: PiExtensionFactory[] = [];
       if (options.persistConversationEvent) {
         extensionFactories.push(
@@ -969,7 +942,6 @@ export class LlmService {
         );
       }
 
-      const loadMemory = buildOptions.loadMemory ?? true;
       const toolAllowlist = buildOptions.tools ?? [
         "read",
         "edit",
@@ -977,7 +949,6 @@ export class LlmService {
         "grep",
         "find",
         "ls",
-        ...PI_MEMORY_TOOL_PATTERNS,
       ];
       let customSystemPrompt: string;
       if (buildOptions.systemPromptAppend?.trim()) {
@@ -996,10 +967,6 @@ export class LlmService {
           `\n\nUser preferences: ${stylePreference}`,
         ].join("\n");
       }
-      // pi-memory resolves its storage root from PI_MEMORY_DIR at module load, and the Pi loader
-      // caches extension modules per cwd, so this must be set before the first reload below.
-      // Without it the extension writes to ~/.pi/agent/memory, outside the TeachForge config root.
-      process.env.PI_MEMORY_DIR = this.settings.getMemoryDirectory();
 
       // Bundled skill templates are copied into the config root once. The user can then inspect,
       // edit or replace them without depending on the backend install directory.
@@ -1018,8 +985,7 @@ export class LlmService {
         agentsFilesOverride: () => ({
           agentsFiles: [{ path: this.settings.getAgentsFilePath(), content: agentsPolicy }],
         }),
-        // `noExtensions` only disables discovered packages; these explicit sources still load.
-        additionalExtensionPaths: loadMemory ? [PI_MEMORY_EXTENSION_PATH] : [],
+        // `noExtensions` disables package discovery; extensionFactories still load explicitly.
         extensionFactories,
         // These stay anchored to the configured root instead of the session cwd, so per-session
         // workspaces never change where user-provided skills and prompt templates are looked up.
@@ -1109,8 +1075,8 @@ export class LlmService {
         customTools,
       });
 
-      // Extensions receive `session_start` only through this binding. pi-memory uses it to probe
-      // qmd and build the memory snapshot that later turns inject into the system prompt.
+      // Extensions receive `session_start` only through this binding; the persistence hook relies
+      // on it to attach its awaited event handlers.
       phase = "extension_bind";
       writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
         ...logContext,
@@ -1128,7 +1094,6 @@ export class LlmService {
         customToolCount: customTools.length,
         toolCount: toolAllowlist.length,
         skillsDirectory: this.settings.getSkillsDirectory(),
-        loadMemory,
         compactionEnabled: compactionSettings.enabled,
         compactionReserveTokens: compactionSettings.reserveTokens,
         compactionKeepRecentTokens: compactionSettings.keepRecentTokens,

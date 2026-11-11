@@ -14,7 +14,7 @@ last_verified: 2026-11-10
 
 - [平台索引](platform/index.md)：Electron、React、NestJS 运行架构和代码放置指南。
 - [技术栈](platform/tech-stack.md)：运行链路实际使用的依赖、声明与安装版本、存储/嵌入/解析选型，以及声明但未接入的遗留项与升级约束。
-- [Agent Runtime](platform/agent-runtime.md)：Agent、Pi SDK、SQLite 持久化与恢复流程、扩展与 skill 装载（含 `pi-memory`、内置 `deep-research`）、结构化诊断日志，以及 Agent 文件读写的安全边界。
+- [Agent Runtime](platform/agent-runtime.md)：Agent、Pi SDK、SQLite 持久化与恢复流程、扩展与 skill 装载（仅进程内扩展与内置 `deep-research` skill）、结构化诊断日志，以及 Agent 文件读写的安全边界。
 - [业务域文档组织](domains/README.md)：当前业务行为文档的责任划分；业务行为经代码验证后再添加。
 - [Conversation 对话持久化与历史读取](domains/conversations/index.md)：Agent 对话写入 SQLite、会话侧栏列表和选中会话消息读取的当前行为。
 - [演练模式](domains/rehearsals/index.md)：独立 Rehearsal 状态机、15 问限额、学生画像、逐题/总体评估、历史列表，以及普通对话 digest 同步。

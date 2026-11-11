@@ -25,7 +25,7 @@ last_verified: 2026-11-10
 
 - 开始前必须存在普通对话历史：至少一条已完成 user 行和一条已完成 assistant 行；存在 `pending` 普通行时返回 409。桌面端只有在当前 thread 出现 completed user + assistant round 后启用「开始演练」。`ConversationsService.getRestorableHistory(conversationId, upToSequenceNo?)` 只读投影可恢复历史并返回 `{ history, maxSequenceNo }`，不创建 turn、不写消息。
 - 开场规划复用父会话 Pi 快照（含 compaction），但 `LlmService.generate()` 不保存快照；快照缺失或落后时按 SQLite 重建。规划输出 `topic`、`learningSummary`、1–8 个知识点和第一道基础题。知识点数量按对话实际内容确定；内容少时可以只有 1–2 个，不要求凑满。
-- 后续答题、跳过和报告只带 `learningSummary + plan + 已有问答 + 当前状态`，不重复注入完整普通历史。演练 Agent 使用代码写死的 system prompt，不加载 SOULS/style preference、pi-memory 或工具；它不能写文件或执行命令。
+- 后续答题、跳过和报告只带 `learningSummary + plan + 已有问答 + 当前状态`，不重复注入完整普通历史。演练 Agent 使用代码写死的 system prompt，不加载 SOULS/style preference 或工具；它不能写文件或执行命令。
 - 学生画像可选、最多 1000 字符，只影响提问视角。画像持久化在 `<configDir>/rehearsal-persona.txt`，不建表、不按会话隔离；`PUT /api/rehearsal-persona` 原子写回，空文件等价于没有画像。每次开始把当时文本作为 `persona` 传入，历史演练保留 `personaText`。
 
 ### 准备画面
@@ -74,7 +74,7 @@ stateDiagram-v2
 - 每个 Conversation 最多一条派生事实，持久化在 `conversation_knowledge_facts`，字段为 `summary`、`knowledgePointDetailsJson`、`tagsJson`、`masteryLevel`、`generationStatus`、`lastError`、`generatedAt`、`createdAt`、`updatedAt`；不新增版本号、来源清单、尝试次数、独立任务表或知识点表。
 - 报告完成（手动 end、模型判断知识点已覆盖、回答/跳过达到 15 问上限）在保存 `completed`、`overallEvaluationJson`、`endedAt` 的同一事务里把事实行置 `pending`；已有内容时只改状态并清空旧错误，保留已发布内容。提交后才唤醒后台 worker，HTTP 继续返回原报告；重复 end 已 completed 演练不重复登记。
 - 后台服务默认每 5 秒扫描 `pending`，按 `updatedAt`、`conversationId` 升序领取；进程内共用一个 worker，同一会话不重叠。领取用短事务把 `pending` 条件更新为 `running` 并读取输入快照，模型调用不持有数据库事务。
-- 输入包含该会话全部 `completed` 演练，按 `endedAt`、`createdAt`、`id` 升序；报告/计划损坏或报告知识点无法映射到计划时明确失败。每条评估带演练 ID、时间、知识点名称、原始等级、依据和总体报告。事实模型使用专用固定 system prompt、`tools: []`、`loadMemory: false`、独立 AbortSignal，不携带画像、父会话上下文、SOULS 或记忆，也不写普通消息/快照；结构校验失败最多 3 次调用（首次 + 2 次修复），provider 错误交给既有 LLM 边界。
+- 输入包含该会话全部 `completed` 演练，按 `endedAt`、`createdAt`、`id` 升序；报告/计划损坏或报告知识点无法映射到计划时明确失败。每条评估带演练 ID、时间、知识点名称、原始等级、依据和总体报告。事实模型使用专用固定 system prompt、`tools: []`、独立 AbortSignal，不携带画像、父会话上下文、SOULS 或记忆，也不写普通消息/快照；结构校验失败最多 3 次调用（首次 + 2 次修复），provider 错误交给既有 LLM 边界。
 - 预算在同一模型解析后用实际 `contextWindow` 构造：先全量历史，超限从最旧开始整份移除，允许 0 份历史；旧事实与本次评估必保留，窗口未知或必保留内容超限时失败。输出预留 8192 token、安全余量 10%，UTF-8 字节数为保守上界，并计入 system prompt、结构包装与修复文本。
 - 模型输出严格校验：summary ≤200 Unicode code points，等级/证据状态枚举，标签 0–8 个且去重，知识点不重复；`insufficient` 等级与考察时间为空，`sufficient` 二者非空，`lastAssessedAt` 必须来自真实评估。引用只能来自本次输入或旧事实原样携带，且同会话真实存在；不按跨演练相同 `pointId` 合并。
 - 成功时整体替换内容、清空 `lastError`、更新 `generatedAt`；失败只在仍为 `running` 时转 `failed`，保留旧内容与旧 `generatedAt`，`lastError` 为有界脱敏摘要。处理期间新报告改回 `pending` 时，旧成功或旧失败都不得发布，worker 重新读取最新快照再生成。启动先把遗留 `running` 恢复为 `pending` 再领取；未唤醒和释放竞态由周期扫描补偿，`failed` 不自动重试。关闭时停止领取并尽力 abort，`running` 留给下次启动恢复。会话删除在原有事务中先删事实行，迟到结果影响 0 行，不重建事实。

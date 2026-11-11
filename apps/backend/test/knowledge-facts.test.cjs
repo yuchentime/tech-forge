@@ -313,7 +313,6 @@ test('facts publish atomically with isolated model options', async () => {
     ctx.service.wake(conversationId);
     await ctx.llm.waitForCalls(1);
     assert.deepEqual(ctx.llm.calls[0].options.tools, []);
-    assert.equal(ctx.llm.calls[0].options.loadMemory, false);
     assert.equal(ctx.llm.calls[0].options.conversation, undefined);
     assert.equal(
       ctx.llm.calls[0].options.systemPromptAppend,

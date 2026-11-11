@@ -166,7 +166,6 @@ async function main() {
       getManagedFilePaths: async () => [],
       getKnowledgeDirectory: () => path.join(workspaceRoot, 'knowledge'),
       getStylePreference: async () => '',
-      getMemoryDirectory: () => path.join(root, 'memory'),
     };
     const snapshotStore = {
       getSnapshot: async () => null,

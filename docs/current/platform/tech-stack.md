@@ -49,7 +49,7 @@ last_verified: 2026-11-09
 | `better-sqlite3` | ^13.0.3（13.0.3） | 原生 SQLite 驱动；本机安装在 `apps/backend/node_modules`，未提升到根 |
 | `class-validator` / `class-transformer` | ^0.15.1 / ^0.5.1 | DTO 校验与转换 |
 | `reflect-metadata` / `rxjs` | ^0.2.2 / ^7.8.2（0.2.2 / 7.8.2） | 装饰器元数据（`main.ts` 首行导入）；`rxjs` 由 Nest 运行时使用，源码只有 `llm.service.ts` 一处未使用的 `of` 导入 |
-| `typebox` | ^1.3.27（1.3.27） | 工具参数 schema 类型：由 Pi SDK 与 `pi-memory` 实际构造，本仓库声明用于对齐 SDK 的 `ToolDefinition` 类型，源码无直接 import |
+| `typebox` | ^1.3.27（1.3.27） | 工具参数 schema 类型：由 Pi SDK 实际构造，本仓库声明用于对齐 SDK 的 `ToolDefinition` 类型，源码无直接 import |
 
 后端没有 `devDependencies`，共享工具链全部来自根 `package.json`。
 
@@ -71,8 +71,7 @@ last_verified: 2026-11-09
 
 | 依赖 | 声明（安装） | 用途 |
 |---|---|---|
-| `@earendil-works/pi-coding-agent` | ^1.5.0（1.5.0） | session、工具循环、资源加载器；扩展文件由内置 jiti 编译 |
-| `pi-memory` | ^0.4.2（0.4.2） | 记忆扩展：`memory_*` / `scratchpad` 工具与系统提示词记忆注入；存储根注入为 `<configDir>/memory`（`PI_MEMORY_DIR`），装载方式与边界见 [Agent Runtime](agent-runtime.md) |
+| `@earendil-works/pi-coding-agent` | ^1.5.0（1.5.0） | session、工具循环、资源加载器；不使用文件扩展，扩展只经 `extensionFactories` 注入进程内钩子 |
 | 外部 LLM | 无 SDK 依赖 | DeepSeek 与自定义 Provider 由 `DeepseekLLMAdapter` / `CustomLLMAdapter` 注册进 `ModelRuntime`，配置来源 `~/.tech-forge/config.toml` |
 
 ## 6. 桌面端
@@ -97,7 +96,6 @@ last_verified: 2026-11-09
 
 ## 8. 升级与兼容约束
 
-- `pi-memory` 的 peer 要求是 `@earendil-works/pi-ai` / `pi-coding-agent >= 0.81.1`；它只发布未编译的 `index.ts`（`type: module`），升级后必须确认经 `additionalExtensionPaths` 仍能被 jiti 装载，并且工具名/`before_agent_start` 钩子签名未变（否则 allowlist 与记忆注入会静默失效）。
 - `better-sqlite3` 与 `@huggingface/transformers` 是原生/ONNX 依赖，安装位置在 `apps/backend/node_modules`；Electron 打包后的 ABI 与加载路径仍属待验证项，风险记录见[后端架构设计](../../source/后端架构设计.md)。
 - 渲染层与主进程共享的类型放在 `apps/desktop/src/types/`，主进程编译目标固定 CommonJS；引入仅 ESM 的包需沿用后端的动态导入做法。
 

@@ -1358,7 +1358,6 @@ export class RehearsalsService {
     const callOptions: LlmGenerateOptions = {
       systemPromptAppend: options.systemPromptAppend,
       tools: [],
-      loadMemory: false,
       timeoutMs: GENERATE_TIMEOUT_MS,
       requestId: options.requestId,
       signal: options.signal,
