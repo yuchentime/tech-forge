@@ -5,6 +5,7 @@ import { buildParserRegistry, DocumentParserRegistry } from './document-parser.r
 import {
   DocumentParserError,
   isDocumentParserError,
+  type DocumentParser,
   type ParseDocumentRequest,
   type ParseDocumentResult,
   type ParserInput,
@@ -108,9 +109,24 @@ export class DocumentParserService {
 
   /** Reports whether a file name would route to a parser, without touching the filesystem. */
   supportsFile(originalName: string): boolean {
+    return this.resolveParser(originalName) !== null;
+  }
+
+  /**
+   * Reports whether reading a file of this name produces a new text document.
+   *
+   * False for Markdown and plain text: the stored file already is the text, so a converted copy
+   * would only duplicate it. Unknown formats report true so no caller treats them as readable.
+   */
+  requiresExtraction(originalName: string): boolean {
+    return this.resolveParser(originalName)?.requiresExtraction ?? true;
+  }
+
+  /** Resolves the parser for one file name, or null when its extension is unsupported. */
+  private resolveParser(originalName: string): DocumentParser | null {
     const extension = extname(originalName).toLowerCase();
-    if (!extension) return false;
-    return this.registry.resolve({ extension, mediaType: MEDIA_TYPES[extension] ?? '' }) !== null;
+    if (!extension) return null;
+    return this.registry.resolve({ extension, mediaType: MEDIA_TYPES[extension] ?? '' });
   }
 
   /** Rejects empty, relative or non-string input paths early. */

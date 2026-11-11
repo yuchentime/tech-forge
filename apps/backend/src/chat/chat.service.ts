@@ -8,6 +8,7 @@ import {
 import { getToolDisplayFields } from '../conversations/conversation-transcript';
 import {
   AttachmentsService,
+  type AttachmentFailure,
   type AttachmentRef,
   type ChatAttachmentInput,
   type StoredAttachments,
@@ -232,6 +233,7 @@ export class ChatService {
       let attachmentContext: string | undefined;
       const requestedAttachments = dedupeAttachments(attachments);
       let currentAttachments: AttachmentRefInjected[] = [];
+      let attachmentImages: StoredAttachments['images'] = [];
       if (requestedAttachments.length > 0) {
         phase = 'attachment.context';
         // The copy happens here, not at pick time: the conversation id only exists at this point.
@@ -242,6 +244,7 @@ export class ChatService {
         const rendered = renderAttachmentContext(stored);
         attachmentContext = rendered.text;
         currentAttachments = rendered.refs;
+        attachmentImages = stored.images;
         // Only the reference and sizes are durable: the text belongs to this turn, not the transcript.
         await this.conversations.mergeUserMessageContextRefs(
           turn.userMessageId,
@@ -255,6 +258,7 @@ export class ChatService {
           {
             ...logContext,
             attachmentCount: stored.contents.length,
+            imageCount: stored.images.length,
             failedCount: stored.failures.length,
             characters: stored.contents.reduce(
               (sum, content) => sum + content.text.length,
@@ -281,10 +285,11 @@ export class ChatService {
         currentAttachments,
       );
       if (scope.length > 0) {
-        const pointer = renderAttachmentScope(scope, (attachmentId) =>
-          this.attachments.textFilePath(
+        const pointer = renderAttachmentScope(scope, (attachment) =>
+          this.attachments.readableFilePath(
             resolvedConversationId,
-            attachmentId,
+            attachment.attachmentId,
+            attachment.name,
           ),
         );
         attachmentContext = [attachmentContext, pointer]
@@ -335,6 +340,7 @@ export class ChatService {
         // The skill body is expanded into the model prompt; `userPrompt` stays the stored text.
         skillName: turnCommand.research ? DEEP_RESEARCH_SKILL_NAME : undefined,
         promptContext: promptContext === '' ? undefined : promptContext,
+        ...(attachmentImages.length > 0 ? { images: attachmentImages } : {}),
         contextMessages: [
           ...(rehearsalDigest.text ? [{ type: 'rehearsal_digest', text: rehearsalDigest.text }] : []),
           ...(directoryContext ? [{
@@ -872,7 +878,7 @@ function renderAttachmentContext(stored: StoredAttachments): {
 } {
   const blocks = [
     '## 本轮用户附加的文件',
-    '以下是用户随这条消息上传的文件内容（系统提取的正文）。请把它当作本轮问题的一部分直接使用，不要要求用户重新上传或贴出内容。',
+    '以下是用户随这条消息上传的文件。文本类文件提供系统提取的正文，图片会作为视觉输入随本消息一并提供。请把它们当作本轮问题的一部分直接使用，不要要求用户重新上传或贴出内容。',
   ];
   let remaining = ATTACHMENT_INJECTION_LIMIT;
   const skipped: string[] = [];
@@ -894,6 +900,15 @@ function renderAttachmentContext(stored: StoredAttachments): {
     blocks.push(`### 文件 ${index + 1}：《${content.name}》\n${visible}`);
   });
 
+  if (stored.images.length > 0) {
+    const names = stored.images
+      .map((image, index) => `${index + 1}. 《${image.name}》`)
+      .join('\n');
+    blocks.push(
+      `### 本轮附加的图片\n以下图片已作为视觉输入随本消息提供，请直接查看：\n${names}`,
+    );
+  }
+
   if (skipped.length > 0) {
     const names = skipped.map((name) => `《${name}》`).join('、');
     blocks.push(
@@ -901,9 +916,16 @@ function renderAttachmentContext(stored: StoredAttachments): {
     );
   }
   if (stored.failures.length > 0) {
-    const names = stored.failures.map((failure) => `《${failure.name}》`).join('、');
+    const reasons: Record<AttachmentFailure['reason'], string> = {
+      missing: '文件不存在或不可读',
+      unsupported: '格式不受支持',
+      unreadable: '内容无法解析、与扩展名不符，或图片超出大小限制',
+    };
+    const lines = stored.failures
+      .map((failure) => `- 《${failure.name}》：${reasons[failure.reason]}`)
+      .join('\n');
     blocks.push(
-      `以下附件本轮没有可用的内容：${names}（文件无法读取，或其中没有可提取的文字）。请如实告知用户，不要猜测其中的内容。`,
+      `以下附件本轮没有可用的内容：\n${lines}\n请如实告知用户，不要猜测其中的内容。`,
     );
   }
   return {
@@ -935,6 +957,7 @@ function mergeAttachmentScope(
     byId.set(attachment.attachmentId, {
       attachmentId: attachment.attachmentId,
       name: attachment.name,
+      kind: attachment.kind,
       characters: attachment.characters,
       injectedCharacters: Math.max(
         attachment.injectedCharacters,
@@ -946,29 +969,31 @@ function mergeAttachmentScope(
 }
 
 /**
- * Renders the pointer block that tells the model where the full attachment text lives.
+ * Renders the pointer block that tells the model where the full attachment content lives.
  *
  * The injected prefix is all it sees by default; the path lets `read` (offset/limit) or `grep`
- * continue from the stored text instead of guessing the rest of the document.
+ * continue from the stored text, or re-open a stored image, instead of guessing.
  */
 function renderAttachmentScope(
   entries: readonly ConversationAttachmentRef[],
-  pathOf: (attachmentId: string) => string,
+  pathOf: (entry: ConversationAttachmentRef) => string,
 ): string {
   const lines = entries.map((entry) => {
     const size =
-      entry.characters === undefined
-        ? '字数未知'
-        : `共 ${entry.characters.toLocaleString('en-US')} 字`;
+      entry.kind === 'image'
+        ? '图片'
+        : entry.characters === undefined
+          ? '字数未知'
+          : `共 ${entry.characters.toLocaleString('en-US')} 字`;
     const seen =
-      entry.injectedCharacters === undefined
+      entry.kind === 'image' || entry.injectedCharacters === undefined
         ? ''
         : `，已注入 ${entry.injectedCharacters.toLocaleString('en-US')} 字`;
-    return `- 《${entry.name}》：${pathOf(entry.attachmentId)}（${size}${seen}）`;
+    return `- 《${entry.name}》：${pathOf(entry)}（${size}${seen}）`;
   });
   return [
     '## 本会话可读取的附件',
-    '以下文件已保存在本机，并带有解析后的正文。需要超出上面已提供范围的内容时，用 read 读取该路径（可带 offset/limit 分段），或用 grep 在其中搜索关键词；不要凭猜测补全未读到的部分。',
+    '以下文件已保存在本机。需要超出上面已提供范围的内容时，用 read 读取该路径（文本可带 offset/limit 分段；图片会作为视觉输入返回），或用 grep 在其中搜索关键词；不要凭猜测补全未读到的部分。',
     ...lines,
   ].join('\n');
 }

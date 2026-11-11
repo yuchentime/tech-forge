@@ -3,12 +3,12 @@ import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 /**
  * Rewrites user entries in a snapshot so they keep only the user's own text.
  *
- * Each turn may prepend attachment text, knowledge chunks and rehearsal digests to the message sent
- * to the model. That material belongs to one request, but Pi stores it in the user entry, and the
- * snapshot is what the next request restores from — leaving it there would replay the document every
- * turn. `userTextById` maps historical user row ids to their clean stored text; the last user entry
- * falls back to the current prompt. Only `message.content` is replaced; ids, parent links and
- * timestamps stay untouched so the restored entry tree is unchanged.
+ * Each turn may prepend attachment text, knowledge chunks, rehearsal digests and inline images to
+ * the message sent to the model. That material belongs to one request, but Pi stores it in the user
+ * entry, and the snapshot is what the next request restores from — leaving it there would replay the
+ * document or image every turn. `userTextById` maps historical user row ids to their clean stored
+ * text; the last user entry falls back to the current prompt. Only `message.content` is replaced;
+ * ids, parent links and timestamps stay untouched so the restored entry tree is unchanged.
  */
 export function replaceInjectedUserText(
   entries: readonly SessionEntry[],
@@ -21,7 +21,8 @@ export function replaceInjectedUserText(
   for (let index = 0; index < cleaned.length; index += 1) {
     const entry = cleaned[index];
     if (entry.type !== 'message' || entry.message.role !== 'user') continue;
-    const currentText = contentToText(entry.message.content);
+    const content = entry.message.content;
+    const currentText = contentToText(content);
     const replacement =
       userTextById.get(entry.id) ??
       (index === lastUserIndex
@@ -29,14 +30,16 @@ export function replaceInjectedUserText(
         : currentText
           ? stripInjectedText(currentText)
           : undefined);
-    if (replacement === undefined) continue;
-    if (contentToText(entry.message.content) === replacement) continue;
+    const hasImages = containsImageBlock(content);
+    if (replacement === undefined && !hasImages) continue;
+    const nextText = replacement ?? currentText ?? '';
+    if (!hasImages && currentText === nextText) continue;
 
     cleaned[index] = {
       ...entry,
       message: {
         ...entry.message,
-        content: replaceContent(entry.message.content, replacement),
+        content: replaceContent(content, nextText),
       },
     };
   }
@@ -55,13 +58,23 @@ function findLastUserEntryIndex(entries: readonly SessionEntry[]): number {
   return -1;
 }
 
-/** Reads text from either the string or text-block content shape Pi may store. */
+/** Reads the text part of either content shape Pi may store, ignoring image blocks. */
 function contentToText(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content) && content.every(isTextBlock)) {
-    return content.map((block) => block.text).join('\n');
+  if (!Array.isArray(content)) return undefined;
+  if (!content.every((block) => isTextBlock(block) || isImageBlock(block))) {
+    return undefined;
   }
-  return undefined;
+  const text = content
+    .filter(isTextBlock)
+    .map((block) => block.text)
+    .join('\n');
+  return text.length > 0 ? text : undefined;
+}
+
+/** Reports whether a content value carries inline image input. */
+function containsImageBlock(content: unknown): boolean {
+  return Array.isArray(content) && content.some(isImageBlock);
 }
 
 /**
@@ -93,6 +106,16 @@ function isTextBlock(value: unknown): value is { type: 'text'; text: string } {
   if (!('type' in value) || value.type !== 'text') return false;
   if (!('text' in value) || typeof value.text !== 'string') return false;
   return true;
+}
+
+/** Narrows one Pi content block to inline image input. */
+function isImageBlock(value: unknown): value is { type: 'image' } {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'type' in value &&
+    value.type === 'image'
+  );
 }
 
 /** Replaces injected content while preserving the shape the snapshot already used. */

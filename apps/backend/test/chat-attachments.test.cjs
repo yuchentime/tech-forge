@@ -25,9 +25,15 @@ const { ChatModule } = load('chat/chat.module.js');
 const { ChatService } = load('chat/chat.service.js');
 const { AttachmentsService } = load('attachments/attachments.service.js');
 const { ConversationsService } = load('conversations/conversations.service.js');
-const { KnowledgeService } = load('knowledge/knowledge.service.js');
+const { KnowledgeDirectoryService } = load('documents/knowledge-directory.service.js');
+const { buildDocx } = require('./helpers/document-fixtures.cjs');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-attachments-'));
+/** A 1×1 transparent PNG; the provider detects the format from these bytes. */
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 const createdApps = [];
 
 test.after(() => {
@@ -67,13 +73,27 @@ async function createIntegrationApp() {
     attachments: app.get(AttachmentsService),
     conversations: app.get(ConversationsService),
     dataSource: app.get(DataSource),
-    /** Builds a ChatService with a recording stand-in for the model. */
+    /**
+     * Builds a ChatService with a recording model and inert side services.
+     *
+     * Rehearsal digests, artifacts and long-term memory are not what these tests assert; passing
+     * stubs keeps them from touching the provider or the embedding model.
+     */
     chatWith(recorder) {
       return new ChatService(
         recorder,
         app.get(ConversationsService),
-        app.get(KnowledgeService),
+        app.get(KnowledgeDirectoryService),
         app.get(AttachmentsService),
+        { registerArtifact: async () => undefined },
+        {
+          buildConversationDigest: async () => ({ text: '', refsJson: null, rehearsalIds: [] }),
+          markDigestDelivered: async () => undefined,
+        },
+        {
+          captureUserMessage: () => undefined,
+          buildChatContext: async () => '',
+        },
       );
     },
     async close() {
@@ -121,37 +141,150 @@ test('an attachment is copied into the conversation session directory', async ()
       {
         attachmentId: '22222222-2222-4222-8222-222222222222',
         name: 'lecture.md',
+        kind: 'text',
         characters: 18,
       },
     ]);
-    assert.match(
-      readFileSync(
-        join(
-          ctx.configDirectory,
-          'sessions',
-          conversationId,
-          'attachments',
-          '22222222-2222-4222-8222-222222222222',
-          'text.md',
-        ),
-        'utf8',
-      ),
-      /光合作用/,
-      'the extracted text must be readable by later turns',
+    const directory = join(
+      ctx.configDirectory,
+      'sessions',
+      conversationId,
+      'attachments',
+      '22222222-2222-4222-8222-222222222222',
     );
-    assert.ok(
-      existsSync(
-        join(
-          ctx.configDirectory,
-          'sessions',
-          conversationId,
-          'attachments',
-          '22222222-2222-4222-8222-222222222222',
-          'lecture.md',
-        ),
-      ),
+    assert.match(
+      readFileSync(join(directory, 'lecture.md'), 'utf8'),
+      /光合作用/,
       'the file must be stored under its own conversation',
     );
+    assert.equal(
+      existsSync(join(directory, 'text.md')),
+      false,
+      'Markdown is already text and must not be converted into a second copy',
+    );
+    assert.equal(
+      ctx.attachments.readableFilePath(
+        conversationId,
+        '22222222-2222-4222-8222-222222222222',
+        'lecture.md',
+      ),
+      join(directory, 'lecture.md'),
+      'later turns must read the original file',
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a binary document keeps its original and gains an extracted text copy', async () => {
+  const ctx = await createIntegrationApp();
+  const source = writeFixture('lesson.docx', buildDocx());
+  const attachmentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const conversationId = '77777777-7777-4777-8777-777777777777';
+
+  try {
+    const stored = await ctx.attachments.storeForConversation(conversationId, [
+      { attachmentId, path: source },
+    ]);
+
+    assert.deepEqual(stored.failures, []);
+    const directory = join(
+      ctx.configDirectory,
+      'sessions',
+      conversationId,
+      'attachments',
+      attachmentId,
+    );
+    assert.ok(
+      existsSync(join(directory, 'lesson.docx')),
+      'the original binary document must be kept',
+    );
+    assert.match(
+      readFileSync(join(directory, 'lesson.md'), 'utf8'),
+      /光合作用/,
+      'a converted format must store the extracted Markdown under the source name',
+    );
+    assert.equal(
+      existsSync(join(directory, 'text.md')),
+      false,
+      'the converted copy must not use a generic name',
+    );
+    assert.equal(
+      ctx.attachments.readableFilePath(conversationId, attachmentId, 'lesson.docx'),
+      join(directory, 'lesson.md'),
+      'later turns must read the converted text, not the binary file',
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an image attachment is stored, encoded and pointed at its own file', async () => {
+  const ctx = await createIntegrationApp();
+  const source = writeFixture('diagram.png', TINY_PNG);
+  const attachmentId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const conversationId = '88888888-8888-4888-8888-888888888888';
+
+  try {
+    const stored = await ctx.attachments.storeForConversation(conversationId, [
+      { attachmentId, path: source },
+    ]);
+
+    assert.deepEqual(stored.failures, []);
+    assert.deepEqual(stored.contents, []);
+    assert.deepEqual(stored.refs, [
+      { attachmentId, name: 'diagram.png', kind: 'image', characters: 0 },
+    ]);
+    assert.equal(stored.images.length, 1);
+    assert.equal(stored.images[0].mimeType, 'image/png');
+    assert.equal(stored.images[0].data, TINY_PNG.toString('base64'));
+
+    const directory = join(
+      ctx.configDirectory,
+      'sessions',
+      conversationId,
+      'attachments',
+      attachmentId,
+    );
+    assert.ok(existsSync(join(directory, 'diagram.png')), 'the image must be kept');
+    assert.equal(
+      existsSync(join(directory, 'text.md')),
+      false,
+      'an image has no text conversion',
+    );
+    assert.equal(
+      ctx.attachments.readableFilePath(conversationId, attachmentId, 'diagram.png'),
+      join(directory, 'diagram.png'),
+      'later turns must read the image itself',
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a chat turn sends attached images as vision input', async () => {
+  const ctx = await createIntegrationApp();
+  const source = writeFixture('diagram.png', TINY_PNG);
+
+  try {
+    const llm = createRecordingLlm();
+    const chat = ctx.chatWith(llm);
+    for await (const _event of chat.stream(
+      '这张图说明了什么',
+      undefined,
+      new AbortController().signal,
+      'request-image',
+      [{ attachmentId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', path: source }],
+    )) {
+      // The turn only needs to finish; the recorded request is what matters.
+    }
+
+    const { options } = llm.calls[0];
+    assert.equal(options.images.length, 1);
+    assert.equal(options.images[0].mimeType, 'image/png');
+    assert.equal(options.images[0].data, TINY_PNG.toString('base64'));
+    assert.match(options.promptContext, /本轮附加的图片/);
+    assert.match(options.promptContext, /diagram\.png/);
   } finally {
     await ctx.close();
   }
@@ -164,16 +297,18 @@ test('an unreadable or unsupported attachment is reported, not fatal', async () 
   try {
     const stored = await ctx.attachments.storeForConversation(conversationId, [
       { attachmentId: '44444444-4444-4444-8444-444444444444', path: join(scratchRoot, 'missing.md') },
-      { attachmentId: '55555555-5555-4555-8555-555555555555', path: writeFixture('image.png', 'x') },
+      { attachmentId: '55555555-5555-4555-8555-555555555555', path: writeFixture('legacy.doc', 'x') },
+      { attachmentId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', path: writeFixture('fake.png', 'not an image') },
     ]);
 
     assert.deepEqual(stored.contents, []);
+    assert.deepEqual(stored.images, []);
     assert.deepEqual(
       stored.failures.map((failure) => failure.reason),
-      ['missing', 'unsupported'],
+      ['missing', 'unsupported', 'unreadable'],
     );
-    // The message still shows both tags even though neither file was readable.
-    assert.equal(stored.refs.length, 2);
+    // The message still shows every tag even though none of the files was readable.
+    assert.equal(stored.refs.length, 3);
   } finally {
     await ctx.close();
   }
@@ -231,6 +366,7 @@ test('a chat turn injects the full attachment text and keeps only the reference'
       {
         attachmentId: '66666666-6666-4666-8666-666666666666',
         name: 'handout.md',
+        kind: 'text',
         characters: 18,
         injectedCharacters: 18,
       },
@@ -321,7 +457,11 @@ test('a later turn points the model at the stored attachment text instead of re-
     const followUp = llm.calls[1].options.promptContext;
     assert.match(followUp, /本会话可读取的附件/);
     assert.match(followUp, /follow-up\.md/);
-    assert.match(followUp, /text\.md/);
+    assert.doesNotMatch(
+      followUp,
+      /text\.md/,
+      'a Markdown attachment has no converted copy to point at',
+    );
     assert.match(followUp, /已注入 \d+ 字/);
     assert.doesNotMatch(followUp, /细胞膜控制物质进出/);
   } finally {

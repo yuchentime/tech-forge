@@ -67,7 +67,7 @@ export function AttachmentPickerButton({ disabled }: { disabled: boolean }) {
 
     setIsPicking(true);
     try {
-      const picked = await window.teachforge.pickImportFiles();
+      const picked = await window.teachforge.pickChatAttachments();
       for (const path of picked) {
         composerAttachmentStore.add(fileNameOf(path), path);
       }
@@ -85,7 +85,7 @@ export function AttachmentPickerButton({ disabled }: { disabled: boolean }) {
         className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled || isPicking}
         onClick={() => void pick()}
-        title="添加 PDF、Word、Markdown 或 TXT 文件"
+        title="添加 PDF、Word、Markdown、TXT 或图片（PNG/JPEG/GIF/WebP）"
         type="button"
       >
         <Paperclip aria-hidden className="size-3.5" />

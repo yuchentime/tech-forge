@@ -108,6 +108,8 @@ function readMammothVersion(): string {
 /** Converts DOCX to Markdown with mammoth and reports the structure it could not keep. */
 export class DocxParser implements DocumentParser {
   readonly id = 'docx' as const;
+  /** DOCX is a zip container: its Markdown must be written beside the original copy. */
+  readonly requiresExtraction = true;
 
   /** Accepts only .docx; legacy .doc is rejected by the service registry. */
   supports(input: { extension: string; mediaType: string }): boolean {

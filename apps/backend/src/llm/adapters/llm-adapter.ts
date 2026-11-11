@@ -24,7 +24,7 @@ export function createOpenAiCompatibleModel(
     name,
     api: 'openai-completions',
     reasoning: false,
-    input: ['text'],
+    input: ['text', 'image'],
     cost: defaultCost,
     contextWindow: 128_000,
     maxTokens: 8_192,

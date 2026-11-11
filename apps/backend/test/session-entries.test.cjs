@@ -133,3 +133,31 @@ test('the current turn keeps only the clean user prompt even with a memory block
   const cleaned = replaceInjectedUserText(entries, '当前问题');
   assert.equal(cleaned[0].message.content, '当前问题');
 });
+
+test('inline images are dropped from the snapshot while the user text survives', () => {
+  const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' };
+  const entries = [
+    messageEntry('u1', 'user', [
+      { type: 'text', text: '## 本轮用户附加的文件\n\n正文\n\n## 用户输入\n当前问题' },
+      image,
+    ]),
+  ];
+
+  const cleaned = replaceInjectedUserText(entries, '当前问题');
+
+  // The image is this turn's vision input; replaying it every turn would bill it again.
+  assert.deepEqual(cleaned[0].message.content, [{ type: 'text', text: '当前问题' }]);
+});
+
+test('historical image input is dropped while the stored user text stays', () => {
+  const image = { type: 'image', data: 'BBBB', mimeType: 'image/png' };
+  const entries = [
+    messageEntry('u1', 'user', [{ type: 'text', text: '旧问题' }, image]),
+    messageEntry('a1', 'assistant', [{ type: 'text', text: '回答' }]),
+    messageEntry('u2', 'user', '新问题'),
+  ];
+
+  const cleaned = replaceInjectedUserText(entries, '新问题');
+
+  assert.deepEqual(cleaned[0].message.content, [{ type: 'text', text: '旧问题' }]);
+});

@@ -4,6 +4,8 @@ import type { DocumentParser, ParserInput, ParserOutput } from '../document-pars
 /** Reads Markdown and plain-text files verbatim; no layout or encoding guessing. */
 export class PlainTextParser implements DocumentParser {
   readonly id = 'plain-text' as const;
+  /** The file already is text: callers keep it as stored and must not write a converted copy. */
+  readonly requiresExtraction = false;
 
   /** Accepts Markdown and plain-text extensions only. */
   supports(input: { extension: string; mediaType: string }): boolean {

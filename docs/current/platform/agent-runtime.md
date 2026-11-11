@@ -154,18 +154,18 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 ## 会话附件
 
-用户可以在输入区为一条消息附加文件（PDF、DOCX、Markdown、TXT）。附件**不进资料库**：没有 `documents` 行、没有分块与向量，也不参与 `/查询资料库`。
+用户可以在输入区为一条消息附加文件（PDF、DOCX、Markdown、TXT，以及 PNG/JPEG/GIF/WebP 图片）。附件**不进资料库**：没有 `documents` 行、没有分块与向量，也不参与 `/查询资料库`。
 
 1. 挑选文件时只生成标签：Renderer 记下 `{attachmentId, path}`（id 由渲染层生成，路径来自专用文件选择器），不上传任何内容。
 2. 发送时 `ChatPromptDto.attachments`（≤10、UUIDv4 + 绝对路径）随 prompt 进入 `ChatService.stream()`；桌面桥接在 Electron Main 校验该列表，格式不对直接拒绝整次请求。
-3. `ChatService` 先 `beginTurn()` 得到会话 ID，再由 `AttachmentsService.storeForConversation()` 把文件复制到 `<configDir>/sessions/<conversationId>/attachments/<attachmentId>/<原文件名>`，解析正文写到同目录 `text.md`。复制时机受会话 ID 约束：新会话在这一刻之前不存在。`<configDir>` 默认 `~/.tech-forge`。
-4. 单份失败不影响整轮：不支持的格式记为 `unsupported`，路径不存在记为 `missing`，解析失败记为 `unreadable`，本轮以一行说明告知模型，而不是静默省略。
-5. 正文经 `renderAttachmentContext()` 拼成"本轮用户附加的文件"块，与知识块一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由它拼在本轮 user message 前面（`## 用户输入` 之后才是用户原话）。演练 digest 不走这条路：它经 `LlmRequestOptions.contextMessage` 在 `session.prompt()` 前以 `custom_message` entry 追加一次，随快照持久化（见 §持久化与恢复约定）。**都不进入 system prompt**：否则每轮变化会打断 provider 的前缀缓存，也违反 system prompt 只承载规则的设计。注入有 40000 字符上限：按用户顺序取文件，超出被截断（模型收到"本轮只提供开头 N 字"说明），后面没有余量的文件整体跳过并同样告知。
-6. 正文不进入 `messages.contentJson`、不进入 SSE、不进入历史接口。user 行 `contextRefsJson.attachments` 保存 `{attachmentId, name, characters, injectedCharacters}`：前两项供气泡标签与历史投影，后两项供后续轮描述"共多少字、已提供多少字"。
-7. 附件正文只注入承载它的那一轮。之后每次请求都会追加一段"本会话可读取的附件"指针：每份附件的 `text.md` 绝对路径、总字数与已注入字数，并提示用 `read`（可带 offset/limit）或 `grep` 继续读取。附件目录不在受保护目录内，两个工具都能读；模型因此可以回到原文，而不是凭记忆补全。
-8. 指针不重复注入正文，只提供路径与规模，成本约每附件两行。
+3. `ChatService` 先 `beginTurn()` 得到会话 ID，再由 `AttachmentsService.storeForConversation()` 把文件复制到 `<configDir>/sessions/<conversationId>/attachments/<attachmentId>/<原文件名>`；只有需要转换的 PDF/DOCX 才把解析正文写到同目录的同名 `.md`（`lesson.docx` → `lesson.md`），Markdown/TXT 本身即文本，直接使用原文件、不生成副本；图片复制后编码为 base64 供本轮视觉输入。复制时机受会话 ID 约束：新会话在这一刻之前不存在。`<configDir>` 默认 `~/.tech-forge`。
+4. 单份失败不影响整轮：不支持的格式记为 `unsupported`，路径不存在记为 `missing`，解析失败、图片内容与扩展名不符或超出内联大小限制记为 `unreadable`，本轮以一行说明告知模型，而不是静默省略。
+5. 正文经 `renderAttachmentContext()` 拼成"本轮用户附加的文件"块，与知识块一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由它拼在本轮 user message 前面（`## 用户输入` 之后才是用户原话）。图片不进入这段文本，而是经 `LlmRequestOptions.images` 随 `session.prompt()` 作为 inline `image_url` 内容发送；文本块只列出图片文件名，便于模型对号引用。演练 digest 不走这条路：它经 `LlmRequestOptions.contextMessage` 在 `session.prompt()` 前以 `custom_message` entry 追加一次，随快照持久化（见 §持久化与恢复约定）。**都不进入 system prompt**：否则每轮变化会打断 provider 的前缀缓存，也违反 system prompt 只承载规则的设计。文本注入有 40000 字符上限：按用户顺序取文件，超出被截断（模型收到"本轮只提供开头 N 字"说明），后面没有余量的文件整体跳过并同样告知。
+6. 正文和图片字节都不进入 `messages.contentJson`、不进入 SSE、不进入历史接口。user 行 `contextRefsJson.attachments` 保存 `{attachmentId, name, kind, characters, injectedCharacters}`：前两项供气泡标签与历史投影，`kind` 区分文本/图片，后两项供后续轮描述"共多少字、已提供多少字"。
+7. 附件正文和图片只注入承载它的那一轮。之后每次请求都会追加一段"本会话可读取的附件"指针：每份附件的可读文件绝对路径（PDF/DOCX 为同名 `.md`，Markdown/TXT/图片为原文件）、总字数或"图片"标记、已注入字数，并提示用 `read`（文本可带 offset/limit；图片会作为视觉输入返回）或 `grep` 继续读取。附件目录不在受保护目录内，工具都能读；模型因此可以回到原文或原图，而不是凭记忆补全。
+8. 指针不重复注入正文，只提供路径与规模，成本约每附件两行。图片只出现在承载它的那一轮：快照保存前 `replaceInjectedUserText()` 会丢弃 user entry 里的 `image` 块，避免每轮重复计费。
 
-已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`（`Pi SDK completed without returning assistant text.`），因为 Pi 压缩无法压缩本轮新注入的正文。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
+已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`（`Pi SDK completed without returning assistant text.`），因为 Pi 压缩无法压缩本轮新注入的正文。图片走 DeepSeek 兼容的内联 `image_url` 输入：单张上限 32 MiB，单轮所有图片原始字节上限 32 MiB（base64 后约 42.7 MiB，仍在 48 MiB 请求体限制内）。DeepSeek Files API 的 `file_id` 引用需要 `file` 内容块，而 Pi 的 OpenAI 兼容 provider 只序列化 `image_url`；附件只在一轮使用，因此不引入 Files API。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
 
 ## 文件读写边界
 

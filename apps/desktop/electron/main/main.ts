@@ -288,6 +288,36 @@ function registerBackendIpc(): void {
     return result.canceled ? [] : result.filePaths;
   });
 
+  // Chat attachments also accept images: the backend encodes them for the model's vision input,
+  // while the knowledge library keeps its document-only picker.
+  ipcMain.handle('chat:pick-attachments', async () => {
+    const options: OpenDialogOptions = {
+      title: '选择要附加的文件',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: '支持的文件',
+          extensions: [
+            'pdf',
+            'docx',
+            'md',
+            'markdown',
+            'txt',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'webp',
+          ],
+        },
+      ],
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? [] : result.filePaths;
+  });
+
   // Reveals a path the artifact API resolved. The Renderer never invents a path, so this only
   // navigates to files the conversation already produced.
   ipcMain.handle('shell:reveal', (_event, value: unknown) => {

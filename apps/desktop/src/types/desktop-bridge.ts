@@ -18,6 +18,8 @@ export type DesktopBridge = {
   request<T = unknown>(input: BackendRequest): Promise<BackendResponse<T>>;
   /** Opens the native file picker and returns the chosen absolute paths (empty when cancelled). */
   pickImportFiles(): Promise<string[]>;
+  /** Opens the attachment picker (documents and images) and returns absolute paths. */
+  pickChatAttachments(): Promise<string[]>;
   /** Starts one validated chat stream and returns its cancellation request ID. */
   streamChat(
     prompt: string,
@@ -44,6 +46,7 @@ export function hasDesktopBridge(): boolean {
       typeof bridge.getBackendState === 'function' &&
       typeof bridge.request === 'function' &&
       typeof bridge.pickImportFiles === 'function' &&
+      typeof bridge.pickChatAttachments === 'function' &&
       typeof bridge.streamChat === 'function' &&
       typeof bridge.cancelChatStream === 'function' &&
       typeof bridge.revealInFolder === 'function',

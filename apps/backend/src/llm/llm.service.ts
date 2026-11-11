@@ -61,6 +61,13 @@ export interface LlmConversationContext {
   history: readonly LlmConversationHistoryMessage[];
 }
 
+/** One inline image for the current user message, already base64-encoded. */
+export interface LlmInputImage {
+  /** Raw base64 bytes without a data-URL prefix. */
+  data: string;
+  mimeType: string;
+}
+
 export interface LlmRequestOptions {
   requestId?: string;
   providerId?: string;
@@ -77,6 +84,14 @@ export interface LlmRequestOptions {
    * `replaceInjectedUserText`.
    */
   promptContext?: string;
+  /**
+   * Images attached to this turn's user message.
+   *
+   * Pi's OpenAI-compatible path serializes each as an `image_url` data URL, so the model receives
+   * them as vision input with the text prompt. They belong to this turn only: the snapshot cleanup
+   * drops them, and later turns can re-open the stored file with `read`.
+   */
+  images?: readonly LlmInputImage[];
   /**
    * Durable context appended to the Pi session as its own custom message entry.
    *
@@ -465,6 +480,15 @@ export class LlmService {
         : composedPrompt;
       const run = session.prompt(modelPrompt, {
         expandPromptTemplates: Boolean(options.skillName),
+        ...(options.images && options.images.length > 0
+          ? {
+              images: options.images.map((image) => ({
+                type: 'image' as const,
+                data: image.data,
+                mimeType: image.mimeType,
+              })),
+            }
+          : {}),
       }).then(
         () => {
           runSettled = true;

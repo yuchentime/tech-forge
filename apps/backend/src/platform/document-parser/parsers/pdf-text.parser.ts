@@ -222,6 +222,8 @@ function loadPdfjs(): Promise<PdfJsModule> {
 /** Extracts the text layer of a PDF page by page, rebuilding lines and paragraphs geometrically. */
 export class PdfTextParser implements DocumentParser {
   readonly id = 'pdf-text' as const;
+  /** PDF is binary: the text layer must be extracted into a separate readable document. */
+  readonly requiresExtraction = true;
 
   /** Accepts only .pdf; signature validation happens in the service. */
   supports(input: { extension: string; mediaType: string }): boolean {

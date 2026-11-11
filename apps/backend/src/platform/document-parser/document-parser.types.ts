@@ -59,6 +59,12 @@ export interface ParserOutput {
 /** One format implementation. Implementations must stay free of persistence and Nest dependencies. */
 export interface DocumentParser {
   id: ParserId;
+  /**
+   * True when the stored file is not itself readable text and parsing must produce one.
+   *
+   * Callers use it to keep a verbatim source file instead of writing a second converted copy.
+   */
+  readonly requiresExtraction: boolean;
   supports(input: { extension: string; mediaType: string }): boolean;
   parse(input: ParserInput): Promise<ParserOutput>;
 }

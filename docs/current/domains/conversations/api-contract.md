@@ -8,7 +8,7 @@ related:
   - docs/current/domains/conversations/index.md
   - docs/current/domains/conversations/backend-behavior.md
   - docs/current/platform/architecture-and-code-placement.md
-last_verified: 2026-11-09
+last_verified: 2026-11-11
 ---
 
 # Conversation 查询接口契约
@@ -222,7 +222,7 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 
 - 返回 `user` 与 `assistant` 的 `completed`、`failed`、`cancelled` 终态文本，按 `sequenceNo ASC` 排列。
 - `toolExecution` 不作为顶层消息返回；仅在 user 行下投影 `toolActivities`。不返回原始工具参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking、原始 `contentJson` 或非文本 Pi blocks。
-- `attachments` 只投影 `{attachmentId, name}`。附件正文保存在 `~/.tech-forge/sessions/<conversationId>/attachments/<attachmentId>/text.md`，从不写入消息行，因此不出现在历史接口；`characters` / `injectedCharacters` 只供服务端 prompt 使用。
+- `attachments` 只投影 `{attachmentId, name}`。附件内容保存在 `~/.tech-forge/sessions/<conversationId>/attachments/<attachmentId>/`：PDF/DOCX 为同名 `.md` 解析结果，Markdown/TXT 与图片为原文件；图片只作为本轮视觉输入发送，正文与字节从不写入消息行，因此不出现在历史接口；`characters` / `injectedCharacters` 只供服务端 prompt 使用。
 - 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。加载最近页或更早页时，Renderer 按持久 user message ID 恢复活动摘要；整轮耗时未持久化，历史 UI 不显示该计时。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。
 

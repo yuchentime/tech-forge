@@ -83,6 +83,8 @@ export interface RestorableConversationHistory {
 export interface ConversationAttachmentRef {
   attachmentId: string;
   name: string;
+  /** Whether the attachment provides text or vision input; absent on older rows. */
+  kind?: 'text' | 'image';
   /** Characters of extracted text, when the recorded turn knew it. */
   characters?: number;
   /** Characters injected into some earlier prompt, so the model knows what it has already seen. */
@@ -1560,6 +1562,7 @@ function collectAttachedDocuments(
       byId.set(attachment.attachmentId, {
         attachmentId: attachment.attachmentId,
         name: attachment.name,
+        kind: attachment.kind ?? existing?.kind,
         characters: attachment.characters ?? existing?.characters,
         injectedCharacters: Math.max(
           attachment.injectedCharacters ?? 0,
@@ -1601,6 +1604,7 @@ function readAttachmentDetails(
       const record = entry as {
         attachmentId?: unknown;
         name?: unknown;
+        kind?: unknown;
         characters?: unknown;
         injectedCharacters?: unknown;
       };
@@ -1614,6 +1618,9 @@ function readAttachmentDetails(
         {
           attachmentId: record.attachmentId,
           name: record.name,
+          ...(record.kind === 'image' || record.kind === 'text'
+            ? { kind: record.kind }
+            : {}),
           ...(typeof record.characters === 'number'
             ? { characters: record.characters }
             : {}),

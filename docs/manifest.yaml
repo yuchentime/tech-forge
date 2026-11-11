@@ -22,13 +22,14 @@ routes:
       - docs/current/domains/conversations/backend-behavior.md
     history_on_demand: []
   chat-message-attachments:
-    description: "Attach a PDF/DOCX/Markdown/TXT to one chat message: copy into the conversation session directory at send time, extract text.md, prepend a capped prefix to that turn's user message, point later turns at the stored text for read/grep, and show only a tag on the user message"
+    description: "Attach a PDF/DOCX/Markdown/TXT or PNG/JPEG/GIF/WebP image to one chat message: copy into the conversation session directory at send time, write a same-named .md only for converted PDF/DOCX (Markdown/TXT keep their own file), encode images as inline vision input for that turn, prepend a capped text prefix to that turn's user message, point later turns at the readable stored file for read/grep, and show only a tag on the user message"
     token_budget: 12000
     code_globs:
       - "apps/backend/src/attachments/**"
       - "apps/backend/src/chat/**"
       - "apps/backend/src/llm/**"
       - "apps/backend/src/conversations/**"
+      - "apps/backend/src/platform/document-parser/**"
       - "apps/backend/test/chat-attachments.test.cjs"
       - "apps/backend/test/session-entries.test.cjs"
       - "apps/desktop/src/features/agent/**"
@@ -42,6 +43,8 @@ routes:
     optional:
       - docs/current/domains/conversations/api-contract.md
       - docs/changes/2026-11-09-chat-attachments/verification.md
+      - docs/changes/2026-11-11-attachment-images/brief.md
+      - docs/changes/2026-11-11-attachment-images/verification.md
     history_on_demand: []
   rehearsal-mode:
     description: "Implement Feynman-style rehearsal: a separate Rehearsal state machine with optional student profile, a 15-question total cap, at most 2 follow-ups per base question, skip/manual-end/limit reporting, a paginated per-conversation history with read-only Q&A and evaluation detail, and one-shot delivery of completed drill evaluations into the normal conversation as a persistent Pi custom-message entry"
