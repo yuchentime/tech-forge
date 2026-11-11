@@ -7,6 +7,9 @@ const TOOL_VERBS: Readonly<Record<string, string>> = {
   write: '写入',
   edit: '编辑',
   grep: '搜索',
+  memory_write: '记录记忆',
+  memory_search: '搜索记忆',
+  memory_list: '读取记忆',
 };
 
 /** Describes one tool call as a plain-language action plus its visible target. */

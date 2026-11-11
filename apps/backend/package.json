@@ -28,9 +28,12 @@
     "test:knowledge-facts": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-facts.test.cjs test/knowledge-facts-http.test.cjs",
     "verify:knowledge-facts-provider": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-knowledge-facts-provider.cjs",
     "test:session-entries": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/session-entries.test.cjs",
-    "test:deep-research": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/deep-research.test.cjs"
+    "test:deep-research": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/deep-research.test.cjs",
+    "test:memory": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/memory-policy.test.cjs test/memory.test.cjs test/memory-extension.test.cjs"
   },
   "dependencies": {
+    "@db0-ai/backends-sqlite": "0.3.0",
+    "@db0-ai/core": "0.3.0",
     "@earendil-works/pi-coding-agent": "^1.5.0",
     "@huggingface/tokenizers": "^0.2.0",
     "@huggingface/transformers": "^4.3.2",

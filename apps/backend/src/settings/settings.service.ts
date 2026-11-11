@@ -104,6 +104,13 @@ export class SettingsService implements OnModuleInit {
   /** Per-conversation local files (attachments and future run data), beside config and knowledge. */
   private readonly sessionsDirectory = join(this.configDirectory, 'sessions');
   /**
+   * Long-term memory owned by MemoryService.
+   *
+   * It sits beside config/knowledge/sessions so `TEACHFORGE_CONFIG_DIR` relocates it with the rest
+   * of the user root, and it is added to the managed paths so file tools can never read or write it.
+   */
+  private readonly memoryDirectory = join(this.configDirectory, 'memory');
+  /**
    * User-visible Pi skill root.
    *
    * It sits beside config, knowledge and sessions rather than inside a per-conversation workspace,
@@ -169,6 +176,16 @@ export class SettingsService implements OnModuleInit {
     return this.agentsPath;
   }
 
+  /**
+   * Returns the long-term memory root.
+   *
+   * `MemoryService` owns the SQLite file inside it; settings only supplies the path so every caller
+   * agrees on `<configDir>/memory` and the directory can be added to the protected file list.
+   */
+  getMemoryDirectory(): string {
+    return this.memoryDirectory;
+  }
+
   /** Returns the root for per-conversation session files (attachments and future run data). */
   getSessionsDirectory(): string {
     return this.sessionsDirectory;
@@ -220,7 +237,12 @@ export class SettingsService implements OnModuleInit {
    */
   async getManagedFilePaths(): Promise<readonly string[]> {
     await this.ensureInitialized();
-    return [this.configPath, this.soulsPath, this.agentsPath];
+    return [
+      this.configPath,
+      this.soulsPath,
+      this.agentsPath,
+      this.memoryDirectory,
+    ];
   }
 
   /** Reads the current user-authored style text for a new Pi session. */

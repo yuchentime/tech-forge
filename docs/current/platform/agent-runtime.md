@@ -35,9 +35,9 @@ last_verified: 2026-11-10
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词并注册持久化扩展钩子。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
-| `MemoryService` | 长期记忆尚未实现：`apps/backend/src/memory/memory.service.ts` 只有空壳方法容器，不注册模型工具、不读写任何存储、不修改系统提示词。模型当前没有记忆工具。 |
+| `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
@@ -116,9 +116,9 @@ sequenceDiagram
 
 Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
 
-扩展只走一条通道：`DefaultResourceLoader.extensionFactories` 里的进程内工厂（对话持久化钩子）。`noExtensions: true` 关闭包发现，因此不会从 `node_modules` 或用户目录加载任何文件扩展；`additionalExtensionPaths` 也不再使用。
+扩展只走一条通道：`DefaultResourceLoader.extensionFactories` 里的进程内工厂（对话持久化钩子与记忆工具）。`noExtensions: true` 关闭包发现，因此不会从 `node_modules` 或用户目录加载任何文件扩展；`additionalExtensionPaths` 也不再使用。记忆工具只在 `loadMemory` 为真时注册，`generate()` 默认不装载。
 
-`createAgentSession({ tools })` 的列表是对**所有**已注册工具的 allowlist，当前只列 `read`/`edit`/`write`/`grep`/`find`/`ls`，自定义文件工具经 `customTools` 注入。会话创建后调用 `session.bindExtensions({})`，进程内扩展才能收到 `session_start` 与后续生命周期事件。
+`createAgentSession({ tools })` 的列表是对**所有**已注册工具的 allowlist，当前列 `read`/`edit`/`write`/`grep`/`find`/`ls`，聊天轮次再追加 `memory_*`；自定义文件工具经 `customTools` 注入。会话创建后调用 `session.bindExtensions({})`，进程内扩展才能收到 `session_start` 与后续生命周期事件。
 
 ## 持久化与恢复约定
 
@@ -205,7 +205,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/SOULS；知识库根（`knowledge/`）默认拒绝读取，只有当前用户请求明确点名该路径时才建立一次性读取许可；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
-7. 长期记忆尚无实现：`apps/backend/src/memory/` 只有空壳 `MemoryService`，不注册模型工具、不读写存储、不修改系统提示词。第三方 `pi-memory` 扩展及其 `<configDir>/memory/` 存储根已移除；自研实现时必须重新明确存储根、所有读写入口，以及这些路径是否经过 `workspace-file-tools.ts` 的授权检查、是否进入 SQLite 与 SSE。
+7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。
 8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具；普通对话只通过一次性 digest（`custom_message` entry + `loadedContext` 标记）与 `contextRefsJson` 读取演练结果。
 
 ## 技能装载与探索主题
@@ -235,7 +235,8 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 - 斜杠命令解析：`apps/backend/src/knowledge/knowledge-command.ts`、`apps/backend/src/chat/deep-research-command.ts`、`apps/backend/src/chat/turn-command.ts`
 - skill 安装与发现：`apps/backend/src/llm/skills.ts`、`SettingsService.getSkillsDirectory()`
 - 内置探索主题 skill 模板：`apps/backend/assets/skills/deep-research/SKILL.md`
-- 第三方文件扩展：无。`pi-memory` 已移除，长期记忆由 `apps/backend/src/memory/` 自研（当前为空壳）
+- 长期记忆：`apps/backend/src/memory/`（引擎、锁/备份、策略、工具、管理 API）
+- 第三方文件扩展：无；扩展全部是 `extensionFactories` 进程内工厂（持久化钩子 + 记忆工具）
 - SQLite 实体映射：`apps/backend/src/conversations/conversation.entity.ts`、`message.entity.ts`、`pi-session-snapshot.entity.ts`
 - Pi session 快照读写与恢复选择：`apps/backend/src/conversations/pi-session-snapshots.service.ts`
 - 桌面 adapter 和桥接：`apps/desktop/src/features/agent/agent-chat-adapter.ts`、`apps/desktop/electron/main/main.ts`、`apps/desktop/electron/preload/preload.ts`

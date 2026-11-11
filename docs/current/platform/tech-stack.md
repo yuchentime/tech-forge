@@ -47,6 +47,7 @@ last_verified: 2026-11-09
 | `fastify` | ^5.12.8（5.12.8） | HTTP/SSE 服务器 |
 | `typeorm` + `@nestjs/typeorm` | ^1.1.2 / ^12.0.2（1.1.2 / 12.0.2） | 实体映射与 migration（`migrationsRun`、`migrationsTransactionMode: all`） |
 | `better-sqlite3` | ^13.0.3（13.0.3） | 原生 SQLite 驱动；本机安装在 `apps/backend/node_modules`，未提升到根 |
+| `@db0-ai/core` / `@db0-ai/backends-sqlite` | 0.3.0 / 0.3.0 | 长期记忆的 harness 与 SQLite backend；ESM-only，经 `new Function("import")` 动态加载；底层依赖 `sql.js`（WASM，无原生编译） |
 | `class-validator` / `class-transformer` | ^0.15.1 / ^0.5.1 | DTO 校验与转换 |
 | `reflect-metadata` / `rxjs` | ^0.2.2 / ^7.8.2（0.2.2 / 7.8.2） | 装饰器元数据（`main.ts` 首行导入）；`rxjs` 由 Nest 运行时使用，源码只有 `llm.service.ts` 一处未使用的 `of` 导入 |
 | `typebox` | ^1.3.27（1.3.27） | 工具参数 schema 类型：由 Pi SDK 实际构造，本仓库声明用于对齐 SDK 的 `ToolDefinition` 类型，源码无直接 import |

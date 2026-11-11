@@ -113,3 +113,23 @@ test('durable custom message entries survive the snapshot cleanup', () => {
   assert.equal(cleaned[1].message.content, '问题');
 });
 
+
+
+test('memory blocks are stripped from historical user entries', () => {
+  const entries = [
+    messageEntry('u1', 'user', '## 长期记忆\n- [2026-11-11] 用户喜欢先给结论。\n\n## 用户输入\n旧问题'),
+    messageEntry('a1', 'assistant', [{ type: 'text', text: '回答' }]),
+    messageEntry('u2', 'user', '当前问题'),
+  ];
+
+  const cleaned = replaceInjectedUserText(entries, '当前问题');
+  assert.equal(cleaned[0].message.content, '旧问题');
+  assert.equal(cleaned[1].message.content[0].text, '回答');
+  assert.equal(cleaned[2].message.content, '当前问题');
+});
+
+test('the current turn keeps only the clean user prompt even with a memory block', () => {
+  const entries = [messageEntry('u1', 'user', '## 长期记忆\n- 用户喜欢类比。\n\n## 用户输入\n当前问题')];
+  const cleaned = replaceInjectedUserText(entries, '当前问题');
+  assert.equal(cleaned[0].message.content, '当前问题');
+});

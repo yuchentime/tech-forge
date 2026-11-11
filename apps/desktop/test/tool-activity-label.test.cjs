@@ -48,3 +48,16 @@ test('unknown tools and cancelled calls still get user-facing wording', () => {
   });
   assert.deepEqual(describeToolActivity('bash', 'failed', null), { action: '处理失败' });
 });
+
+
+test('memory tools use plain-language actions instead of raw names', () => {
+  assert.deepEqual(describeToolActivity('memory_write', 'running', { content: '用户喜欢先给结论。' }), {
+    action: '正在记录记忆',
+  });
+  assert.deepEqual(describeToolActivity('memory_search', 'completed', { query: '讲题偏好' }), {
+    action: '已搜索记忆',
+  });
+  assert.deepEqual(describeToolActivity('memory_list', 'failed', {}), {
+    action: '读取记忆失败',
+  });
+});

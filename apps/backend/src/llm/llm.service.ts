@@ -30,6 +30,7 @@ import {
 } from "./skills";
 import { parsePersistedPiMessage } from "../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../conversations/pi-session-snapshots.service";
+import { MemoryService } from "../memory/memory.service";
 import { replaceInjectedUserText } from "./session-entries";
 import {
   getSafeErrorLogFields,
@@ -143,6 +144,13 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
   systemPromptAppend?: string;
   /** Explicit tool allowlist; rehearsal passes an empty array. */
   tools?: readonly string[];
+  /**
+   * Whether long-term memory is loaded for this call.
+   *
+   * `generate()` is used for internal JSON work (rehearsal, knowledge facts), so it defaults to
+   * `false`; chat `stream()` defaults to `true` in `createSession()`.
+   */
+  loadMemory?: boolean;
   /** Abort the provider call after this many milliseconds. */
   timeoutMs?: number;
   /**
@@ -166,6 +174,8 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
 interface PiSessionBuildOptions {
   systemPromptAppend?: string;
   tools?: readonly string[];
+  /** Whether to register long-term memory tools; JSON-only calls pass `false`. */
+  loadMemory?: boolean;
   /** Publishes the resolved model's context window to the caller that builds the prompt. */
   onModelResolved?: (contextWindow: number | null) => void;
 }
@@ -236,6 +246,7 @@ export class LlmService {
     private readonly customAdapter: CustomLLMAdapter,
     private readonly settings: SettingsService,
     private readonly piSessionSnapshots: PiSessionSnapshotsService,
+    private readonly memory: MemoryService,
   ) {}
 
   /**
@@ -671,6 +682,7 @@ export class LlmService {
       session = await this.createSession(resolved, modelSettings, undefined, {
         systemPromptAppend: options.systemPromptAppend,
         tools: options.tools,
+        loadMemory: options.loadMemory ?? false,
         onModelResolved: (contextWindow) => {
           resolvedContextWindow = contextWindow;
         },
@@ -931,8 +943,10 @@ export class LlmService {
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
       // already-built context block into this request.
       const customTools = [...workspaceFileTools];
-      // The only extension is the in-process conversation persistence hook. `noExtensions` keeps
-      // Pi from discovering packages, so a session registers exactly the allowlisted tools.
+      // Chat turns load long-term memory; internal JSON calls (`generate`) opt out.
+      const loadMemory = buildOptions.loadMemory ?? true;
+      // Extensions are in-process only. `noExtensions` keeps Pi from discovering packages, so a
+      // session registers exactly the persistence hook plus the allowlisted memory tools.
       const extensionFactories: PiExtensionFactory[] = [];
       if (options.persistConversationEvent) {
         extensionFactories.push(
@@ -940,6 +954,10 @@ export class LlmService {
             options.persistConversationEvent,
           ),
         );
+      }
+      if (loadMemory) {
+        const memoryExtension = await this.memory.createToolExtension();
+        if (memoryExtension) extensionFactories.push(memoryExtension);
       }
 
       const toolAllowlist = buildOptions.tools ?? [
@@ -949,6 +967,7 @@ export class LlmService {
         "grep",
         "find",
         "ls",
+        ...(loadMemory ? ["memory_*"] : []),
       ];
       let customSystemPrompt: string;
       if (buildOptions.systemPromptAppend?.trim()) {
@@ -964,6 +983,7 @@ export class LlmService {
           "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
           "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
           "- For mind maps, prefer SVG with a left-to-right tree layout.",
+          "- When the user states a durable preference, identity, or explicitly asks you to remember something, call memory_write. Never record one-off task details, file contents, teaching mastery (scores/weak spots), or answer style.",
           `\n\nUser preferences: ${stylePreference}`,
         ].join("\n");
       }
@@ -1093,6 +1113,8 @@ export class LlmService {
         extensionCount: extensionFactories.length,
         customToolCount: customTools.length,
         toolCount: toolAllowlist.length,
+        loadMemory,
+        memoryToolAvailable: loadMemory && this.memory.isAvailable(),
         skillsDirectory: this.settings.getSkillsDirectory(),
         compactionEnabled: compactionSettings.enabled,
         compactionReserveTokens: compactionSettings.reserveTokens,

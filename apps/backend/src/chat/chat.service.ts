@@ -14,6 +14,7 @@ import {
 } from '../attachments/attachments.service';
 import { KnowledgeDirectoryService } from '../documents/knowledge-directory.service';
 import { LlmService } from '../llm/llm.service';
+import { MemoryService } from '../memory/memory.service';
 import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
 import { parseTurnCommand } from './turn-command';
 import { RehearsalsService } from '../rehearsals/rehearsals.service';
@@ -55,6 +56,7 @@ export class ChatService {
     private readonly attachments: AttachmentsService,
     private readonly artifacts: ArtifactsService,
     private readonly rehearsals: RehearsalsService,
+    private readonly memory: MemoryService,
     private readonly conversationRuns: ConversationRunRegistry = new ConversationRunRegistry(),
   ) {}
 
@@ -170,6 +172,9 @@ export class ChatService {
         assistantTurnId: turn.assistantTurnId,
         loadedChunkCount: turn.loadedChunkIds.length,
       });
+      // Only explicit Chinese memory intent is captured; the write runs in the background and can
+      // never delay or fail this turn.
+      this.memory.captureUserMessage(userPrompt);
       if (signal.aborted) {
         assistantStatus = 'cancelled';
         writeStructuredEvent(this.logger, 'warn', 'chat.turn.cancelled', {
@@ -306,7 +311,8 @@ export class ChatService {
       // the system prompt must stay identical across turns for provider prefix caching, and the
       // snapshot is cleaned of this block before it is stored. The rehearsal digest is not part of
       // it: it is appended once as a durable Pi message entry (see `contextMessage` below).
-      const promptContext = [attachmentContext]
+      const memoryContext = await this.memory.buildChatContext(userPrompt);
+      const promptContext = [attachmentContext, memoryContext]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
 
@@ -320,6 +326,7 @@ export class ChatService {
         injectedTokens: 0,
         researchCommand: turnCommand.research,
         rehearsalDigestCharacters: rehearsalDigest.text.length,
+        memoryContextCharacters: memoryContext.length,
         promptContextCharacters: promptContext.length,
       });
       const piEvents = this.llm.stream(userPrompt, {

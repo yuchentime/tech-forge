@@ -20,6 +20,7 @@ last_verified: 2026-11-10
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| 长期记忆（已实施） | db0 core + SQLite（`<configDir>/memory/db0.sqlite`）、本地 bge 512 维嵌入、`memory_*` 工具、每轮 user 前缀注入、显式意图写入、设置页管理；不装 `@db0-ai/pi` | [简报](2026-11-11-long-term-memory/brief.md) · [设计](2026-11-11-long-term-memory/design.md) · [任务](2026-11-11-long-term-memory/tasks.md) · [验收](2026-11-11-long-term-memory/verification.md) · [实施记录](2026-11-11-long-term-memory/worklog.md) |
 | `/探索主题` 斜杠命令 | 固定先检索知识库，再用内置 `deep-research` Pi skill 生成知识文档与自包含 SVG 知识地图；不新增 Agent/表，产物按普通会话 artifact 登记 | [简报](2026-11-10-deep-research-command/brief.md) · [设计](2026-11-10-deep-research-command/design.md) · [验收](2026-11-10-deep-research-command/verification.md) |
 | Chat 截断语义与实时文件卡片（待评审） | 输出上限/内部取消的终态与消息行状态一致；线程结束后保留实时文件卡片，历史加载时按会话去重 | [交接](2026-11-10-chat-truncation-and-artifact-footer/handoff.md) |
 | 会话知识掌握卡片 | 三种掌握状态的会话卡片、摘要/详情和会话跳转；轻量列表读取，详情按需读取 | [简报](2026-11-10-knowledge-session-cards/brief.md) · [设计](2026-11-10-knowledge-session-cards/design.md) · [验收](2026-11-10-knowledge-session-cards/verification.md) · [实施记录](2026-11-10-knowledge-session-cards/worklog.md) |

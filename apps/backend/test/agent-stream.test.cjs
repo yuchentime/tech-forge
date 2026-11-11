@@ -13,6 +13,12 @@ const {
   LlmResponseTruncatedError,
 } = require('../dist/llm/llm.service.js');
 
+/** Minimal long-term memory double; the chat suite does not exercise storage. */
+const memoryStub = {
+  buildChatContext: async () => '',
+  captureUserMessage: () => {},
+};
+
 /** Collects every value from an async generator for one local test assertion. */
 async function collect(generator) {
   const values = [];
@@ -101,6 +107,7 @@ test('ChatService delegates the prompt and request signal to the configured mode
     undefined,
     undefined,
     rehearsals,
+    memoryStub,
   );
   assert.deepEqual(
     await collect(
@@ -166,34 +173,14 @@ test('deep research forces knowledge retrieval and loads the bundled skill', asy
     finishTurn: async () => undefined,
   };
   const knowledge = {
-    buildContext: async (input) => {
-      knowledgeCalls.push(input);
+    loadForAgent: async () => {
+      knowledgeCalls.push('load');
       return {
-        outcome: 'injected',
         text: '## 资料库检索结果\n\n### 片段 1（资料：生物讲义；页码：1）\n光合作用',
-        refs: [
-          {
-            chunkId: 'chunk-1',
-            documentId: 'document-1',
-            documentVersionId: 'version-1',
-            title: '生物讲义',
-            headingPath: ['光合作用'],
-            pageStart: 1,
-            pageEnd: 1,
-          },
-        ],
-        stats: {
-          scopeDocuments: 1,
-          candidateChunks: 1,
-          skippedAlreadyLoaded: 0,
-          reranked: false,
-          injectedChunks: 1,
-          injectedTokens: 24,
-          elapsedMs: 3,
-        },
+        revision: 'revision-1',
       };
     },
-    toContextRefsJson: () => null,
+    renderLoadedContext: (context) => context.text,
   };
   const rehearsals = {
     buildConversationDigest: async () => ({
@@ -210,6 +197,7 @@ test('deep research forces knowledge retrieval and loads the bundled skill', asy
     undefined,
     undefined,
     rehearsals,
+    memoryStub,
   );
 
   await collect(
@@ -221,12 +209,16 @@ test('deep research forces knowledge retrieval and loads the bundled skill', asy
   );
 
   assert.equal(knowledgeCalls.length, 1);
-  assert.equal(knowledgeCalls[0].query, '光合作用');
+  assert.deepEqual(knowledgeCalls, ['load']);
   assert.equal(streamOptions.length, 1);
   // The stored message and snapshot keep the user's topic; the skill is only in the model prompt.
   assert.equal(streamOptions[0].prompt, '光合作用');
   assert.equal(streamOptions[0].options.skillName, 'deep-research');
-  assert.match(streamOptions[0].options.promptContext, /## 资料库检索结果/);
+  assert.equal(streamOptions[0].options.promptContext, undefined);
+  const knowledgeMessage = streamOptions[0].options.contextMessages.find(
+    (message) => message.type === 'knowledge_index',
+  );
+  assert.match(knowledgeMessage.text, /## 资料库检索结果/);
 });
 
 test('a plain turn does not retrieve knowledge or load a skill', async () => {
@@ -250,11 +242,11 @@ test('a plain turn does not retrieve knowledge or load a skill', async () => {
     finishTurn: async () => undefined,
   };
   const knowledge = {
-    buildContext: async () => {
+    loadForAgent: async () => {
       knowledgeCalls += 1;
-      throw new Error('must not retrieve without a command');
+      throw new Error('must not load the directory without a command');
     },
-    toContextRefsJson: () => null,
+    renderLoadedContext: () => '',
   };
   const rehearsals = {
     buildConversationDigest: async () => ({
@@ -271,6 +263,7 @@ test('a plain turn does not retrieve knowledge or load a skill', async () => {
     undefined,
     undefined,
     rehearsals,
+    memoryStub,
   );
 
   await collect(
@@ -583,6 +576,7 @@ test('ChatService hands the rehearsal digest over once and marks it delivered', 
     undefined,
     undefined,
     rehearsals,
+    memoryStub,
   );
 
   await collect(
@@ -595,10 +589,9 @@ test('ChatService hands the rehearsal digest over once and marks it delivered', 
 
   assert.equal(options.length, 1);
   // The digest travels as durable context, not as per-turn text that the snapshot would strip.
-  assert.deepEqual(options[0].contextMessage, {
-    type: 'rehearsal_digest',
-    text: '## 此前的演练记录\n薄弱点：MECE',
-  });
+  assert.deepEqual(options[0].contextMessages, [
+    { type: 'rehearsal_digest', text: '## 此前的演练记录\n薄弱点：MECE' },
+  ]);
   assert.equal(options[0].promptContext, undefined);
   assert.deepEqual(marked, ['rehearsal-1']);
   assert.deepEqual(refs, [
@@ -732,6 +725,7 @@ test('ChatService stores an aborted assistant row as a cancelled turn', async ()
     undefined,
     undefined,
     rehearsals,
+    memoryStub,
   );
 
   await collect(

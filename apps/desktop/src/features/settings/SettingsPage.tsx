@@ -25,6 +25,14 @@ interface LocalSettingsView {
   souls: string;
 }
 
+/** One stored long-term memory as exposed by the management API. */
+interface MemoryEntryView {
+  id: string;
+  content: string;
+  tags: string[];
+  createdAt: string;
+}
+
 /** Renders and persists the local model, workspace and style settings. */
 export function SettingsPage() {
   const [settings, setSettings] = useState<LocalSettingsView | null>(null);
@@ -38,6 +46,11 @@ export function SettingsPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [memories, setMemories] = useState<MemoryEntryView[]>([]);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryStatus, setMemoryStatus] = useState<string | null>(null);
+  const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
+  const [isClearingMemory, setIsClearingMemory] = useState(false);
 
   /** Loads the saved local configuration when the settings view is opened. */
   const loadSettings = useCallback(async () => {
@@ -70,9 +83,98 @@ export function SettingsPage() {
     }
   }, []);
 
+  /** Loads the stored long-term memories for the management section. */
+  const loadMemories = useCallback(async () => {
+    if (!hasDesktopBridge()) return;
+    try {
+      const response = await window.teachforge.request<unknown>({
+        method: 'GET',
+        path: '/api/memories',
+      });
+      if (response.status !== 200 || !Array.isArray(response.data)) {
+        throw new Error(
+          readBackendErrorMessage(response.data, '读取长期记忆失败，请重试。'),
+        );
+      }
+      setMemories(
+        response.data.filter(
+          (item): item is MemoryEntryView =>
+            typeof item === 'object' &&
+            item !== null &&
+            typeof (item as MemoryEntryView).id === 'string' &&
+            typeof (item as MemoryEntryView).content === 'string',
+        ),
+      );
+      setMemoryError(null);
+    } catch (error) {
+      setMemoryError(
+        error instanceof Error ? error.message : '读取长期记忆失败，请重试。',
+      );
+    }
+  }, []);
+
   useEffect(() => {
     void loadSettings();
-  }, [loadSettings]);
+    void loadMemories();
+  }, [loadMemories, loadSettings]);
+
+  /** Deletes one memory; the teacher can correct anything the assistant remembered wrongly. */
+  const deleteMemory = useCallback(
+    async (id: string) => {
+      if (!hasDesktopBridge()) return;
+      setBusyMemoryId(id);
+      setMemoryError(null);
+      setMemoryStatus(null);
+      try {
+        const response = await window.teachforge.request<unknown>({
+          method: 'DELETE',
+          path: `/api/memories/${encodeURIComponent(id)}`,
+        });
+        if (response.status !== 200) {
+          throw new Error(
+            readBackendErrorMessage(response.data, '删除记忆失败，请重试。'),
+          );
+        }
+        setMemories((current) => current.filter((memory) => memory.id !== id));
+        setMemoryStatus('已删除这条记忆。');
+      } catch (error) {
+        setMemoryError(
+          error instanceof Error ? error.message : '删除记忆失败，请重试。',
+        );
+      } finally {
+        setBusyMemoryId(null);
+      }
+    },
+    [],
+  );
+
+  /** Clears every memory after an explicit confirmation. */
+  const clearMemories = useCallback(async () => {
+    if (!hasDesktopBridge()) return;
+    if (!window.confirm('确定清空全部长期记忆吗？此操作无法撤销。')) return;
+    setIsClearingMemory(true);
+    setMemoryError(null);
+    setMemoryStatus(null);
+    try {
+      const response = await window.teachforge.request<unknown>({
+        method: 'DELETE',
+        path: '/api/memories',
+      });
+      if (response.status !== 200) {
+        throw new Error(
+          readBackendErrorMessage(response.data, '清空记忆失败，请重试。'),
+        );
+      }
+      setMemories([]);
+      setMemoryStatus('已清空全部长期记忆。');
+    } catch (error) {
+      setMemoryError(
+        error instanceof Error ? error.message : '清空记忆失败，请重试。',
+      );
+    } finally {
+      setIsClearingMemory(false);
+    }
+  }, []);
 
   /** Saves local settings and refreshes the plaintext keys from the response. */
   const saveSettings = useCallback(async () => {
@@ -335,6 +437,63 @@ export function SettingsPage() {
                 />
               </section>
 
+              <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-stone-900">长期记忆</h2>
+                    <p className="mt-1 max-w-3xl text-sm leading-6 text-stone-500">
+                      助手在对话中记录的跨会话偏好与事实。它们只在本机保存，可以随时删除；删除后下一条消息立即生效。
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-50"
+                    disabled={isClearingMemory || memories.length === 0}
+                    onClick={() => void clearMemories()}
+                    type="button"
+                  >
+                    {isClearingMemory ? '正在清空…' : '清空全部'}
+                  </button>
+                </div>
+
+                {memoryError && (
+                  <p className="mb-3 text-sm text-rose-700" role="alert">
+                    {memoryError}
+                  </p>
+                )}
+                {memoryStatus && (
+                  <p className="mb-3 text-sm text-emerald-800" role="status">
+                    {memoryStatus}
+                  </p>
+                )}
+
+                {memories.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-stone-200 px-4 py-6 text-center text-sm text-stone-500">
+                    暂无长期记忆。当你明确要求助手记住偏好或事实时，它会出现在这里。
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {memories.map((memory) => (
+                      <li className="flex items-start justify-between gap-4 py-3" key={memory.id}>
+                        <div className="min-w-0">
+                          <p className="text-sm leading-6 text-stone-800">{memory.content}</p>
+                          <p className="mt-1 text-xs text-stone-400">
+                            {formatMemoryDate(memory.createdAt)}
+                          </p>
+                        </div>
+                        <button
+                          className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-50"
+                          disabled={busyMemoryId === memory.id}
+                          onClick={() => void deleteMemory(memory.id)}
+                          type="button"
+                        >
+                          {busyMemoryId === memory.id ? '删除中…' : '删除'}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
               <div aria-live="polite" className="min-h-6 text-sm" role="status">
                 {saveError && <p className="text-rose-700">{saveError}</p>}
                 {statusMessage && <p className="text-emerald-800">{statusMessage}</p>}
@@ -345,6 +504,12 @@ export function SettingsPage() {
       </div>
     </section>
   );
+}
+
+/** Formats one stored memory date for the settings list. */
+function formatMemoryDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN');
 }
 
 /** Renders a labelled provider radio choice with a quiet selected state. */

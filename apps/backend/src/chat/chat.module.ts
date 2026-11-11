@@ -4,6 +4,7 @@ import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { LlmModule } from '../llm/llm.module';
+import { MemoryModule } from '../memory/memory.module';
 import { RehearsalsModule } from '../rehearsals/rehearsals.module';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
@@ -15,6 +16,7 @@ import { ChatService } from './chat.service';
     ConversationsModule,
     DocumentsModule,
     LlmModule,
+    MemoryModule,
     RehearsalsModule,
   ],
   controllers: [ChatController],

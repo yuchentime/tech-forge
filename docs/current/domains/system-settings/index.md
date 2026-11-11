@@ -42,7 +42,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 | 责任单元 | 所有状态 / 操作 |
 |---|---|
 | Agent 设置界面 | Provider 表单、密钥输入状态、SOULS 文本和加载/保存反馈（工作空间路径已移除） |
-| SettingsController / SettingsService | DTO 校验、本机设置 API 响应、本机文件初始化、配置读取和替换；独占 config.toml 与 SOULS.md，并提供独立 workspace 与托管文件路径 |
+| SettingsController / SettingsService | DTO 校验、本机设置 API 响应、本机文件初始化、配置读取和替换；独占 config.toml 与 SOULS.md，并提供独立 workspace、skills、memory 目录与托管文件路径 |
 | LlmService / workspace-file-tools | 每个新 Pi session 读取 Provider 与风格；Pi cwd 为会话工作区，read/edit/write 工具同根；文件工具执行读取与修改权限检查；首次 session 前把内置 skill 模板安装到 `<configDir>/skills` |
 | 对话持久化 | Conversation 和消息仍归 ConversationsService / SQLite；设置不写入对话数据库 |
 
@@ -52,8 +52,8 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 - PUT /api/settings 接收完整 Provider 表单和 souls 文本；workspacePath 可选，缺省保留已存值（设置页已不提供）；密钥可省略以保留当前值，clearApiKey: true 才清除对应密钥。GET /api/settings 返回已保存明文 Key。
 - `~/.tech-forge/config.toml` 保存 `[llm]`、`[llm.deepseek]`、`[llm.custom]` 和 `[workspace].path` 字段；TOML 中的 API Key 是明文。缺少 workspace.path 或仍等于旧默认 `.tech-forge/` 时映射到 `~/.tech-forge/workspace/`。
 - ~/.tech-forge/SOULS.md 是后续新 session 的用户风格提示；正在运行的 session 不受后续保存影响。
-- `SettingsService.getLlmSettings()` 仍只返回模型字段；`LlmService` 单独调用 `getWorkspacePath()`，并只取得 config.toml / SOULS.md 路径供文件工具拒绝访问，设置文件本身仍只由 `SettingsService` 读写。
-- Agent 可读取任意来源的普通文件，但不可读取 config.toml / SOULS.md 本体、符号链接或硬链接别名，也不可读取 SettingsService 原子替换时创建的同目录临时文件。创建、编辑和建目录在后端文件工具中默认限制在当前会话工作区；仅当前用户请求明确表达写入意图且给出一个无歧义绝对目标时，可在该轮临时写入授权目录或文件。外部目标的父目录必须存在；该授权不会从会话历史、文件内容或模型输出继承。
+- `SettingsService.getLlmSettings()` 仍只返回模型字段；`LlmService` 单独调用 `getWorkspacePath()`，并只取得 config.toml / SOULS.md / `<configDir>/memory` 路径供文件工具拒绝访问，设置文件本身仍只由 `SettingsService` 读写。
+- Agent 可读取任意来源的普通文件，但不可读取 config.toml / SOULS.md 本体、符号链接或硬链接别名，也不可读取 SettingsService 原子替换时创建的同目录临时文件；长期记忆目录 `<configDir>/memory` 同样不可读写，详见[长期记忆](../memory/index.md)。创建、编辑和建目录在后端文件工具中默认限制在当前会话工作区；仅当前用户请求明确表达写入意图且给出一个无歧义绝对目标时，可在该轮临时写入授权目录或文件。外部目标的父目录必须存在；该授权不会从会话历史、文件内容或模型输出继承。
 
 ## 设计来源差异
 

@@ -77,6 +77,7 @@ function stripInjectedText(text: string): string | undefined {
     '## 本轮用户附加的文件',
     '## 资料库检索结果',
     '## 本会话可读取的附件',
+    '## 长期记忆',
   ];
   if (!injectedHeaders.some((header) => text.startsWith(header))) {
     return undefined;

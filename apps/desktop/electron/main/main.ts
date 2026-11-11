@@ -67,6 +67,19 @@ if (configuredDataDirectory) {
   app.setPath('userData', configuredDataDirectory);
 }
 
+// A single instance owns the local backend. Without this lock, a second launch would start a
+// second backend on a random port and both would write the same `~/.tech-forge` files; the
+// conversation database survives that through WAL, but the sql.js memory database would not.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
 /** Uses the renderer's PNG asset for the macOS Dock icon while running from source. */
 function configureDevelopmentDockIcon(): void {
   if (app.isPackaged || process.platform !== 'darwin' || !app.dock) return;
@@ -672,6 +685,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   configureDevelopmentDockIcon();
   registerBackendIpc();
   try {

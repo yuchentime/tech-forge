@@ -17,5 +17,6 @@ last_verified: 2026-11-10
 当前已实现并经代码核对的业务线：Conversation/Message 的持久化与历史读取（见[业务事实](conversations/index.md)、[行为](conversations/backend-behavior.md)与[接口契约](conversations/api-contract.md)）；本机模型与风格设置、Agent workspace 默认输出目录及文件读写边界（见[系统设置事实](system-settings/index.md)和[Agent Runtime](../platform/agent-runtime.md)）；资料入库（见[资料入库](documents/index.md)）与知识库检索（见[知识库检索](retrieval/index.md)）；演练模式（见[演练业务事实](rehearsals/index.md)与[接口契约](rehearsals/api-contract.md)）；知识掌握卡片视图、轻量事实列表及按需详情读取（见[知识掌握](knowledge-profile/index.md)与[接口契约](knowledge-profile/api-contract.md)）。
 
 Agent 会话产出文件的索引与只读预览见[Artifact 会话产出文件](artifacts/index.md)。
+用户级跨会话事实、工具、注入与管理入口见[长期记忆](memory/index.md)。
 
-其他业务（`memory`、`jobs` 等）仍只在流程经代码实现并核对后建立当前业务事实页；实施目标仍放在 `source/` 或正式 change 中。
+其他业务（`jobs` 等）仍只在流程经代码实现并核对后建立当前业务事实页；实施目标仍放在 `source/` 或正式 change 中。
