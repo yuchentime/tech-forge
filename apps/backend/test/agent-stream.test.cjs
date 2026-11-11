@@ -342,12 +342,9 @@ test('LlmService queues Pi session events in subscription order', async () => {
   };
   const service = new LlmService(
     {},
-    {},
     {
       getLlmSettings: async () => ({
-        provider: 'deepseek',
         deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
       }),
     },
     {},
@@ -401,12 +398,9 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
   };
   const service = new LlmService(
     {},
-    {},
     {
       getLlmSettings: async () => ({
-        provider: 'deepseek',
         deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
       }),
     },
     {},
@@ -455,12 +449,9 @@ test('durable context is appended as its own Pi message entry before prompting',
   };
   const service = new LlmService(
     {},
-    {},
     {
       getLlmSettings: async () => ({
-        provider: 'deepseek',
         deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
       }),
     },
     {},
@@ -507,12 +498,9 @@ test('a requested skill becomes the first token of the model prompt', async () =
   };
   const service = new LlmService(
     {},
-    {},
     {
       getLlmSettings: async () => ({
-        provider: 'deepseek',
         deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
       }),
     },
     {},
@@ -760,12 +748,9 @@ function thinkingOnlyMessage(stopReason) {
 function createLlmService() {
   return new LlmService(
     {},
-    {},
     {
       getLlmSettings: async () => ({
-        provider: 'deepseek',
         deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-        custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
       }),
     },
     {},

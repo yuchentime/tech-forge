@@ -42,13 +42,14 @@ export const KNOWLEDGE_SLASH_COMMAND: SlashCommandItem = {
  * The deep-research command.
  *
  * `/探索主题` is also a backend protocol: `deep-research-command.ts` parses exactly this token and
- * loads the bundled `deep-research` Pi skill. The backend always retrieves knowledge first, then the
- * skill writes a Markdown document and an SVG knowledge map into the conversation workspace.
+ * loads the bundled `deep-research` Pi skill. The backend always retrieves knowledge first; the skill
+ * may then search the web when useful, and writes a Markdown document and an SVG knowledge map into
+ * the conversation workspace.
  */
 export const DEEP_RESEARCH_SLASH_COMMAND: SlashCommandItem = {
   id: 'deep-research',
   label: '探索主题',
-  description: '输入一个主题，AI 将帮你深入研究并生成知识地图',
+  description: '输入一个主题，AI 将结合资料库与网络深入研究并生成知识地图',
   insert: '/探索主题 ',
   icon: 'research',
 };

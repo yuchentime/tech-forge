@@ -73,7 +73,7 @@ last_verified: 2026-11-09
 | 依赖 | 声明（安装） | 用途 |
 |---|---|---|
 | `@earendil-works/pi-coding-agent` | ^1.5.0（1.5.0） | session、工具循环、资源加载器；不使用文件扩展，扩展只经 `extensionFactories` 注入进程内钩子 |
-| 外部 LLM | 无 SDK 依赖 | DeepSeek 与自定义 Provider 由 `DeepseekLLMAdapter` / `CustomLLMAdapter` 注册进 `ModelRuntime`，配置来源 `~/.tech-forge/config.toml` |
+| 外部 LLM | 无 SDK 依赖 | DeepSeek 由 `DeepseekLLMAdapter` 注册进 `ModelRuntime`，配置来源 `~/.tech-forge/config.toml` |
 
 ## 6. 桌面端
 

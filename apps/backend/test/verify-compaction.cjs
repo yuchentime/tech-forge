@@ -147,19 +147,27 @@ async function main() {
   const snapshots = [];
   try {
     const { LlmService } = require('../dist/llm/llm.service.js');
-    const { DeepseekLLMAdapter } = require('../dist/llm/adapters/deepseek-llm.adapter.js');
-    const { CustomLLMAdapter } = require('../dist/llm/adapters/custom-llm.adapter.js');
+    const {
+      createOpenAiCompatibleModel,
+    } = require('../dist/llm/adapters/llm-adapter.js');
+
+    // The mock endpoint stands in for the fixed production base URL; the service still sees the
+    // DeepSeek provider contract, only the transport target changes.
+    const mockAdapter = {
+      register(runtime) {
+        runtime.registerProvider('deepseek', {
+          name: 'Compaction Check',
+          baseUrl: provider.baseUrl,
+          api: 'openai-completions',
+          apiKey: 'test-key',
+          models: [createOpenAiCompatibleModel('mock-model', 'mock-model')],
+        });
+      },
+    };
 
     const settings = {
       getLlmSettings: async () => ({
-        provider: 'custom',
-        deepseek: { modelId: 'deepseek-flash', apiKey: '' },
-        custom: {
-          name: 'Compaction Check',
-          baseUrl: provider.baseUrl,
-          modelId: 'mock-model',
-          apiKey: 'test-key',
-        },
+        deepseek: { modelId: 'mock-model', apiKey: 'test-key' },
       }),
       getWorkspacePath: async () => workspaceRoot,
       getSessionWorkspaceDirectory: () => sessionWorkspace,
@@ -174,12 +182,7 @@ async function main() {
       },
     };
 
-    const service = new LlmService(
-      new DeepseekLLMAdapter(),
-      new CustomLLMAdapter(),
-      settings,
-      snapshotStore,
-    );
+    const service = new LlmService(mockAdapter, settings, snapshotStore);
 
     const history = createHistory(40, '上下文压缩验证文本。'.repeat(120));
     const events = [];

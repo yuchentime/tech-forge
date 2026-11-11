@@ -10,6 +10,8 @@ version: 1.0
 
 # `/探索主题` 验证
 
+> 后续变更（2026-11-11）：skill 已可调用 `web_search`/`web_fetch`；本文件的历史验收项仍描述 2026-11-10 的离线范围，当前行为以 [Agent Runtime](../../current/platform/agent-runtime.md) 为准。
+
 验证以真实 backend 进程 + 真实 SQLite + 真实内置 embedding + 真实 DeepSeek Provider 为准。
 
 ## AC

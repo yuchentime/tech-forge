@@ -97,7 +97,12 @@ test('the bundled deep-research skill installs into the config skills root and i
     installBundledSkills(bundledSkills, installedSkills);
 
     const installedFile = join(installedSkills, 'deep-research', 'SKILL.md');
-    assert.match(readFileSync(installedFile, 'utf8'), /name: deep-research/);
+    const installedContent = readFileSync(installedFile, 'utf8');
+    assert.match(installedContent, /name: deep-research/);
+    assert.match(installedContent, /web_search/);
+    assert.match(installedContent, /web_fetch/);
+    assert.match(installedContent, /\[网络：/);
+    assert.doesNotMatch(installedContent, /没有联网/);
 
     // Installation must not overwrite an existing user copy.
     const marker = join(installedSkills, 'deep-research', 'user-edit.txt');

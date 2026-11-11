@@ -10,6 +10,7 @@ import {
   XCircle,
 } from '@phosphor-icons/react';
 import { describeFailure, readBackendErrorMessage } from '../../api/backend-error';
+import { PageHeader } from '../../components/PageHeader';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 /** Lifecycle values the backend may report for the latest document version. */
@@ -227,14 +228,9 @@ export function KnowledgeBasePage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
+      <PageHeader className="justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight text-stone-900">资料库</h1>
-          <p className="mt-1 truncate text-sm text-stone-500">
-            {documents.length === 0
-              ? '导入资料后，提问时就能用上它们。'
-              : `共 ${documents.length} 份资料 · 可以搜索 ${readyCount} 份`}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -264,7 +260,7 @@ export function KnowledgeBasePage() {
             <span>{isImporting ? '正在导入…' : '导入资料'}</span>
           </button>
         </div>
-      </header>
+      </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
         <div className="mx-auto w-full max-w-4xl space-y-4 pb-8">

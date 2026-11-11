@@ -8,13 +8,13 @@ export class SettingsController {
   /** Injects the local file owner for settings reads and writes. */
   constructor(private readonly settings: SettingsService) {}
 
-  /** Returns Provider fields, Key presence and style text without API Key values. */
+  /** Returns DeepSeek fields, Key presence and style text for the local settings page. */
   @Get()
   getSettings() {
     return this.settings.getSettings();
   }
 
-  /** Persists the submitted local Provider and style preference settings. */
+  /** Persists the submitted DeepSeek and style preference settings. */
   @Put()
   saveSettings(@Body() input: SaveSettingsInput) {
     return this.settings.saveSettings(input);

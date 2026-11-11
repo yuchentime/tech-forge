@@ -7,6 +7,8 @@ created_at: 2026-11-10
 
 # `/探索主题` 斜杠命令 Brief
 
+> 后续变更（2026-11-11）：DeepSeek 网页工具已作为 `web_search`/`web_fetch` 提供给 `/探索主题` skill。本文件中“联网检索不在范围内”的描述仅代表 2026-11-10 的设计范围；当前行为以 [Agent Runtime](../../current/platform/agent-runtime.md) 和 [deep-research SKILL.md](../../../apps/backend/assets/skills/deep-research/SKILL.md) 为准。
+
 ## Problem
 
 教师需要把零散的资料整理成可直接备课的知识文档，并希望一眼看到知识结构。当前只有 `/查询资料库`：
@@ -31,7 +33,7 @@ created_at: 2026-11-10
 
 ## Out Of Scope
 
-- 联网检索、论文库、WebFetch、脚本执行与子 Agent。当前运行时没有这些工具，探索主题只以本地资料库和模型背景知识为证据，并对无证据内容明确标注。
+- 联网检索、论文库、WebFetch、脚本执行与子 Agent（2026-11-11 起 `web_search`/`web_fetch` 已可用；见顶部说明）。
 - 新增探索主题会话列表、任务队列、进度页或后台任务。一次探索主题就是一次普通流式对话轮次；文件写入通过现有工具活动展示。
 - 提高检索分片上限、整篇文档注入或知识库目录直读。当前仍使用 `/查询资料库` 的 8 片预算。
 - 为探索主题单独建表、建 artifact 类型或特殊预览组件。SVG 继续用现有 `SvgArtifact` 预览。

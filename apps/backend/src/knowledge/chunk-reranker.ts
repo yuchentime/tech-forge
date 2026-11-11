@@ -40,15 +40,8 @@ interface ProviderConfig {
   apiKey: string;
 }
 
-/** Resolves the OpenAI-compatible endpoint for the provider the user selected. */
+/** Builds the DeepSeek endpoint and credentials used for reranking. */
 function resolveProvider(settings: StoredLlmSettings): ProviderConfig {
-  if (settings.provider === 'custom') {
-    return {
-      baseUrl: settings.custom.baseUrl.replace(/\/$/, ''),
-      modelId: settings.custom.modelId,
-      apiKey: settings.custom.apiKey,
-    };
-  }
   return {
     baseUrl: DEEPSEEK_BASE_URL,
     modelId: settings.deepseek.modelId,

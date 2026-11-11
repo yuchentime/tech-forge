@@ -61,3 +61,27 @@ test('memory tools use plain-language actions instead of raw names', () => {
     action: '读取记忆失败',
   });
 });
+
+test('web tools show the query or URL instead of raw names', () => {
+  assert.deepEqual(describeToolActivity('web_search', 'running', { query: '光合作用 实验' }), {
+    action: '正在搜索网页',
+    pattern: '光合作用 实验',
+  });
+  assert.deepEqual(describeToolActivity('web_fetch', 'completed', {
+    url: 'https://example.com/article',
+  }), {
+    action: '已抓取网页',
+    pattern: 'https://example.com/article',
+  });
+  assert.deepEqual(describeToolActivity('web_search', 'failed', { query: 'x' }), {
+    action: '搜索网页失败',
+    pattern: 'x',
+  });
+});
+
+test('long web URLs are clipped before reaching the activity row', () => {
+  const url = `https://example.com/${'a'.repeat(200)}`;
+  const description = describeToolActivity('web_fetch', 'running', { url });
+  assert.equal(Array.from(description.pattern).length, 120);
+  assert.ok(description.pattern.endsWith('…'));
+});

@@ -4,16 +4,13 @@ import {
   createOpenAiCompatibleModel,
   DEEPSEEK_BASE_URL,
   DEEPSEEK_PROVIDER_ID,
-  type LLMAdapter,
   type PiProviderConfig,
   type DeepseekAdapterSettings,
 } from './llm-adapter';
 
 /** Registers the selected DeepSeek model from user-owned local settings. */
 @Injectable()
-export class DeepseekLLMAdapter implements LLMAdapter<DeepseekAdapterSettings> {
-  readonly providerId = DEEPSEEK_PROVIDER_ID;
-
+export class DeepseekLLMAdapter {
   /** Adds the configured DeepSeek credentials and model to one Pi runtime. */
   register(runtime: ModelRuntime, settings: DeepseekAdapterSettings): void {
     const config: PiProviderConfig = {
@@ -23,6 +20,6 @@ export class DeepseekLLMAdapter implements LLMAdapter<DeepseekAdapterSettings> {
       apiKey: settings.apiKey,
       models: [createOpenAiCompatibleModel(settings.modelId, settings.modelId)],
     };
-    runtime.registerProvider(this.providerId, config);
+    runtime.registerProvider(DEEPSEEK_PROVIDER_ID, config);
   }
 }

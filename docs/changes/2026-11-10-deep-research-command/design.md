@@ -9,6 +9,8 @@ created_at: 2026-11-10
 
 # `/探索主题` 设计
 
+> 后续变更（2026-11-11）：DeepSeek 网页工具已作为 `web_search`/`web_fetch` 提供给 `/探索主题` skill。本文件关于“skill 不联网”的设计描述仅代表 2026-11-10 的范围；当前行为以 [Agent Runtime](../../current/platform/agent-runtime.md) 和 [deep-research SKILL.md](../../../apps/backend/assets/skills/deep-research/SKILL.md) 为准。
+
 ## 1. 命令协议
 
 `/探索主题` 与 `/查询资料库` 一样是用户显式开关，不是模型工具：

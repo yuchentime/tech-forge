@@ -6,26 +6,11 @@ export interface DeepseekAdapterSettings {
   apiKey: string;
 }
 
-/** Supplies model fields used to register a user-defined OpenAI-compatible API. */
-export interface CustomAdapterSettings {
-  name: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}
-
-/** Connects one provider's configuration to the Pi SDK model runtime. */
-export interface LLMAdapter<TSettings> {
-  readonly providerId: string;
-  register(runtime: ModelRuntime, settings: TSettings): void;
-}
-
 export type PiProviderConfig = Parameters<ModelRuntime['registerProvider']>[1];
 
 export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 export const DEEPSEEK_PROVIDER_ID = 'deepseek';
 export const DEEPSEEK_MODEL_ID = 'deepseek-flash';
-export const CUSTOM_PROVIDER_ID = 'custom';
 
 const defaultCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 

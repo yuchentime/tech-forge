@@ -7,16 +7,21 @@ const TOOL_VERBS: Readonly<Record<string, string>> = {
   write: '写入',
   edit: '编辑',
   grep: '搜索',
+  web_search: '搜索网页',
+  web_fetch: '抓取网页',
   memory_write: '记录记忆',
   memory_search: '搜索记忆',
   memory_list: '读取记忆',
 };
 
+/** Caps the query or URL shown next to an activity row. */
+const TOOL_TARGET_MAX_CHARS = 120;
+
 /** Describes one tool call as a plain-language action plus its visible target. */
 export interface ToolActivityDescription {
   /** Plain-language action including lifecycle tense; never the raw tool name. */
   action: string;
-  /** Text the tool searched for, present only for grep. */
+  /** Text the tool searched for, or the web query/URL. */
   pattern?: string;
   /** Last path segment only, so the row never exposes the surrounding directories. */
   fileName?: string;
@@ -31,7 +36,7 @@ export function describeToolActivity(
   status: ToolActivityStatus,
   args: unknown,
 ): ToolActivityDescription {
-  const pattern = toolName === 'grep' ? getStringArg(args, 'pattern') : '';
+  const pattern = getToolTarget(toolName, args);
   const fileName = getFileName(getStringArg(args, 'path'));
 
   return {
@@ -49,6 +54,26 @@ function getToolAction(toolName: string, status: ToolActivityStatus): string {
   if (status === 'failed') return `${verb}失败`;
   // 取消不区分工具，避免“已取消搜索”这类生硬组合。
   return '已取消';
+}
+
+/** Selects the one visible target each tool may expose, and nothing else. */
+function getToolTarget(toolName: string, args: unknown): string {
+  if (toolName === 'grep') return getStringArg(args, 'pattern');
+  if (toolName === 'web_search') {
+    return clipTarget(getStringArg(args, 'query'));
+  }
+  if (toolName === 'web_fetch') {
+    return clipTarget(getStringArg(args, 'url'));
+  }
+  return '';
+}
+
+/** Keeps a long query or URL from taking over the activity row. */
+function clipTarget(value: string): string {
+  const characters = Array.from(value);
+  return characters.length > TOOL_TARGET_MAX_CHARS
+    ? `${characters.slice(0, TOOL_TARGET_MAX_CHARS - 1).join('')}…`
+    : value;
 }
 
 /** Reads one named string argument and ignores every other tool field. */

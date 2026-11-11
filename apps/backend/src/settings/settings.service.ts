@@ -5,7 +5,6 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   lstat,
   mkdir,
@@ -14,21 +13,14 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import {
-  CUSTOM_PROVIDER_ID,
-  DEEPSEEK_MODEL_ID,
-  DEEPSEEK_PROVIDER_ID,
-} from '../llm/adapters/llm-adapter';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DEEPSEEK_MODEL_ID } from '../llm/adapters/llm-adapter';
 import { resolveTeachForgeConfigDirectory } from '../platform/local-paths';
 import type { SaveSettingsInput } from './settings.dto';
 
-type ProviderId = 'deepseek' | 'custom';
-
-/** Holds the full local Provider configuration, including secrets kept on disk. */
+/** Holds the local DeepSeek configuration, including the secret kept on disk. */
 export interface StoredLlmSettings {
-  provider: ProviderId;
   deepseek: { modelId: string; apiKey: string };
-  custom: { name: string; baseUrl: string; modelId: string; apiKey: string };
 }
 
 /** Holds all file-backed settings while keeping workspace outside LLM config. */
@@ -43,15 +35,7 @@ export interface LocalSettingsView {
   soulsFilePath: string;
   workspacePath: string;
   llm: {
-    provider: ProviderId;
     deepseek: { modelId: string; apiKey: string; apiKeyConfigured: boolean };
-    custom: {
-      name: string;
-      baseUrl: string;
-      modelId: string;
-      apiKey: string;
-      apiKeyConfigured: boolean;
-    };
   };
   souls: string;
 }
@@ -70,15 +54,10 @@ const KNOWLEDGE_AGENT_POLICY = `# TeachForge 资料库规则
 /** Conversation ids are UUIDv4; the session directory path is built from one. */
 const CONVERSATION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LLM_SETTING_KEYS = new Set([
-  'llm.provider',
-  'llm.deepseek.model_id',
-  'llm.deepseek.api_key',
-  'llm.custom.name',
-  'llm.custom.base_url',
-  'llm.custom.model_id',
-  'llm.custom.api_key',
-]);
+const LLM_SETTING_KEYS: Record<string, true> = {
+  'llm.deepseek.model_id': true,
+  'llm.deepseek.api_key': true,
+};
 
 /** Owns the per-user TOML configuration and Markdown style preference files. */
 @Injectable()
@@ -137,25 +116,17 @@ export class SettingsService implements OnModuleInit {
       soulsFilePath: this.soulsPath,
       workspacePath: saved.workspacePath,
       llm: {
-        provider: saved.provider,
         deepseek: {
           modelId: saved.deepseek.modelId,
           apiKey: saved.deepseek.apiKey,
           apiKeyConfigured: Boolean(saved.deepseek.apiKey),
-        },
-        custom: {
-          name: saved.custom.name,
-          baseUrl: saved.custom.baseUrl,
-          modelId: saved.custom.modelId,
-          apiKey: saved.custom.apiKey,
-          apiKeyConfigured: Boolean(saved.custom.apiKey),
         },
       },
       souls,
     };
   }
 
-  /** Reads the current Provider configuration for one new Pi session. */
+  /** Reads the current DeepSeek configuration for one new Pi session. */
   async getLlmSettings(): Promise<StoredLlmSettings> {
     await this.ensureInitialized();
     return this.readLlmSettings();
@@ -273,23 +244,12 @@ export class SettingsService implements OnModuleInit {
               this.configDirectory,
             )
           : current.workspacePath,
-        provider: input.llm.provider,
         deepseek: {
           modelId: input.llm.deepseek.modelId.trim() || DEEPSEEK_MODEL_ID,
           apiKey: resolveApiKey(
             current.deepseek.apiKey,
             input.llm.deepseek.apiKey,
             input.llm.deepseek.clearApiKey,
-          ),
-        },
-        custom: {
-          name: input.llm.custom.name.trim(),
-          baseUrl: input.llm.custom.baseUrl.trim(),
-          modelId: input.llm.custom.modelId.trim(),
-          apiKey: resolveApiKey(
-            current.custom.apiKey,
-            input.llm.custom.apiKey,
-            input.llm.custom.clearApiKey,
           ),
         },
       };
@@ -438,9 +398,7 @@ export class SettingsService implements OnModuleInit {
 function createDefaultSettings(defaultWorkspacePath: string): StoredSettings {
   return {
     workspacePath: resolve(defaultWorkspacePath),
-    provider: 'deepseek',
     deepseek: { modelId: DEEPSEEK_MODEL_ID, apiKey: '' },
-    custom: { name: '', baseUrl: '', modelId: '', apiKey: '' },
   };
 }
 
@@ -461,9 +419,11 @@ function parseSettings(
   };
 }
 
-/** Parses only Provider fields so workspace settings cannot affect LLM reads. */
+/** Parses only DeepSeek fields so workspace settings cannot affect LLM reads. */
 function parseLlmSettings(contents: string): StoredLlmSettings {
-  return parseLlmSettingsValues(parseTomlSettings(contents, isLlmSettingKey));
+  return parseLlmSettingsValues(
+    parseTomlSettings(contents, (key) => LLM_SETTING_KEYS[key] === true),
+  );
 }
 
 /** Reads supported TOML strings while ignoring fields outside the projection. */
@@ -501,34 +461,17 @@ function parseTomlSettings(
 
 /** Builds the model config shared by the LLM-only and full settings views. */
 function parseLlmSettingsValues(values: Map<string, string>): StoredLlmSettings {
-  const provider = values.get('llm.provider') ?? 'deepseek';
-  if (provider !== 'deepseek' && provider !== 'custom') {
-    throw new Error('Unknown LLM provider.');
-  }
-
   return {
-    provider,
     deepseek: {
       modelId: values.get('llm.deepseek.model_id') || DEEPSEEK_MODEL_ID,
       apiKey: values.get('llm.deepseek.api_key') ?? '',
-    },
-    custom: {
-      name: values.get('llm.custom.name') ?? '',
-      baseUrl: values.get('llm.custom.base_url') ?? '',
-      modelId: values.get('llm.custom.model_id') ?? '',
-      apiKey: values.get('llm.custom.api_key') ?? '',
     },
   };
 }
 
 /** Identifies known configuration fields so unrelated TOML keys are ignored. */
 function isSupportedSettingKey(key: string): boolean {
-  return isLlmSettingKey(key) || key === 'workspace.path';
-}
-
-/** Identifies Provider-only fields consumed by the model runtime. */
-function isLlmSettingKey(key: string): boolean {
-  return LLM_SETTING_KEYS.has(key);
+  return key === 'workspace.path' || LLM_SETTING_KEYS[key] === true;
 }
 
 /** Decodes one TOML basic string without evaluating or logging its content. */
@@ -578,18 +521,9 @@ function parseTomlString(rawValue: string): string {
 function serializeSettings(settings: StoredSettings): string {
   return [
     '# TeachForge local settings. API keys in this file are private.',
-    '[llm]',
-    `provider = ${toTomlString(settings.provider)}`,
-    '',
     '[llm.deepseek]',
     `model_id = ${toTomlString(settings.deepseek.modelId)}`,
     `api_key = ${toTomlString(settings.deepseek.apiKey)}`,
-    '',
-    '[llm.custom]',
-    `name = ${toTomlString(settings.custom.name)}`,
-    `base_url = ${toTomlString(settings.custom.baseUrl)}`,
-    `model_id = ${toTomlString(settings.custom.modelId)}`,
-    `api_key = ${toTomlString(settings.custom.apiKey)}`,
     '',
     '[workspace]',
     `path = ${toTomlString(settings.workspacePath)}`,

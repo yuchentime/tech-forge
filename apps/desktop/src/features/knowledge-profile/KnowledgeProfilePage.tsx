@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFailure } from '../../api/backend-error';
+import { PageHeader } from '../../components/PageHeader';
 import type { ConversationSummary } from '../agent/conversation-store';
 import {
   loadConversationKnowledgeFact,
@@ -124,9 +125,9 @@ export function KnowledgeProfilePage({
         aria-hidden={Boolean(selectedCard)}
         className={`${selectedCard ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col`}
       >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
+        <PageHeader className="justify-between">
           <h1 className="text-xl font-semibold tracking-tight text-stone-900">知识掌握</h1>
-        </header>
+        </PageHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
           <div className="mx-auto w-full max-w-6xl pb-8">
@@ -276,7 +277,7 @@ function KnowledgeFactDetailPage({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
+      <PageHeader>
         <button
           aria-label="返回知识掌握列表"
           className="inline-flex min-h-9 shrink-0 items-center rounded-lg px-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
@@ -288,7 +289,7 @@ function KnowledgeFactDetailPage({
         <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-stone-900">
           {card.conversationTitle}
         </h1>
-      </header>
+      </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
         <article className="mx-auto w-full max-w-4xl rounded-2xl border border-stone-200 bg-white p-5 shadow-sm md:p-8">

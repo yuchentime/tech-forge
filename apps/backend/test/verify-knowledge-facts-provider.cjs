@@ -129,9 +129,9 @@ async function main() {
 
   try {
     const local = await settings.getSettings();
-    if (!local.llm[local.llm.provider].apiKeyConfigured) {
+    if (!local.llm.deepseek.apiKeyConfigured) {
       process.stdout.write(
-        `SKIPPED: provider ${local.llm.provider} has no configured API key.\n`,
+        'SKIPPED: DeepSeek has no configured API key.\n',
       );
       return;
     }
@@ -152,11 +152,8 @@ async function main() {
     );
     const fact = row[0];
     const record = {
-      provider: local.llm.provider,
-      model:
-        local.llm.provider === 'deepseek'
-          ? local.llm.deepseek.modelId
-          : local.llm.custom.modelId,
+      provider: 'deepseek',
+      model: local.llm.deepseek.modelId,
       generationStatus: fact?.generationStatus ?? null,
       lastError: fact?.lastError ?? null,
       summary: fact?.summary ?? null,

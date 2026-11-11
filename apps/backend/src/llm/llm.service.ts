@@ -11,11 +11,7 @@ import type {
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { DeepseekLLMAdapter } from "./adapters/deepseek-llm.adapter";
-import { CustomLLMAdapter } from "./adapters/custom-llm.adapter";
-import {
-  CUSTOM_PROVIDER_ID,
-  DEEPSEEK_PROVIDER_ID,
-} from "./adapters/llm-adapter";
+import { DEEPSEEK_PROVIDER_ID } from "./adapters/llm-adapter";
 import {
   SettingsService,
   type StoredLlmSettings,
@@ -24,6 +20,11 @@ import {
   createWorkspaceFileTools,
   prepareWorkspaceDirectory,
 } from "./tools/workspace-file-tools";
+import {
+  areWebToolsEnabled,
+  createWebTools,
+  WEB_TOOL_NAMES,
+} from "./tools/web-tools";
 import {
   BUNDLED_SKILLS_ASSET_PATH,
   installBundledSkills,
@@ -176,6 +177,8 @@ interface PiSessionBuildOptions {
   tools?: readonly string[];
   /** Whether to register long-term memory tools; JSON-only calls pass `false`. */
   loadMemory?: boolean;
+  /** Whether to register DeepSeek web tools; internal JSON calls pass `false`. */
+  webTools?: boolean;
   /** Publishes the resolved model's context window to the caller that builds the prompt. */
   onModelResolved?: (contextWindow: number | null) => void;
 }
@@ -240,10 +243,9 @@ export class LlmService {
   /** One-shot seeding of bundled skills into `<configDir>/skills`; retried after a failure. */
   private installedSkillsPromise?: Promise<void>;
 
-  /** Injects local settings, provider adapters, and the per-conversation Pi snapshot store. */
+  /** Injects local settings, the DeepSeek adapter, and the per-conversation Pi snapshot store. */
   constructor(
     private readonly deepseekAdapter: DeepseekLLMAdapter,
-    private readonly customAdapter: CustomLLMAdapter,
     private readonly settings: SettingsService,
     private readonly piSessionSnapshots: PiSessionSnapshotsService,
     private readonly memory: MemoryService,
@@ -683,6 +685,8 @@ export class LlmService {
         systemPromptAppend: options.systemPromptAppend,
         tools: options.tools,
         loadMemory: options.loadMemory ?? false,
+        // Internal JSON calls must never spend Search/Fetch budget.
+        webTools: false,
         onModelResolved: (contextWindow) => {
           resolvedContextWindow = contextWindow;
         },
@@ -843,22 +847,12 @@ export class LlmService {
         ...logContext,
         phase,
       });
-      if (modelSettings.provider === "deepseek") {
-        if (!modelSettings.deepseek.apiKey) {
-          throw new Error(
-            "DeepSeek API Key is missing. Open Settings to configure it.",
-          );
-        }
-        this.deepseekAdapter.register(modelRuntime, modelSettings.deepseek);
-      } else {
-        const custom = modelSettings.custom;
-        if (!custom.name || !custom.baseUrl || !custom.modelId) {
-          throw new Error(
-            "Custom provider name, Base URL, and model ID are required in Settings.",
-          );
-        }
-        this.customAdapter.register(modelRuntime, custom);
+      if (!modelSettings.deepseek.apiKey) {
+        throw new Error(
+          "DeepSeek API Key is missing. Open Settings to configure it.",
+        );
       }
+      this.deepseekAdapter.register(modelRuntime, modelSettings.deepseek);
 
       const model =
         options.providerId && options.modelId
@@ -942,7 +936,27 @@ export class LlmService {
       );
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
       // already-built context block into this request.
-      const customTools = [...workspaceFileTools];
+      //
+      // Web tools bill the DeepSeek account per successful request. Chat and skill turns get them;
+      // `generate()` opts out. The deep-research skill decides when web evidence is useful.
+      const webToolsEnabled = areWebToolsEnabled(
+        { apiKey: modelSettings.deepseek.apiKey },
+        { enabled: buildOptions.webTools ?? true },
+      );
+      const webTools = webToolsEnabled
+        ? createWebTools({
+            apiKey: modelSettings.deepseek.apiKey,
+            requestId,
+            ...(options.conversation
+              ? { conversationId: options.conversation.id }
+              : {}),
+            ...(currentUserRequest?.trim()
+              ? { originalQuestion: currentUserRequest }
+              : {}),
+            logger: this.logger,
+          })
+        : [];
+      const customTools = [...workspaceFileTools, ...webTools];
       // Chat turns load long-term memory; internal JSON calls (`generate`) opt out.
       const loadMemory = buildOptions.loadMemory ?? true;
       // Extensions are in-process only. `noExtensions` keeps Pi from discovering packages, so a
@@ -968,6 +982,7 @@ export class LlmService {
         "find",
         "ls",
         ...(loadMemory ? ["memory_*"] : []),
+        ...(webToolsEnabled ? [...WEB_TOOL_NAMES] : []),
       ];
       let customSystemPrompt: string;
       if (buildOptions.systemPromptAppend?.trim()) {
@@ -1115,6 +1130,8 @@ export class LlmService {
         toolCount: toolAllowlist.length,
         loadMemory,
         memoryToolAvailable: loadMemory && this.memory.isAvailable(),
+        webToolsEnabled,
+        webToolCount: webTools.length,
         skillsDirectory: this.settings.getSkillsDirectory(),
         compactionEnabled: compactionSettings.enabled,
         compactionReserveTokens: compactionSettings.reserveTokens,
@@ -1469,15 +1486,10 @@ function getRequestLogContext(
 function getSelectedModelIds(
   settings: StoredLlmSettings,
 ): Pick<LlmRequestOptions, "providerId" | "modelId"> {
-  return settings.provider === "deepseek"
-    ? {
-        providerId: DEEPSEEK_PROVIDER_ID,
-        modelId: settings.deepseek.modelId,
-      }
-    : {
-        providerId: CUSTOM_PROVIDER_ID,
-        modelId: settings.custom.modelId,
-      };
+  return {
+    providerId: DEEPSEEK_PROVIDER_ID,
+    modelId: settings.deepseek.modelId,
+  };
 }
 
 /**

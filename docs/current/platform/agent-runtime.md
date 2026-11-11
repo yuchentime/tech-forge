@@ -15,8 +15,9 @@ related:
   - docs/changes/2026-11-07-conversation-history-sidebar/verification.md
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/changes/2026-11-10-deep-research-command/design.md
+  - docs/changes/2026-11-11-deepseek-web-tools/design.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 ---
 
 # Agent Runtime 运行链路
@@ -29,13 +30,13 @@ last_verified: 2026-11-10
 |---|---|
 | `App` / `useRemoteThreadListRuntime` | 以稳定 `ThreadListAdapter` 读取 Conversation 摘要，并为每个访问过的线程创建独立 LocalRuntime；assistant-ui 保持后台线程挂载，切换不会取消其他会话的流。活动 remote ID 仍写入 localStorage 供启动恢复。 |
 | `AgentChatPage` / `ConversationStore` | 恢复活动 ID、加载最近最多 30 条可见消息并以 Message ID 按需前置更早历史；各线程的 composer 附件/命令草稿以稳定 localThreadId 键控。页面采用全高双栏，侧栏列表与消息视口独立滚动，输入区保持可见；设置按钮切换右侧聊天/设置主视图，不卸载根 Conversation Runtime。 |
-| `SettingsPage` / `ConversationSidebar` | 会话行悬停显示「…」，菜单里的「删除会话」直接物理删除（无二次确认），删除当前会话时同时清空线程与输入区；通过侧栏底部设置入口切换视图；从本地设置 API 加载 Provider 字段、密钥配置状态与 SOULS 文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
+| `SettingsPage` / `ConversationSidebar` | 会话行悬停显示「…」，菜单里的「删除会话」直接物理删除（无二次确认），删除当前会话时同时清空线程与输入区；通过侧栏底部设置入口切换视图；从本地设置 API 加载 DeepSeek 模型字段、密钥配置状态与 SOULS 文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
 | Desktop Agent adapter | 发送最新用户输入和该线程的 `unstable_threadId`（已初始化时为 remote Conversation ID）；不读取全局活动会话，也不让后台 `conversation` SSE 改变选择。活动映射按 requestId 保存，流终止后刷新摘要。 |
 | Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 Provider 与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 DeepSeek 模型配置与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。聊天与 skill 轮次再注册 `web_search`/`web_fetch`（内部 JSON 调用不注册）。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
@@ -51,7 +52,7 @@ Pi 自动压缩由 SDK 触发，`LlmService` 在 `stream()` 和 `generate()` 的
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
-常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`LlmService` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`LlmService` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
 ## 请求与持久化时序
 
@@ -116,9 +117,19 @@ sequenceDiagram
 
 Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
 
-扩展只走一条通道：`DefaultResourceLoader.extensionFactories` 里的进程内工厂（对话持久化钩子与记忆工具）。`noExtensions: true` 关闭包发现，因此不会从 `node_modules` 或用户目录加载任何文件扩展；`additionalExtensionPaths` 也不再使用。记忆工具只在 `loadMemory` 为真时注册，`generate()` 默认不装载。
+进程内扩展只走 `DefaultResourceLoader.extensionFactories`（对话持久化钩子与记忆工具）；`customTools` 另注入工作区文件工具与 DeepSeek 网页工具。`noExtensions: true` 关闭包发现，因此不会从 `node_modules` 或用户目录加载任何文件扩展；`additionalExtensionPaths` 也不再使用。记忆工具只在 `loadMemory` 为真时注册，`generate()` 默认不装载；网页工具只在 `webToolsEnabled` 为真时注册，`generate()` 固定关闭。
 
-`createAgentSession({ tools })` 的列表是对**所有**已注册工具的 allowlist，当前列 `read`/`edit`/`write`/`grep`/`find`/`ls`，聊天轮次再追加 `memory_*`；自定义文件工具经 `customTools` 注入。会话创建后调用 `session.bindExtensions({})`，进程内扩展才能收到 `session_start` 与后续生命周期事件。
+`createAgentSession({ tools })` 的列表是对**所有**已注册工具的 allowlist，当前列 `read`/`edit`/`write`/`grep`/`find`/`ls`，聊天与 skill 轮次再追加 `memory_*`，有 API Key 时再追加 `web_search`/`web_fetch`；自定义文件工具与网页工具经 `customTools` 注入。会话创建后调用 `session.bindExtensions({})`，进程内扩展才能收到 `session_start` 与后续生命周期事件。
+
+### 网页搜索与抓取工具
+
+`web-tools.ts` 把 DeepSeek 官方 Search/Fetch 暴露为 `web_search`、`web_fetch` 两个只读自定义工具，经 `customTools` 注入；不新增扩展工厂、不写文件、不访问 SQLite。
+
+- 启用条件：`config.toml` 有 DeepSeek API Key，且 `PiSessionBuildOptions.webTools !== false`。`generate()` 固定传 `false`，因此演练与知识事实等内部 JSON 调用不会产生搜索费用；普通聊天与 `/探索主题` skill 轮次由模型决定是否调用。
+- 参数：`web_search` 的 `query` 1–128、`count` 1–50（默认 5）、`include_content`（默认 false）；当前用户原话截到 128 字符后作为 `ori_question`。`web_fetch` 只接受含 host 的 http/https URL，拒绝用户名/密码。
+- 响应：Search 输出标题、URL、站点、日期、权威性与摘要；Fetch 输出标题与 Markdown 正文。搜索结果上限 12,000 字符，单条正文摘录 2,000 字符，Fetch 正文上限 16,000 字符。
+- 错误：400/401/402/403/404/413 直接返回工具错误；408/429/5xx 间隔 500 ms 重试一次（429 尊重 `Retry-After`，上限 2 秒）；取消抛 `AbortError`。日志只记录长度、状态、重试次数和耗时，不记录 query、URL 或正文。
+- 计费与限速归 DeepSeek 账号：Search 100 QPS、Fetch 25 QPS，均按成功请求次数计费。
 
 ## 持久化与恢复约定
 
@@ -139,7 +150,7 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-每次 `stream()` 结束且持久化没有失败时，`LlmService` 用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 Provider 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
+每次 `stream()` 结束且持久化没有失败时，`LlmService` 用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 DeepSeek 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 DeepSeek Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
 ## 会话附件
 
@@ -207,6 +218,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。
 8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具；普通对话只通过一次性 digest（`custom_message` entry + `loadedContext` 标记）与 `contextRefsJson` 读取演练结果。
+9. 网页搜索与抓取归 `LlmService` 与 `llm/tools/web-tools.ts` 所有：只读调用 DeepSeek Search/Fetch，不写文件、不访问 SQLite、不参与消息持久化；仅在已配置 DeepSeek Key 且 `webTools !== false` 时启用，`generate()` 明确关闭。日志与错误结果不得包含 query、URL、正文或 API Key。
 
 ## 技能装载与探索主题
 
@@ -220,9 +232,9 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 2. `ChatService` 把资料块放进 `promptContext`，并向 `LlmService.stream()` 传 `skillName: 'deep-research'`；不新增 Agent、状态机或表。
 3. `LlmService` 在 `createSession()` 中校验 skill 存在（缺失时抛 `Pi skill not found`），然后构造 `/skill:deep-research <promptContext>\n\n## 用户输入\n<主题>` 并传 `expandPromptTemplates: true`。Pi 把 `SKILL.md` 展开为 `<skill>` 块，资料与用户主题成为其参数。
 4. 快照清洗仍以纯主题 `prompt` 为准，因此本轮 skill 正文与资料块不会在下一轮重放；入库消息也只保存主题。
-5. skill 用现有 `read`/`write`/`edit`/`grep` 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，写入回调把它们登记为会话 artifact。skill 不获得新工具，也不放开知识库目录直读。
+5. skill 用 `read`/`write`/`edit`/`grep` 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，并在需要补充外部证据时调用 `web_search`/`web_fetch`；资料库分片仍是主证据，网络结论标 `[网络：<标题> · <URL>]`。写入回调把两个文件登记为会话 artifact，不放开知识库目录直读。
 
-内置 skill 的硬性约束（见 `SKILL.md`）：资料库分片是主证据，引用带资料名/章节/页码；未覆盖内容标 `[补充背景]`，不确定内容标 `[待核实]`；先写文档并通过自检，再写 SVG；SVG 必须自包含、带 `viewBox`、禁止脚本/`foreignObject`/外部引用。模型漏写其中一个产物时，本轮不会失败，聊天摘要只报告实际生成的文件。
+内置 skill 的硬性约束（见 `SKILL.md`）：资料库分片是主证据，引用带资料名/章节/页码；网络证据引用带标题/URL；未覆盖内容标 `[补充背景]`，不确定或冲突内容标 `[待核实]`；先写文档并通过自检，再写 SVG；SVG 必须自包含、带 `viewBox`、禁止脚本/`foreignObject`/外部引用。模型漏写其中一个产物时，本轮不会失败，聊天摘要只报告实际生成的文件。
 
 ## 代码入口
 
@@ -232,6 +244,7 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/llm.service.ts`
+- DeepSeek 网页搜索/抓取工具：`apps/backend/src/llm/tools/web-tools.ts`
 - 斜杠命令解析：`apps/backend/src/knowledge/knowledge-command.ts`、`apps/backend/src/chat/deep-research-command.ts`、`apps/backend/src/chat/turn-command.ts`
 - skill 安装与发现：`apps/backend/src/llm/skills.ts`、`SettingsService.getSkillsDirectory()`
 - 内置探索主题 skill 模板：`apps/backend/assets/skills/deep-research/SKILL.md`

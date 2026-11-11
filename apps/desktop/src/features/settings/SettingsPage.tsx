@@ -1,26 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Eye, EyeClosed } from '@phosphor-icons/react';
 import { readBackendErrorMessage } from '../../api/backend-error';
+import { PageHeader } from '../../components/PageHeader';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
-type ProviderId = 'deepseek' | 'custom';
-
-/** Describes the local settings projection, including editable plaintext API Keys. */
+/** Describes the local settings projection, including the editable plaintext API Key. */
 interface LocalSettingsView {
   configDirectory: string;
   configFilePath: string;
   soulsFilePath: string;
   workspacePath: string;
   llm: {
-    provider: ProviderId;
     deepseek: { modelId: string; apiKey: string; apiKeyConfigured: boolean };
-    custom: {
-      name: string;
-      baseUrl: string;
-      modelId: string;
-      apiKey: string;
-      apiKeyConfigured: boolean;
-    };
   };
   souls: string;
 }
@@ -39,11 +30,8 @@ const MEMORY_PREVIEW_LIMIT = 3;
 /** Renders and persists the local model, workspace and style settings. */
 export function SettingsPage() {
   const [settings, setSettings] = useState<LocalSettingsView | null>(null);
-  const [provider, setProvider] = useState<ProviderId>('deepseek');
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
-  const [customApiKey, setCustomApiKey] = useState('');
   const [clearDeepseekApiKey, setClearDeepseekApiKey] = useState(false);
-  const [clearCustomApiKey, setClearCustomApiKey] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -75,9 +63,7 @@ export function SettingsPage() {
         throw new Error(readBackendErrorMessage(response.data, '读取设置失败，请重试。'));
       }
       setSettings(response.data);
-      setProvider(response.data.llm.provider);
       setDeepseekApiKey(response.data.llm.deepseek.apiKey);
-      setCustomApiKey(response.data.llm.custom.apiKey);
     } catch (error) {
       setLoadError(
         error instanceof Error ? error.message : '读取设置失败，请重试。',
@@ -186,7 +172,7 @@ export function SettingsPage() {
     const hasDeepseekKey =
       !clearDeepseekApiKey &&
       (settings.llm.deepseek.apiKeyConfigured || Boolean(deepseekApiKey.trim()));
-    if (provider === 'deepseek' && !hasDeepseekKey) {
+    if (!hasDeepseekKey) {
       setSaveError('请填写 DeepSeek API Key 后再保存。');
       setStatusMessage(null);
       return;
@@ -201,22 +187,12 @@ export function SettingsPage() {
         path: '/api/settings',
         body: {
           llm: {
-            provider,
             deepseek: {
               modelId: settings.llm.deepseek.modelId,
               ...(!clearDeepseekApiKey && deepseekApiKey.trim()
                 ? { apiKey: deepseekApiKey }
                 : {}),
               ...(clearDeepseekApiKey ? { clearApiKey: true } : {}),
-            },
-            custom: {
-              name: settings.llm.custom.name,
-              baseUrl: settings.llm.custom.baseUrl,
-              modelId: settings.llm.custom.modelId,
-              ...(!clearCustomApiKey && customApiKey.trim()
-                ? { apiKey: customApiKey }
-                : {}),
-              ...(clearCustomApiKey ? { clearApiKey: true } : {}),
             },
           },
           souls: settings.souls,
@@ -226,11 +202,8 @@ export function SettingsPage() {
         throw new Error(readBackendErrorMessage(response.data, '保存设置失败，请重试。'));
       }
       setSettings(response.data);
-      setProvider(response.data.llm.provider);
       setDeepseekApiKey(response.data.llm.deepseek.apiKey);
-      setCustomApiKey(response.data.llm.custom.apiKey);
       setClearDeepseekApiKey(false);
-      setClearCustomApiKey(false);
       setStatusMessage('设置已保存。');
     } catch (error) {
       setSaveError(
@@ -239,14 +212,7 @@ export function SettingsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [
-    clearCustomApiKey,
-    clearDeepseekApiKey,
-    customApiKey,
-    deepseekApiKey,
-    provider,
-    settings,
-  ]);
+  }, [clearDeepseekApiKey, deepseekApiKey, settings]);
 
   /** Updates one DeepSeek field while preserving the rest of the form. */
   const updateDeepseek = useCallback(
@@ -258,24 +224,6 @@ export function SettingsPage() {
               llm: {
                 ...current.llm,
                 deepseek: { ...current.llm.deepseek, [field]: value },
-              },
-            }
-          : current,
-      );
-    },
-    [],
-  );
-
-  /** Updates one custom provider field without replacing other settings. */
-  const updateCustom = useCallback(
-    (field: 'name' | 'baseUrl' | 'modelId', value: string) => {
-      setSettings((current) =>
-        current
-          ? {
-              ...current,
-              llm: {
-                ...current.llm,
-                custom: { ...current.llm.custom, [field]: value },
               },
             }
           : current,
@@ -299,7 +247,7 @@ export function SettingsPage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-5 py-4 md:px-8">
+      <PageHeader className="justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-stone-900">设置</h1>
         </div>
@@ -311,7 +259,7 @@ export function SettingsPage() {
         >
           {isSaving ? '正在保存…' : '保存设置'}
         </button>
-      </header>
+      </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
         <div className="mx-auto w-full max-w-4xl space-y-6 pb-8">
@@ -343,92 +291,28 @@ export function SettingsPage() {
                 <div className="mb-5">
                   <h2 className="text-base font-semibold text-stone-900">模型配置</h2>
                   <p className="mt-1 text-sm leading-6 text-stone-500">
-                    选择当前对话使用的模型服务。配置保存在这台设备上。
+                    当前对话使用 DeepSeek 官方服务。配置保存在这台设备上。
                   </p>
                 </div>
 
-                <fieldset className="mb-6">
-                  <legend className="mb-2 block text-sm font-medium text-stone-800">
-                    模型供应商
-                  </legend>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ProviderChoice
-                      checked={provider === 'deepseek'}
-                      description="连接 DeepSeek 官方服务"
-                      disabled={isSaving}
-                      label="DeepSeek"
-                      onChange={() => setProvider('deepseek')}
-                    />
-                    <ProviderChoice
-                      checked={provider === 'custom'}
-                      description="使用 OpenAI 兼容接口"
-                      disabled={isSaving}
-                      label="自定义"
-                      onChange={() => setProvider('custom')}
-                    />
-                  </div>
-                </fieldset>
-
-                {provider === 'deepseek' ? (
-                  <div className="space-y-4">
-                    <TextField
-                      autoComplete="off"
-                      disabled={isSaving}
-                      label="模型 ID"
-                      onChange={(value) => updateDeepseek('modelId', value)}
-                      required
-                      value={settings.llm.deepseek.modelId}
-                    />
-                    <SecretField
-                      configured={settings.llm.deepseek.apiKeyConfigured}
-                      disabled={isSaving}
-                      label="API Key"
-                      onClearChange={setClearDeepseekApiKey}
-                      onKeyChange={setDeepseekApiKey}
-                      clearRequested={clearDeepseekApiKey}
-                      value={deepseekApiKey}
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <TextField
-                      autoComplete="organization"
-                      disabled={isSaving}
-                      label="厂商名称"
-                      onChange={(value) => updateCustom('name', value)}
-                      required
-                      value={settings.llm.custom.name}
-                    />
-                    <TextField
-                      autoComplete="url"
-                      disabled={isSaving}
-                      helpText="填写服务的 API 根地址，例如 https://api.example.com/v1。"
-                      label="Base URL"
-                      onChange={(value) => updateCustom('baseUrl', value)}
-                      placeholder="https://"
-                      required
-                      type="url"
-                      value={settings.llm.custom.baseUrl}
-                    />
-                    <TextField
-                      autoComplete="off"
-                      disabled={isSaving}
-                      label="模型 ID"
-                      onChange={(value) => updateCustom('modelId', value)}
-                      required
-                      value={settings.llm.custom.modelId}
-                    />
-                    <SecretField
-                      configured={settings.llm.custom.apiKeyConfigured}
-                      disabled={isSaving}
-                      label="API Key（可选）"
-                      onClearChange={setClearCustomApiKey}
-                      onKeyChange={setCustomApiKey}
-                      clearRequested={clearCustomApiKey}
-                      value={customApiKey}
-                    />
-                  </div>
-                )}
+                <div className="space-y-4">
+                  <TextField
+                    autoComplete="off"
+                    disabled={isSaving}
+                    label="模型 ID"
+                    onChange={(value) => updateDeepseek('modelId', value)}
+                    value={settings.llm.deepseek.modelId}
+                  />
+                  <SecretField
+                    configured={settings.llm.deepseek.apiKeyConfigured}
+                    disabled={isSaving}
+                    label="API Key"
+                    onClearChange={setClearDeepseekApiKey}
+                    onKeyChange={setDeepseekApiKey}
+                    clearRequested={clearDeepseekApiKey}
+                    value={deepseekApiKey}
+                  />
+                </div>
               </section>
 
               <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
@@ -550,92 +434,36 @@ function formatMemoryDate(value: string): string {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN');
 }
 
-/** Renders a labelled provider radio choice with a quiet selected state. */
-function ProviderChoice({
-  checked,
-  description,
-  disabled,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  description: string;
-  disabled: boolean;
-  label: string;
-  onChange: () => void;
-}) {
-  return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition ${
-        checked
-          ? 'border-stone-500 bg-stone-100'
-          : 'border-stone-200 bg-white hover:border-stone-400'
-      } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-    >
-      <input
-        checked={checked}
-        className="mt-1 accent-emerald-800"
-        disabled={disabled}
-        name="model-provider"
-        onChange={onChange}
-        type="radio"
-      />
-      <span>
-        <span className="block text-sm font-medium text-stone-900">{label}</span>
-        <span className="mt-0.5 block text-xs leading-5 text-stone-500">{description}</span>
-      </span>
-    </label>
-  );
-}
-
-/** Renders a consistent labelled text field with an optional helper sentence. */
+/** Renders the labelled model ID field. */
 function TextField({
   autoComplete,
   disabled,
-  id,
-  helpText,
   label,
   onChange,
-  placeholder,
-  required = false,
-  type = 'text',
   value,
 }: {
   autoComplete: string;
   disabled: boolean;
-  id?: string;
-  helpText?: string;
   label: string;
   onChange: (value: string) => void;
-  placeholder?: string;
-  required?: boolean;
-  type?: 'text' | 'url';
   value: string;
 }) {
-  const fieldId = id ?? `setting-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
-  const helpId = helpText ? `${fieldId}-help` : undefined;
+  const fieldId = `setting-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-stone-800" htmlFor={fieldId}>
         {label}
       </label>
       <input
-        aria-describedby={helpId}
         autoComplete={autoComplete}
         className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
         disabled={disabled}
         id={fieldId}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        required={required}
-        type={type}
+        required
+        type="text"
         value={value}
       />
-      {helpText && (
-        <p className="mt-1.5 text-xs leading-5 text-stone-500" id={helpId}>
-          {helpText}
-        </p>
-      )}
     </div>
   );
 }
@@ -733,14 +561,8 @@ function isLocalSettingsView(value: unknown): value is LocalSettingsView {
     typeof candidate.souls === 'string' &&
     typeof candidate.llm === 'object' &&
     candidate.llm !== null &&
-    (candidate.llm.provider === 'deepseek' || candidate.llm.provider === 'custom') &&
     typeof candidate.llm.deepseek?.modelId === 'string' &&
     typeof candidate.llm.deepseek.apiKey === 'string' &&
-    typeof candidate.llm.deepseek.apiKeyConfigured === 'boolean' &&
-    typeof candidate.llm.custom?.name === 'string' &&
-    typeof candidate.llm.custom.baseUrl === 'string' &&
-    typeof candidate.llm.custom.modelId === 'string' &&
-    typeof candidate.llm.custom.apiKey === 'string' &&
-    typeof candidate.llm.custom.apiKeyConfigured === 'boolean'
+    typeof candidate.llm.deepseek.apiKeyConfigured === 'boolean'
   );
 }
