@@ -58,7 +58,7 @@ last_verified: 2026-11-10
 
 - 幂等键是文件内容的 SHA-256：同一内容重复提交返回 `duplicate: true`，不新增行。
 - 同一份资料的历史版本需显式传 `documentId`，`versionNo` 自增，旧版本分片保留。
-- 源文件被复制到 `<dataDir>/documents/<documentId>/v<versionNo>/<originalName>`，`workspaceRelativePath` 相对数据目录保存；`<dataDir>` 为 `TEACHFORGE_DATA_DIR`，未设置时默认 `~/.tech-forge`（与 SQLite 主库同根）。
+- 源文件被复制到 `<dataDir>/documents/<documentId>/v<versionNo>/<originalName>`，`workspaceRelativePath` 相对数据目录保存；`<dataDir>` 为 `TEACHFORGE_DATA_DIR`，未设置时默认 `~/.tech-forge`（SQLite 主库位于其 `db/` 子目录）。
 - 转换后的正文另存为同目录的 `<baseName>.md`：仅对需要转换的格式（PDF/DOCX）写入；`.md`/`.markdown`/`.txt` 本身就是可读文本，不写第二份。内容用 `joinParsedPages`（分块器同一拼装规则），因此 `locator.charStart/charEnd` 对这份文件同样成立；写入失败只产生 `CONVERTED_MARKDOWN_FAILED` 警告，不影响入库与检索。
 - 导入时另存的用户可见副本位于 `<configDir>/knowledge/<documentId>/`，与 Agent workspace 隔离。
 - 界面文案不出现 `向量`、`索引`、`分片`、`embedding`、`OCR` 等内部术语：状态显示为"可以搜索 / 只能关键词搜索 / 正在读取 / 正在整理 / 导入失败"，分片数显示为"N 段"。

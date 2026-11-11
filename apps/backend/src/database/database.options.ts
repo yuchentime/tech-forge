@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Database = require('better-sqlite3');
 import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
-import { resolveTeachForgeDataDirectory } from '../platform/local-paths';
+import { resolveTeachForgeDatabasePath } from '../platform/local-paths';
 import { ArtifactEntity } from '../artifacts/artifact.entity';
 import { ConversationEntity } from '../conversations/conversation.entity';
 import { MessageEntity } from '../conversations/message.entity';
@@ -17,8 +17,7 @@ import { RehearsalEntity } from '../rehearsals/rehearsal.entity';
 
 /** Builds the SQLite TypeORM connection options and registers persisted entities. */
 export function buildDatabaseOptions(): TypeOrmModuleOptions {
-  const dataDirectory = resolveTeachForgeDataDirectory();
-  const databasePath = join(dataDirectory, 'teachforge.db');
+  const databasePath = resolveTeachForgeDatabasePath();
   mkdirSync(dirname(databasePath), { recursive: true });
 
   return {

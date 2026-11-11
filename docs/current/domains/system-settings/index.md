@@ -35,7 +35,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 | 风格偏好 | SOULS.md 的非空文本在每个新 Pi session 的固定系统提示词之后追加；空白内容不改变提示词 |
 | Agent Skill | 安装根固定为 `<configDir>/skills`（默认 `~/.tech-forge/skills/`），与 workspace 同级；backend 首次 session 前把 `assets/skills` 模板复制进去，目标 skill 已有 `SKILL.md` 时不覆盖。`LlmService` 把该目录与用户 `<workspace>/skills` 一起加入 Pi 显式 skill 路径；用户可直接查看和编辑，不随会话删除 |
 
-配置文件新建时 POSIX 权限为目录 0700、文件 0600；Windows 使用用户目录继承 ACL。配置写入先写同目录临时文件，再替换目标文件。应用只识别自身定义的 TOML 字段，格式错误时不会重置已有配置。保存不会迁移或改变 SQLite 的 `TEACHFORGE_DATA_DIR`；未设置该变量时数据根与配置根同为 `~/.tech-forge`，SQLite 主库位于 `~/.tech-forge/teachforge.db`。桌面端首次以该默认位置启动时，若旧 Electron `userData` 下存在 `teachforge.db` 而新位置还没有数据库，backend 会在打开数据库前把它（含 WAL/SHM）与 `documents/` 迁入；新位置已有数据库时不做任何迁移。
+配置文件新建时 POSIX 权限为目录 0700、文件 0600；Windows 使用用户目录继承 ACL。配置写入先写同目录临时文件，再替换目标文件。应用只识别自身定义的 TOML 字段，格式错误时不会重置已有配置。保存不会迁移或改变 SQLite 的 `TEACHFORGE_DATA_DIR`；未设置该变量时数据根与配置根同为 `~/.tech-forge`，SQLite 主库位于 `<dataDir>/db/teachforge.db`（默认 `~/.tech-forge/db/teachforge.db`）。backend 在打开数据库前把旧布局的 `<dataDir>/teachforge.db`（含 WAL/SHM）迁入 `db/`；若旧 Electron `userData` 下存在 `teachforge.db` 而新位置还没有数据库，再把它（含 WAL/SHM）与 `documents/` 迁入。`<dataDir>/db/teachforge.db` 已存在时不做任何迁移。
 
 ## 责任边界
 

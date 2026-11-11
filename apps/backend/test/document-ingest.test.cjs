@@ -75,7 +75,7 @@ async function createIntegrationApp() {
     dataSource,
     service: app.get(DocumentsService),
     parser: app.get(DocumentParserService),
-    databaseFile: join(dataDirectory, 'teachforge.db'),
+    databaseFile: join(dataDirectory, 'db', 'teachforge.db'),
     async close() {
       await app.close();
       const index = createdApps.indexOf(app);

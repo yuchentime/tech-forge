@@ -8,7 +8,7 @@ import {
   statSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 /**
  * Name of the per-user root that owns every TeachForge file outside the install directory.
@@ -17,6 +17,17 @@ import { join, resolve } from 'node:path';
  * database all live here, so one directory is enough to back up or relocate an installation.
  */
 const USER_ROOT_DIRECTORY_NAME = '.tech-forge';
+
+/**
+ * Subdirectory of the persisted-data root that owns the SQLite database and its WAL/SHM files.
+ *
+ * Keeping the database out of the root leaves it parallel to user-facing directories such as
+ * `documents/`, so backing up or inspecting the data root does not have to filter side files.
+ */
+const DATABASE_DIRECTORY_NAME = 'db';
+
+/** SQLite file name, unchanged across the root-level and `db/` layouts. */
+const DATABASE_FILE_NAME = 'teachforge.db';
 
 /**
  * Resolves the configuration root (`config.toml`, `SOULS.md`, knowledge, sessions, memory).
@@ -29,7 +40,7 @@ export function resolveTeachForgeConfigDirectory(): string {
 }
 
 /**
- * Resolves the persisted-data root: `teachforge.db` (plus WAL/SHM) and managed document copies.
+ * Resolves the persisted-data root: the SQLite database (under `db/`) and managed document copies.
  *
  * `TEACHFORGE_DATA_DIR` relocates it for portable installs and isolated integration tests. Without
  * it the default is the same per-user root used for configuration, never the process working
@@ -41,35 +52,77 @@ export function resolveTeachForgeDataDirectory(): string {
 }
 
 /**
- * Moves data written by older builds into the current data root.
+ * Resolves the SQLite database file inside the persisted-data root.
  *
- * Earlier builds kept `teachforge.db` under Electron's `userData` (or `<cwd>/.data`) while the
- * configuration already lived in `~/.tech-forge`. The move happens only when the current root has no
- * database yet, so it never overwrites newer data, and the WAL/SHM side files travel with the main
- * file so uncheckpointed writes are not lost. Returns the target root when something moved.
+ * WAL and SHM side files share this `db/` directory. The caller creates the directory because
+ * resolving a path must not touch the filesystem.
+ */
+export function resolveTeachForgeDatabasePath(): string {
+  return databasePathIn(resolveTeachForgeDataDirectory());
+}
+
+/** Builds the SQLite path for a supplied data root, keeping layout changes in one place. */
+function databasePathIn(dataRoot: string): string {
+  return join(dataRoot, DATABASE_DIRECTORY_NAME, DATABASE_FILE_NAME);
+}
+
+/**
+ * Moves data written by older builds into the current layout.
+ *
+ * Two older locations are handled, newest first:
+ * 1. `<dataRoot>/teachforge.db` from builds before the `db/` subdirectory existed.
+ * 2. `<legacyDirectory>/teachforge.db` from builds that kept the database under Electron
+ *    `userData` (or `<cwd>/.data`).
+ *
+ * A move happens only while `<dataRoot>/db/teachforge.db` is absent, so newer data is never
+ * overwritten. WAL/SHM side files travel with the main file so uncheckpointed writes are not lost.
+ * Returns the target root when anything moved.
  */
 export function migrateLegacyDataDirectory(
   legacyDirectory: string | undefined,
 ): string | undefined {
-  if (!legacyDirectory) return undefined;
   const target = resolveTeachForgeDataDirectory();
-  if (resolve(legacyDirectory) === target) return undefined;
-  if (existsSync(join(target, 'teachforge.db'))) return undefined;
-  const sourceDatabase = join(legacyDirectory, 'teachforge.db');
-  if (!existsSync(sourceDatabase)) return undefined;
+  const targetDatabase = databasePathIn(target);
+  let moved = migrateDatabaseIntoSubdirectory(target);
 
-  mkdirSync(target, { recursive: true });
-  if (!movePath(sourceDatabase, join(target, 'teachforge.db'))) return undefined;
+  if (legacyDirectory && resolve(legacyDirectory) !== target && !existsSync(targetDatabase)) {
+    const sourceDatabase = join(legacyDirectory, DATABASE_FILE_NAME);
+    if (existsSync(sourceDatabase) && moveDatabase(sourceDatabase, targetDatabase)) {
+      moved = true;
+      const sourceDocuments = join(legacyDirectory, 'documents');
+      if (existsSync(sourceDocuments) && !movePath(sourceDocuments, join(target, 'documents'))) {
+        process.stderr.write(
+          `[data-migration] kept ${sourceDocuments}: ${join(target, 'documents')} already exists\n`,
+        );
+      }
+    }
+  }
+
+  return moved ? target : undefined;
+}
+
+/**
+ * Moves a root-level database into `<dataRoot>/db/` for installs upgraded from the previous layout.
+ * Returns whether the database moved.
+ */
+function migrateDatabaseIntoSubdirectory(dataRoot: string): boolean {
+  return moveDatabase(join(dataRoot, DATABASE_FILE_NAME), databasePathIn(dataRoot));
+}
+
+/**
+ * Moves one SQLite database and its WAL/SHM side files to `destination`.
+ *
+ * Creates the destination directory when needed. Returns false when the source is missing or the
+ * destination already exists, so an existing database is never replaced.
+ */
+function moveDatabase(source: string, destination: string): boolean {
+  if (!existsSync(source) || existsSync(destination)) return false;
+  mkdirSync(dirname(destination), { recursive: true });
+  if (!movePath(source, destination)) return false;
   for (const suffix of ['-wal', '-shm']) {
-    movePath(`${sourceDatabase}${suffix}`, join(target, `teachforge.db${suffix}`));
+    movePath(`${source}${suffix}`, `${destination}${suffix}`);
   }
-  const sourceDocuments = join(legacyDirectory, 'documents');
-  if (existsSync(sourceDocuments) && !movePath(sourceDocuments, join(target, 'documents'))) {
-    process.stderr.write(
-      `[data-migration] kept ${sourceDocuments}: ${join(target, 'documents')} already exists\n`,
-    );
-  }
-  return target;
+  return true;
 }
 
 /**
