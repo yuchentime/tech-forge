@@ -33,6 +33,8 @@ Pi 的 `getEntries()` 是模型侧会话状态（含 compaction、model/thinking
 
 每轮 `stream()` 结束且没有持久化失败时，`LlmService` 将该 session 的 `getEntries()` 结果 upsert 到 `pi_session_snapshots`；保存失败只记录 `llm.session_snapshot.save.failed`，不改变已完成的流结果。
 
+恢复出的条目（快照或 SQLite 重建）在交给 Pi 之前都会先经 `checkSessionEntries()` 核对 `toolCall`/`toolResult` 配对：没有对应调用的结果被丢弃，没有结果的调用从 assistant 消息里剥掉（保留文本），并重接 `parentId` 保持单链，修复结果立即写回快照（日志 `llm.session_snapshot.repaired`）。因为 OpenAI 兼容端点会拒绝孤立的 `tool` 消息，这类条目一旦进入快照，此后每轮请求都会以同一个 400 失败。已用真实损坏快照验证：24 条恢复条目核对后为 23 条，配对问题为 0，叶子路径覆盖全部条目。
+
 ## API 与错误
 
 | 边界 | 当前契约 |

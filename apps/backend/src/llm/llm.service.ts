@@ -32,8 +32,12 @@ import {
 import { parsePersistedPiMessage } from "../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../conversations/pi-session-snapshots.service";
 import { MemoryService } from "../memory/memory.service";
-import { replaceInjectedUserText } from "./session-entries";
 import {
+  checkSessionEntries,
+  replaceInjectedUserText,
+} from "./session-entries";
+import {
+  clipLogText,
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
@@ -141,11 +145,29 @@ export class LlmResponseTruncatedError extends Error {
   }
 }
 
+/**
+ * Raised when the provider answered the run with an error instead of a completion.
+ *
+ * Pi records that answer as an assistant message with `stopReason: "error"` and the provider's
+ * text in `errorMessage`, then settles the run normally. Without reading the message first, the
+ * empty content looks like a broken model and the actual cause (a rejected request) is invisible.
+ */
+export class LlmProviderRejectedError extends Error {
+  constructor(readonly providerMessage: string) {
+    super(
+      providerMessage.trim() ||
+        "Provider rejected the request without an error message.",
+    );
+    this.name = "LlmProviderRejectedError";
+  }
+}
+
 /** Classifies the latest assistant message once a Pi run has settled. */
 type AssistantCompletion =
   | { kind: "text"; text: string }
   | { kind: "truncated" }
   | { kind: "cancelled" }
+  | { kind: "rejected"; providerMessage: string }
   | { kind: "empty" };
 
 /**
@@ -573,6 +595,7 @@ export class LlmService {
           eventCounts: Object.fromEntries(eventCounts),
           elapsedMs: Date.now() - startedAt,
           ...getSafeErrorLogFields(error),
+          ...getProviderRejectionLogFields(error),
         },
       );
       throw error;
@@ -802,6 +825,7 @@ export class LlmService {
           phase: timedOut ? "timeout" : phase,
           elapsedMs: Date.now() - startedAt,
           ...getSafeErrorLogFields(error),
+          ...getProviderRejectionLogFields(error),
         },
       );
       throw error;
@@ -1213,14 +1237,42 @@ export class LlmService {
     }
 
     const restored = pickSessionEntries(rebuiltEntries, snapshotEntries);
+    // A broken tool pair makes every later provider call fail, so the restored entries are
+    // checked on both sources, and a repair is persisted before the provider runs.
+    const checked = checkSessionEntries(restored.entries);
+    const changed =
+      checked.removedToolResults + checked.strippedToolCalls + checked.relinkedEntries > 0;
+    if (changed) {
+      writeStructuredEvent(this.logger, "warn", "llm.session_snapshot.repaired", {
+        ...logContext,
+        source: restored.source,
+        removedToolResults: checked.removedToolResults,
+        strippedToolCalls: checked.strippedToolCalls,
+        relinkedEntries: checked.relinkedEntries,
+        restoredEntryCount: checked.entries.length,
+      });
+      try {
+        await this.piSessionSnapshots.saveSnapshot(conversation.id, checked.entries);
+      } catch (error) {
+        writeStructuredEvent(
+          this.logger,
+          "error",
+          "llm.session_snapshot.repair_save.failed",
+          {
+            ...logContext,
+            ...getSafeErrorLogFields(error),
+          },
+        );
+      }
+    }
     writeStructuredEvent(this.logger, "log", "llm.session.restore.completed", {
       ...logContext,
       source: restored.source,
       rebuiltEntryCount: rebuiltEntries.length,
       snapshotEntryCount: snapshotEntries?.length ?? 0,
-      restoredEntryCount: restored.entries.length,
+      restoredEntryCount: checked.entries.length,
     });
-    return restored.entries;
+    return checked.entries;
   }
 
   /** Converts persisted plain-text turns into the Pi SDK's authoritative entry tree. */
@@ -1359,6 +1411,9 @@ export class LlmService {
     if (completion.kind === "truncated") {
       throw new LlmResponseTruncatedError();
     }
+    if (completion.kind === "rejected") {
+      throw new LlmProviderRejectedError(completion.providerMessage);
+    }
     if (completion.kind === "empty") {
       throw new Error("Pi SDK completed without returning assistant text.");
     }
@@ -1383,9 +1438,23 @@ function classifyAssistantCompletion(
   if (lastAssistant?.role === "assistant") {
     if (lastAssistant.stopReason === "aborted") return { kind: "cancelled" };
     if (lastAssistant.stopReason === "length") return { kind: "truncated" };
+    if (lastAssistant.stopReason === "error") {
+      return {
+        kind: "rejected",
+        providerMessage: lastAssistant.errorMessage ?? "",
+      };
+    }
   }
   if (!text?.trim()) return { kind: "empty" };
   return { kind: "text", text };
+}
+
+/** Adds the provider's rejection text, which explains a settled run with no assistant text. */
+function getProviderRejectionLogFields(
+  error: unknown,
+): Record<string, unknown> {
+  if (!(error instanceof LlmProviderRejectedError)) return {};
+  return { providerErrorMessage: clipLogText(error.providerMessage, 600) };
 }
 
 /** Identifies one Pi message independently of SQLite row and Pi entry IDs. */

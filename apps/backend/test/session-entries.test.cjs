@@ -4,7 +4,7 @@ const { join } = require('node:path');
 
 /** Isolated build output, so a running dev backend that locks `dist` does not block the suite. */
 const buildDirectory = join(__dirname, '..', process.env.BACKEND_TEST_BUILD_DIR ?? '.test-dist');
-const { replaceInjectedUserText } = require(join(
+const { replaceInjectedUserText, checkSessionEntries } = require(join(
   buildDirectory,
   'llm/session-entries.js',
 ));
@@ -160,4 +160,128 @@ test('historical image input is dropped while the stored user text stays', () =>
   const cleaned = replaceInjectedUserText(entries, '新问题');
 
   assert.deepEqual(cleaned[0].message.content, [{ type: 'text', text: '旧问题' }]);
+});
+
+/** Links entries the way the session manager stores them: one parent chain, oldest first. */
+function chained(entries) {
+  let parentId = null;
+  return entries.map((entry) => {
+    const linked = { ...entry, parentId };
+    parentId = entry.id;
+    return linked;
+  });
+}
+
+/** Builds one assistant message entry carrying the given tool calls. */
+function assistantEntry(id, blocks) {
+  return messageEntry(id, 'assistant', blocks);
+}
+
+test('an orphan tool result is dropped and the chain stays connected', () => {
+  // Reproduces a snapshot whose assistant message lost the tool call its result answers.
+  const entries = chained([
+    messageEntry('u1', 'user', '旧问题'),
+    assistantEntry('a1', [{ type: 'text', text: '先写文件' }]),
+    {
+      ...messageEntry('t1', 'toolResult', [{ type: 'text', text: '未执行' }]),
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call_missing',
+        toolName: 'write',
+        content: [{ type: 'text', text: 'Tool call was not executed.' }],
+        isError: true,
+        timestamp: 1,
+      },
+    },
+    messageEntry('u2', 'user', '继续'),
+  ]);
+
+  const check = checkSessionEntries(entries);
+
+  assert.equal(check.removedToolResults, 1);
+  assert.equal(check.strippedToolCalls, 0);
+  assert.equal(check.relinkedEntries, 1);
+  assert.deepEqual(check.entries.map((entry) => entry.id), ['u1', 'a1', 'u2']);
+  // u2 pointed at the dropped tool result; the restored chain must not fork there.
+  assert.equal(check.entries[2].parentId, 'a1');
+});
+
+test('a tool call without a result is stripped from the assistant message', () => {
+  const entries = chained([
+    messageEntry('u1', 'user', '整理知识地图'),
+    assistantEntry('a1', [
+      { type: 'text', text: '写入文件' },
+      { type: 'toolCall', id: 'call_1', name: 'write', arguments: {} },
+    ]),
+  ]);
+
+  const check = checkSessionEntries(entries);
+
+  assert.equal(check.strippedToolCalls, 1);
+  // The generated text survives; only the call a provider cannot accept is removed.
+  assert.deepEqual(check.entries[1].message.content, [
+    { type: 'text', text: '写入文件' },
+  ]);
+  // Nothing was removed, so the stored chain is unchanged.
+  assert.equal(check.relinkedEntries, 0);
+  assert.deepEqual(
+    check.entries.map((entry) => [entry.id, entry.parentId]),
+    entries.map((entry) => [entry.id, entry.parentId]),
+  );
+});
+
+test('an answered call keeps its result while an unanswered one is stripped', () => {
+  const entries = chained([
+    messageEntry('u1', 'user', '整理知识地图'),
+    assistantEntry('a1', [
+      { type: 'toolCall', id: 'call_1', name: 'write', arguments: {} },
+      { type: 'toolCall', id: 'call_2', name: 'read', arguments: {} },
+    ]),
+    {
+      ...messageEntry('t1', 'toolResult', [{ type: 'text', text: 'ok' }]),
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call_1',
+        toolName: 'write',
+        content: [{ type: 'text', text: 'Successfully wrote to 知识地图.svg' }],
+        isError: false,
+        timestamp: 1,
+      },
+    },
+  ]);
+
+  const check = checkSessionEntries(entries);
+
+  assert.equal(check.removedToolResults, 0);
+  assert.equal(check.strippedToolCalls, 1);
+  assert.deepEqual(check.entries[1].message.content, [
+    { type: 'toolCall', id: 'call_1', name: 'write', arguments: {} },
+  ]);
+  assert.equal(check.entries[2].message.toolCallId, 'call_1');
+});
+
+test('a matched tool call and result are left untouched', () => {
+  const entries = chained([
+    messageEntry('u1', 'user', '整理知识地图'),
+    assistantEntry('a1', [{ type: 'toolCall', id: 'call_1', name: 'write', arguments: {} }]),
+    {
+      ...messageEntry('t1', 'toolResult', [{ type: 'text', text: 'ok' }]),
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call_1',
+        toolName: 'write',
+        content: [{ type: 'text', text: 'Successfully wrote to 知识地图.svg' }],
+        isError: false,
+        timestamp: 1,
+      },
+    },
+    messageEntry('a2', [{ type: 'text', text: '写好了' }]),
+  ]);
+
+  const check = checkSessionEntries(entries);
+
+  assert.equal(check.removedToolResults, 0);
+  assert.equal(check.strippedToolCalls, 0);
+  assert.equal(check.relinkedEntries, 0);
+  assert.deepEqual(check.entries, entries);
 });

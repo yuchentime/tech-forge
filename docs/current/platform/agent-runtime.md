@@ -137,6 +137,14 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 `LlmService` 优先读取 `pi_session_snapshots` 作为模型上下文（含 compaction 等 Pi 条目），仅当快照最后一条持久化消息与 SQLite 最新历史不一致（崩溃或快照未保存）时回退 SQLite 重建；未命中时也走重建。当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
+恢复出的条目在交给 Pi 之前先经 `checkSessionEntries()`（`llm/session-entries.ts`）核对工具调用配对，两条恢复路径共用这一步：
+
+- 找不到对应 assistant `toolCall` 的 `toolResult` 丢弃。
+- 只有调用、没有结果的 `toolCall` block 从该条 assistant 消息里剥掉，保留 assistant 文本；与 `recoverInterruptedPiMessage()` 对 SQLite 行的处理一致。
+- 被丢弃条目的子条目重新接到相邻条目上，恢复结果保持单链（模型上下文取叶子路径）。
+
+必须核对的原因是 OpenAI 兼容端点校验 `tool_calls` 与 `tool` 的配对：崩溃退出或 `length` 截断会留下缺失 `toolCall` 的不完整 assistant 条目和它的结果，原样重放会让此后每一轮都以同一个 400 失败，而不是当轮可见地失败。修复结果立即 upsert 回 `pi_session_snapshots`，一次失败的请求不会把同一份坏数据再读回来。
+
 上下文压缩由 Pi SDK 自动执行，应用层不调用 `session.compact()`，也不自行裁剪或摘要历史：
 
 - 触发条件为 `contextTokens > contextWindow - reserveTokens`。SDK 在发送新 user prompt 前、工具结果追加后准备下一轮 assistant 时、运行结束后各检查一次；provider 报上下文溢出或出现可恢复的 `length` 结束时，会压缩并重试一次。
@@ -165,7 +173,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 7. 附件正文和图片只注入承载它的那一轮。之后每次请求都会追加一段"本会话可读取的附件"指针：每份附件的可读文件绝对路径（PDF/DOCX 为同名 `.md`，Markdown/TXT/图片为原文件）、总字数或"图片"标记、已注入字数，并提示用 `read`（文本可带 offset/limit；图片会作为视觉输入返回）或 `grep` 继续读取。附件目录不在受保护目录内，工具都能读；模型因此可以回到原文或原图，而不是凭记忆补全。
 8. 指针不重复注入正文，只提供路径与规模，成本约每附件两行。图片只出现在承载它的那一轮：快照保存前 `replaceInjectedUserText()` 会丢弃 user entry 里的 `image` 块，避免每轮重复计费。
 
-已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`（`Pi SDK completed without returning assistant text.`），因为 Pi 压缩无法压缩本轮新注入的正文。图片走 DeepSeek 兼容的内联 `image_url` 输入：单张上限 32 MiB，单轮所有图片原始字节上限 32 MiB（base64 后约 42.7 MiB，仍在 48 MiB 请求体限制内）。DeepSeek Files API 的 `file_id` 引用需要 `file` 内容块，而 Pi 的 OpenAI 兼容 provider 只序列化 `image_url`；附件只在一轮使用，因此不引入 Files API。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
+已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`，Pi 把 provider 的拒绝记成 `stopReason: "error"` 的 assistant 消息，`LlmService` 据此抛 `LlmProviderRejectedError` 并在日志里带 `providerErrorMessage`（截断 600 字符，不进 UI），因为 Pi 压缩无法压缩本轮新注入的正文。图片走 DeepSeek 兼容的内联 `image_url` 输入：单张上限 32 MiB，单轮所有图片原始字节上限 32 MiB（base64 后约 42.7 MiB，仍在 48 MiB 请求体限制内）。DeepSeek Files API 的 `file_id` 引用需要 `file` 内容块，而 Pi 的 OpenAI 兼容 provider 只序列化 `image_url`；附件只在一轮使用，因此不引入 Files API。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
 
 ## 文件读写边界
 

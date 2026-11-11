@@ -1,4 +1,101 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
+import { MEMORY_CONTEXT_HEADER } from '../memory/memory-context';
+
+/** Reports what one snapshot check had to change before Pi could replay it. */
+export interface SessionEntryCheck {
+  entries: SessionEntry[];
+  /** `toolResult` messages dropped because no assistant message declared their call. */
+  removedToolResults: number;
+  /** `toolCall` blocks stripped because their result was never recorded. */
+  strippedToolCalls: number;
+  /** Entries re-parented onto the previous entry after a removal. */
+  relinkedEntries: number;
+}
+
+/**
+ * Returns the entries to restore, after dropping tool-call pairs a provider would reject.
+ *
+ * Pi replays restored entries verbatim and OpenAI-compatible endpoints validate the pairing: a
+ * `tool` message must answer a preceding `tool_calls`, and every `tool_calls` must be answered.
+ * A turn interrupted between the assistant message and its results leaves an orphan `toolResult`
+ * (its `toolCall` was stripped as unfinished) or a `toolCall` with no result. Because those entries
+ * are saved into the snapshot, one broken pair fails every later request in the conversation with
+ * a 400 instead of failing the turn that broke.
+ *
+ * Orphan results are dropped; a call without a result is stripped from its assistant message while
+ * the assistant text stays, the same treatment `recoverInterruptedPiMessage()` gives SQLite rows.
+ * A `parentId` that pointed at a dropped entry follows the previous entry: the model context is
+ * the leaf path, so a dangling link would silently drop every entry before it.
+ */
+export function checkSessionEntries(
+  entries: readonly SessionEntry[],
+): SessionEntryCheck {
+  const declared = new Set<string>();
+  const answered = new Set<string>();
+  const checked: SessionEntry[] = [];
+  let removedToolResults = 0;
+
+  for (const entry of entries) {
+    if (entry.type !== 'message') {
+      checked.push(entry);
+      continue;
+    }
+    const message = entry.message;
+    if (message.role === 'toolResult') {
+      if (!declared.has(message.toolCallId)) {
+        removedToolResults += 1;
+        continue;
+      }
+      answered.add(message.toolCallId);
+      checked.push(entry);
+      continue;
+    }
+    checked.push(entry);
+    if (message.role !== 'assistant') continue;
+    for (const block of message.content) {
+      if (block.type === 'toolCall') declared.add(block.id);
+    }
+  }
+
+  let strippedToolCalls = 0;
+  for (let index = 0; index < checked.length; index += 1) {
+    const entry = checked[index];
+    if (entry.type !== 'message' || entry.message.role !== 'assistant') continue;
+    const unanswered = entry.message.content.flatMap((block) =>
+      block.type === 'toolCall' && !answered.has(block.id) ? [block.id] : [],
+    );
+    if (unanswered.length === 0) continue;
+    const stripped = new Set(unanswered);
+    strippedToolCalls += unanswered.length;
+    checked[index] = {
+      ...entry,
+      message: {
+        ...entry.message,
+        content: entry.message.content.filter(
+          (block) => block.type !== 'toolCall' || !stripped.has(block.id),
+        ),
+      },
+    };
+  }
+
+  const keptIds = new Set(checked.map((entry) => entry.id));
+  let relinkedEntries = 0;
+  let previousId: string | null = null;
+  for (const entry of checked) {
+    if (entry.parentId !== null && !keptIds.has(entry.parentId)) {
+      entry.parentId = previousId;
+      relinkedEntries += 1;
+    }
+    previousId = entry.id;
+  }
+
+  return {
+    entries: checked,
+    removedToolResults,
+    strippedToolCalls,
+    relinkedEntries,
+  };
+}
 
 /**
  * Rewrites user entries in a snapshot so they keep only the user's own text.
@@ -90,7 +187,7 @@ function stripInjectedText(text: string): string | undefined {
     '## 本轮用户附加的文件',
     '## 资料库检索结果',
     '## 本会话可读取的附件',
-    '## 长期记忆',
+    MEMORY_CONTEXT_HEADER,
   ];
   if (!injectedHeaders.some((header) => text.startsWith(header))) {
     return undefined;
