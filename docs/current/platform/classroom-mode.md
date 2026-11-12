@@ -1,0 +1,75 @@
+---
+status: current
+layer: platform
+domain: classroom-mode
+canonical_for:
+  - classroom-mode-window-aspect
+related:
+  - docs/current/platform/index.md
+  - docs/current/platform/desktop-skin.md
+  - docs/current/platform/architecture-and-code-placement.md
+  - docs/source/课堂模拟图像素材规格.md
+  - docs/source/学习趣味性设计讨论.md
+last_verified: 2026-11-12
+---
+
+# 课堂模式
+
+本页描述 `apps/desktop` 当前实际生效的课堂模式：侧栏入口、沉浸式舞台，以及进入后强制的 16:9 窗口比例。课堂状态机、学生立绘、气泡与报告仍是设计草案（见[学习趣味性设计讨论](../../source/学习趣味性设计讨论.md) 3.7 节），不在当前实现内。
+
+## 入口与布局
+
+| 项 | 当前事实 |
+|---|---|
+| 入口 | 侧栏「知识掌握」下方的「课堂模式」（`Chalkboard` 图标），对应 `SidebarView = 'classroom'` |
+| 布局 | 进入后不渲染侧栏与聊天头，舞台占满整个窗口内容区；因此窗口内容区的比例就是舞台比例 |
+| 退出 | 舞台左上「退出课堂模式」按钮，或按 `Esc`；没有侧栏入口可点，退出后回到对话视图 |
+| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 只负责挂载舞台与窗口模式开关 |
+
+舞台由两层 CSS 决定（[styles.css](../../../apps/desktop/src/styles.css)）：
+
+- `.tf-classroom-viewport`：`container-type: size`，让子元素能用 `100cqw`/`100cqh` 互相换算。
+- `.tf-classroom-stage`：`width: min(100cqw, 100cqh * 16 / 9)`、`height: min(100cqh, 100cqw * 9 / 16)`，即视口内最大的 16:9 矩形并居中。只用 `max-width`/`max-height` 会夹住单轴、破坏比例并把学生图拉变形。
+- 背景 [bg-classroom.png](../../../apps/desktop/src/assets/classroom/bg-classroom.png)（1568×882，恰好 16:9）按 `cover` 铺满舞台；窗口被锁成 16:9 时舞台与内容区同尺寸，不裁剪、不出现留边。
+- 舞台外的 `ink-900` 底色只在窗口比例无法被约束时露出（普通浏览器预览、最大化窗口）。
+
+## 窗口 16:9
+
+渲染层只声明「课堂模式是否在屏幕上」，几何全部由 main 决定：
+
+| 层 | 事实 |
+|---|---|
+| `window.teachforge.setClassroomMode(enabled)` | [desktop-bridge.ts](../../../apps/desktop/src/types/desktop-bridge.ts) 的唯一新能力；[preload](../../../apps/desktop/electron/preload/preload.ts) 转 `ipcRenderer.invoke('window:set-classroom-mode', enabled)` |
+| IPC 校验 | 参数必须是布尔值；窗口不可用时报错，不静默降级 |
+| 进入 | `applyClassroomMode(win, true)`：先退出全屏/最大化（比例只约束普通窗口），用 `planAspectLock` 由当前窗口尺寸算出**内容区 16:9** 的 bounds，记下 baseline 后写入 |
+| 拖动 | 在 `will-resize` 里按实测边框补偿修正为内容区 16:9：保留位移更大的那条轴（拖右边缘改宽度、拖下边缘改高度），另一轴按比例推导，并阻止系统原本的这次尺寸 |
+| 离开 | 删除锁；用户没在模式内改过尺寸时写回 baseline，改过或窗口已最大化/全屏时保留用户当前尺寸 |
+
+`planAspectLock`（[window-layout.ts](../../../apps/desktop/electron/main/window-layout.ts)）是纯函数：保留当前内容宽度、按 16:9 推导高度；显示器装不下时两轴一起缩小；结果夹进 `workArea`，避免窗口跑到屏幕外。
+
+### 为什么没用 `win.setAspectRatio`
+
+在 125% 缩放、边框 16×39 的 Windows 实测：`win.setAspectRatio(16 / 9)` 约束的是**窗口外框**，内容区变成 1.84（应为 1.7778），舞台两侧出现 26px 留边；把实测边框作为 `extraSize` 传入没有改变结果。因此改为在 `will-resize` 内按内容区自行修正，比例与舞台完全对齐。macOS/Linux 未实测，代码路径与平台无关。
+
+### 与既有窗口能力的关系
+
+- 进入课堂模式会卸载聊天视图，`ArtifactSidebar` 的卸载回调会立即 `releaseContentWidth()`；这与进入模式的写尺寸是同一条 IPC 序列，先释放再锁比例，不会互相覆盖。
+- 模式进行中不写入 `userData/window-state.json` 的临时尺寸，保存的是进入前的 baseline，下次启动仍是用户自己的窗口大小。
+- 退出后窗口与聊天视图的可拉伸行为完全恢复（不受 16:9 约束）。
+
+## 与设计稿的差异
+
+[课堂模拟图像素材规格](../../source/课堂模拟图像素材规格.md) 规划的是 16:10 舞台、独立学生立绘与前景课桌条；本轮按用户提供的一张 16:9 背景图实现，因此：
+
+| 项 | 草案 | 当前实现 |
+|---|---|---|
+| 舞台比例 | 16:10 | 16:9（与图片和用户要求一致） |
+| 素材 | BG-01 + FG-01 + 3 张立绘 | 仅背景图 `bg-classroom.png` |
+| 内容 | 讲解→轮转提问→报告 | 只有沉浸式舞台与退出入口 |
+
+立绘与背景替换时保持 16:9 即可；若改成 16:10 素材，需要同时改 `CLASSROOM_ASPECT_RATIO` 与 `.tf-classroom-stage` 的两处比例。
+
+## 验证方式
+
+- `npm run test:layout-budget --workspace @teachforge/desktop`：`planAspectLock` 的保留宽度、短屏缩放、屏幕边界回夹。
+- 实机（`npm run dev:desktop` 后进入课堂模式）：内容区 `innerWidth/innerHeight` 应为 16:9；拖右边缘与下边缘都等比变化；退出后窗口尺寸恢复，且随后可自由拉伸；从最大化状态进入会先还原为普通窗口并锁成 16:9。

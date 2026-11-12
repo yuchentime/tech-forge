@@ -1,4 +1,26 @@
 routes:
+  classroom-mode:
+    description: "Add or change the classroom mode stage: a sidebar entry under 知识掌握 opens a full-window 16:9 classroom stage, and the main process locks the window content area to the same ratio on entry, keeps it on manual resize, and releases/restores it on exit"
+    token_budget: 14000
+    code_globs:
+      - "apps/desktop/src/features/classroom/**"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+      - "apps/desktop/src/features/agent/ConversationSidebar.tsx"
+      - "apps/desktop/src/assets/classroom/**"
+      - "apps/desktop/src/styles.css"
+      - "apps/desktop/src/types/desktop-bridge.ts"
+      - "apps/desktop/electron/**"
+      - "apps/desktop/test/window-layout.test.cjs"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/classroom-mode.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/platform/desktop-skin.md
+    optional:
+      - docs/changes/2026-11-12-classroom-mode/design.md
+      - docs/changes/2026-11-12-classroom-mode/verification.md
+      - docs/current/domains/artifacts/index.md
+    history_on_demand: []
   conversation-knowledge-facts:
     description: "One current knowledge fact per conversation: report completion writes pending in the same transaction, a single-process worker synthesizes chronological evidence with a model-bound prompt budget and durable reruns, and read-only single/collection APIs return the last published fact; the collection omits knowledge-point details"
     token_budget: 44000

@@ -30,9 +30,11 @@ import {
   requestBackend,
 } from './backend-request';
 import {
+  CLASSROOM_ASPECT_RATIO,
   MIN_CONTENT_WIDTH,
   clampContentWidthRequest,
   isSnappedWidth,
+  planAspectLock,
   planWindowGrowth,
   resolveRestoredBounds,
   sameHorizontalBounds,
@@ -304,6 +306,20 @@ type PendingGrowth = {
 
 const pendingGrowth = new WeakMap<BrowserWindow, PendingGrowth>();
 /**
+ * The classroom-mode aspect lock of each window.
+ *
+ * `baseline` is the rect the user had before entering the mode. `resized` records that the user
+ * changed the window inside the mode, so leaving then keeps their size instead of snapping back;
+ * it is used instead of comparing bounds because the window manager rewrites the rect the mode
+ * writes by a few pixels, which a comparison could not tell apart from a real resize.
+ */
+type AspectLock = {
+  baseline: WindowRect;
+  resized: boolean;
+};
+
+const aspectLocks = new WeakMap<BrowserWindow, AspectLock>();
+/**
  * The rect each window had before the artifact panel first widened it.
  *
  * Kept for the whole window session, not per open: writing back a value read from the window and
@@ -358,6 +374,12 @@ function scheduleWindowStateSave(win: BrowserWindow): void {
 function saveWindowState(win: BrowserWindow): void {
   if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
   const bounds = win.getBounds();
+  // Classroom mode owns the geometry while it is active; persist the size the user returns to.
+  const lock = aspectLocks.get(win);
+  if (lock) {
+    storeWindowState(lock.baseline);
+    return;
+  }
   const growth = pendingGrowth.get(win);
   // While the panel holds a grown window, save the size the user will return to.
   storeWindowState(
@@ -374,6 +396,80 @@ function resolveInitialWindowBounds(): WindowRect | null {
     workArea: screen.getPrimaryDisplay().workArea,
     minSize: MIN_WINDOW_SIZE,
   });
+}
+
+/**
+ * Locks or releases the window to the classroom stage's aspect ratio.
+ *
+ * Entering first leaves maximize/full screen (the ratio only binds a normal window) and writes the
+ * 16:9 content rect that `planAspectLock` derives from the user's own size; the baseline is kept so
+ * leaving can return to it. Releasing restores that baseline only while the user has not resized
+ * the window inside the mode.
+ *
+ * The ratio is enforced in `will-resize` instead of `win.setAspectRatio`: measured on Windows, that
+ * API constrains the *outer* window, which left the content area ~3% wider than 16:9 and made the
+ * stage letterbox (its excluded-size argument did not change that).
+ */
+function applyClassroomMode(win: BrowserWindow, enabled: boolean): void {
+  const existing = aspectLocks.get(win);
+  if (enabled) {
+    if (existing) return;
+    // A maximized or full-screen window is sized by the OS and cannot honour the ratio; the
+    // previous normal rect is what the mode measures and what leaving restores.
+    if (win.isFullScreen()) win.setFullScreen(false);
+    if (win.isMaximized()) win.unmaximize();
+    const baseline = win.getBounds();
+    const applied = planAspectLock({
+      bounds: baseline,
+      contentBounds: win.getContentBounds(),
+      workArea: screen.getDisplayMatching(baseline).workArea,
+      aspectRatio: CLASSROOM_ASPECT_RATIO,
+    });
+    aspectLocks.set(win, { baseline, resized: false });
+    win.setBounds(applied, false);
+    return;
+  }
+
+  if (!existing) return;
+  aspectLocks.delete(win);
+  // Restoring would undo a maximize or resize the user made while the mode was open.
+  if (win.isMaximized() || win.isFullScreen() || existing.resized) return;
+  win.setBounds(existing.baseline, false);
+}
+
+/**
+ * Corrects one manual resize so the content area keeps the classroom ratio.
+ *
+ * Returns `null` when no classroom lock is active. The axis the user moved the most is kept as the
+ * requested value and the other one is derived, so dragging the right edge widens the window while
+ * a bottom-edge drag keeps the height the pointer asked for.
+ */
+function correctAspectResize(win: BrowserWindow, proposed: WindowRect): WindowRect | null {
+  const lock = aspectLocks.get(win);
+  if (!lock) return null;
+  lock.resized = true;
+  const current = win.getBounds();
+  const content = win.getContentBounds();
+  const frameWidth = Math.max(0, current.width - content.width);
+  const frameHeight = Math.max(0, current.height - content.height);
+  const proposedContentWidth = Math.max(1, proposed.width - frameWidth);
+  const proposedContentHeight = Math.max(1, proposed.height - frameHeight);
+  // Compare relative deltas so a small window is not biased toward the width.
+  const widthDominant =
+    Math.abs(proposedContentWidth - content.width) * content.height >=
+    Math.abs(proposedContentHeight - content.height) * content.width;
+  const contentWidth = widthDominant
+    ? proposedContentWidth
+    : proposedContentHeight * CLASSROOM_ASPECT_RATIO;
+  const contentHeight = widthDominant
+    ? proposedContentWidth / CLASSROOM_ASPECT_RATIO
+    : proposedContentHeight;
+  return {
+    x: proposed.x,
+    y: proposed.y,
+    width: Math.round(contentWidth + frameWidth),
+    height: Math.round(contentHeight + frameHeight),
+  };
 }
 
 /**
@@ -452,6 +548,15 @@ function registerWindowIpc(): void {
       },
       false,
     );
+  });
+
+  // The classroom stage only says whether it is on screen; the main process owns the ratio, the
+  // geometry, and the restore of the user's own size.
+  ipcMain.handle('window:set-classroom-mode', (event, value: unknown): void => {
+    if (typeof value !== 'boolean') throw new Error('课堂模式参数无效。');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) throw new Error('窗口不可用，请重试。');
+    applyClassroomMode(win, value);
   });
 }
 
@@ -902,10 +1007,14 @@ function createWindow(): void {
   });
   const windowRef = mainWindow;
   // A user resize invalidates the pending growth, so closing the panel never shrinks a window the
-  // user resized in the meantime.
-  windowRef.on('will-resize', () => {
+  // user resized in the meantime. In classroom mode the same event enforces the content ratio.
+  windowRef.on('will-resize', (event, newBounds) => {
     pendingGrowth.delete(windowRef);
     windowBaselines.delete(windowRef);
+    const corrected = correctAspectResize(windowRef, newBounds);
+    if (!corrected) return;
+    event.preventDefault();
+    windowRef.setBounds(corrected, false);
   });
   windowRef.on('resize', () => scheduleWindowStateSave(windowRef));
   windowRef.on('move', () => scheduleWindowStateSave(windowRef));
@@ -918,6 +1027,7 @@ function createWindow(): void {
   });
   windowRef.on('closed', () => {
     pendingGrowth.delete(windowRef);
+    aspectLocks.delete(windowRef);
     windowBaselines.delete(windowRef);
     cancelAllChatStreams();
     mainWindow = undefined;

@@ -1,0 +1,72 @@
+import { ArrowLeft, Chalkboard } from '@phosphor-icons/react';
+import { useEffect } from 'react';
+import classroomBackground from '../../assets/classroom/bg-classroom.png';
+import { hasDesktopBridge } from '../../types/desktop-bridge';
+
+/**
+ * Renders the immersive classroom stage and owns the window's 16:9 mode.
+ *
+ * The artwork is exactly 16:9, so the main process locks the OS window to that ratio while this
+ * view is mounted and `.tf-classroom-stage` keeps the stage at 16:9 even where the window cannot be
+ * locked (browser preview, a maximized window). The stage replaces the sidebar and header, so it
+ * carries its own exit control; `Esc` leaves as well.
+ */
+export function ClassroomMode({ onExit }: { onExit: () => void }) {
+  // The ratio lock lives in the main process, not in this component's state: it must be released
+  // on unmount for every route out (the exit button, Esc, closing the window).
+  useEffect(() => {
+    if (!hasDesktopBridge()) return;
+    void window.teachforge.setClassroomMode(true).catch((error: unknown) => {
+      console.error(
+        '[TeachForge][classroom] aspect_lock_failed',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
+    });
+    return () => {
+      void window.teachforge.setClassroomMode(false).catch((error: unknown) => {
+        console.error(
+          '[TeachForge][classroom] aspect_unlock_failed',
+          error instanceof Error ? error.name : 'UnknownError',
+        );
+      });
+    };
+  }, []);
+
+  /** Leaves the mode from the keyboard, since the sidebar's entries are not on screen. */
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onExit();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onExit]);
+
+  return (
+    <div className="relative flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-ink-900">
+      <div className="tf-classroom-viewport">
+        <div
+          aria-label="课堂模式舞台"
+          className="tf-classroom-stage overflow-hidden bg-ink-200 bg-cover bg-center bg-no-repeat"
+          role="region"
+          style={{ backgroundImage: `url(${classroomBackground})` }}
+        >
+          <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 md:p-5">
+            <button
+              autoFocus
+              className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/80 py-2 pl-3 pr-4 text-sm font-medium text-ink-800 shadow-card backdrop-blur-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+              onClick={onExit}
+              type="button"
+            >
+              <ArrowLeft aria-hidden="true" className="size-4" />
+              退出课堂模式
+            </button>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/60 bg-white/70 px-3 py-1.5 text-xs font-semibold text-brand-800 backdrop-blur-md">
+              <Chalkboard aria-hidden="true" className="size-3.5" />
+              课堂模式
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -260,6 +260,7 @@ function installBridge() {
         maxContentWidth: width,
       }),
       releaseContentWidth: async () => undefined,
+      setClassroomMode: async () => undefined,
       streamChat: () => '',
       cancelChatStream: () => undefined,
       revealInFolder: async () => true,

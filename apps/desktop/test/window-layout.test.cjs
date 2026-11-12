@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  CLASSROOM_ASPECT_RATIO,
   clampContentWidthRequest,
   isSnappedWidth,
+  planAspectLock,
   planWindowGrowth,
   resolveRestoredBounds,
   sameHorizontalBounds,
@@ -118,4 +120,34 @@ test('restore comparison looks at x and width only, with rounding slack', () => 
   assert.equal(sameHorizontalBounds(bounds, { x: 101, width: 1281 }), true);
   assert.equal(sameHorizontalBounds(bounds, { x: 100, width: 1284 }), false);
   assert.equal(sameHorizontalBounds(bounds, { x: 160, width: 1280 }), false);
+});
+
+/** A 1280×820 window with the usual 16×39 Windows frame; its content is 1264×781. */
+function lockToClassroom(overrides = {}) {
+  return planAspectLock({
+    bounds: { x: 100, y: 100, width: 1280, height: 820 },
+    contentBounds: { width: 1264, height: 781 },
+    workArea: WORK_AREA,
+    aspectRatio: CLASSROOM_ASPECT_RATIO,
+    ...overrides,
+  });
+}
+
+test('classroom lock keeps the content width and derives the height from 16:9', () => {
+  // 1264 content → 711 content height; the 39px frame is added back to the window height.
+  assert.deepEqual(lockToClassroom(), { x: 100, y: 100, width: 1280, height: 750 });
+});
+
+test('classroom lock fits a short display by shrinking both axes', () => {
+  const result = lockToClassroom({
+    workArea: { x: 0, y: 0, width: 1366, height: 728 },
+  });
+  assert.equal(result.width, 1241);
+  assert.equal(result.height, 728, 'the stage never overflows the work area');
+  assert.equal(result.x, 100);
+});
+
+test('classroom lock slides a window back inside the work area', () => {
+  const result = lockToClassroom({ bounds: { x: 400, y: 800, width: 1280, height: 820 } });
+  assert.deepEqual(result, { x: 400, y: 290, width: 1280, height: 750 });
 });

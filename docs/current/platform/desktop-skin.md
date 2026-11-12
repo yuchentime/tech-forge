@@ -56,6 +56,8 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
   - 外扩硬 `ring`：被面板 `overflow-hidden` 在底部切出直线，且外扩半径与卡片圆角不重合，表现为「扩散不自然、底角对不齐」。
   - 模糊外发光：扁平白卡上出现光晕显得脏。
   - 保留 `shadow-card`：第二层 `0 12px 32px -18px` 向下约 10px，容器余量不足时被 `overflow-hidden` 切出一条灰色横带，像底部没清理干净；补足余量又会把输入区整体抬高，不如直接不投影。
+- 侧栏头部入口顺序固定为「新建课题 / 资料库 / 知识掌握 / 课堂模式」，图标依次为 `NotePencil`、`Books`、`Stack`、`Chalkboard`，样式与选中态一致；课堂模式占满窗口、隐藏侧栏，因此该入口只用于进入。
+- 课堂模式舞台是整窗背景图 + 两枚玻璃态胶囊（左上「退出课堂模式」、右上「课堂模式」标签）：`bg-white/70–80` + `backdrop-blur-md` + `border-white/60–70`，文字 `ink-800` / `brand-800`，不加深色遮罩，避免压暗教室画面。舞台比例与窗口比例的约定见[课堂模式](classroom-mode.md)。
 - 会话侧栏底色是背景图（见下），选中行 `brand-100/80` + `brand-200` 描边；底部「设置」栏是玻璃条（`bg-white/45` + `backdrop-blur-lg` + `border-t border-white/60`），把它从山峰、山道、云层那块最花的画面上分离出来，文字用 `ink-800`、`font-medium`。
 - 表单控件的基础样式放在 `@layer base`：`button/input/textarea { font: inherit }` 若写在 layer 外会压过 Tailwind 工具类，而且 `font` 简写会重置 `font-weight`，导致按钮上的 `font-medium`/`font-semibold` 全部失效。
 - 空状态统一由 [apps/desktop/src/components/EmptyState.tsx](../../../apps/desktop/src/components/EmptyState.tsx) 渲染：一个 `brand-400` filled 图标（36px）+ 标题 + 两行说明 + 一行提示，无卡片、无边框、无投影、无胶囊底色，避免在内容上方叠出第二块面板。现有使用者是对话首屏（`Sparkle`）、资料库空列表（`Books`）与知识掌握空列表（`Stack`）；图形取侧栏同一入口的图标，视觉重量与首屏星点一致。

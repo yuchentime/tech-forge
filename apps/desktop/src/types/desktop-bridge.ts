@@ -53,6 +53,13 @@ export type DesktopBridge = {
    * a window the user resized in the meantime is never shrunk.
    */
   releaseContentWidth(): Promise<void>;
+  /**
+   * Locks the window to the classroom stage's 16:9 content ratio, or releases it.
+   *
+   * The renderer only states which mode is on screen; the main process owns the 16:9 content
+   * ratio, the resize correction and the restore of the user's previous size.
+   */
+  setClassroomMode(enabled: boolean): Promise<void>;
 };
 
 /** Detects whether this renderer was launched with the restricted Electron preload bridge. */
@@ -69,7 +76,8 @@ export function hasDesktopBridge(): boolean {
       typeof bridge.cancelChatStream === 'function' &&
       typeof bridge.revealInFolder === 'function' &&
       typeof bridge.ensureContentWidth === 'function' &&
-      typeof bridge.releaseContentWidth === 'function',
+      typeof bridge.releaseContentWidth === 'function' &&
+      typeof bridge.setClassroomMode === 'function',
   );
 }
 

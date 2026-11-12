@@ -151,6 +151,29 @@ body {
     radial-gradient(16rem 12rem at 78% 44%, color-mix(in oklab, var(--color-honey-200) 55%, transparent) 0%, transparent 72%);
 }
 
+/*
+ * Classroom stage: the artwork is exactly 16:9, so the stage is the largest 16:9 rect that fits the
+ * viewport, centred. `container-type: size` makes `100cqw`/`100cqh` resolve against this viewport;
+ * with only `max-width`/`max-height` the browser clamps a single axis and silently breaks the
+ * ratio, which would stretch the students. The window itself is also locked to 16:9 by the main
+ * process, so the letterbox behind the stage only shows when the lock cannot apply (browser
+ * preview, a maximized window).
+ */
+.tf-classroom-viewport {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+}
+
+.tf-classroom-stage {
+  position: absolute;
+  inset: 0;
+  width: min(100cqw, calc(100cqh * 16 / 9));
+  height: min(100cqh, calc(100cqw * 9 / 16));
+  margin: auto;
+}
+
+
 @keyframes tf-float {
   0%,
   100% {

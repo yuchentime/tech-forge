@@ -60,6 +60,7 @@ import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage';
+import { ClassroomMode } from '../classroom/ClassroomMode';
 import {
   REHEARSAL_REQUIRES_ROUND_HINT,
   hasCompletedConversationRound,
@@ -458,6 +459,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     await conversationStore.renameConversation(conversationId, title);
   }, []);
 
+  /** Leaves the immersive classroom view; the stage's Esc handler depends on a stable identity. */
+  const exitClassroomMode = useCallback(() => setActiveView('chat'), []);
+
   const isHistoryLoading = loadingConversationId !== null;
   /** Drills need a completed round, so the toggle and the view both follow that gate. */
   const canEnterRehearsal = hasCompletedRound;
@@ -482,275 +486,283 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
-      <ConversationSidebar
-        isBusy={false}
-        runningConversationIds={runningConversationIds}
-        activeView={activeView}
-        loadingConversationId={loadingConversationId}
-        onNewConversation={() => {
-          setActiveView('chat');
-          setConversationDisplayMode('conversation');
-          startNewConversation();
-        }}
-        onRefresh={() => void conversationStore.refresh()}
-        onSelect={(conversationId) => {
-          setActiveView('chat');
-          setConversationDisplayMode('conversation');
-          void loadConversation(conversationId);
-        }}
-        onDelete={(conversationId) => void deleteConversation(conversationId)}
-        onRename={renameConversation}
-        onSelectView={(view) =>
-          setActiveView((current) => (current === view ? 'chat' : view))
-        }
-        state={conversationState}
-      />
-
-      {activeView === 'settings' ? (
-        <SettingsPage />
-      ) : activeView === 'knowledge' ? (
-        <KnowledgeBasePage />
-      ) : activeView === 'knowledgeProfile' ? (
-        <KnowledgeProfilePage
-          conversations={conversationState.conversations}
-          onSelectConversation={(conversationId) => {
-            setActiveView('chat');
-            setConversationDisplayMode('conversation');
-            void loadConversation(conversationId);
-          }}
-        />
+      {activeView === 'classroom' ? (
+        // The stage owns the whole window so its 16:9 artwork matches the locked window ratio;
+        // leaving goes through the stage's own exit control instead of the hidden sidebar.
+        <ClassroomMode onExit={exitClassroomMode} />
       ) : (
-        // Positioned so the artifact panel can float over the chat when the window is too narrow.
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <PageHeader className="justify-between">
-              <h1
-                aria-label={activeConversationTitle}
-                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-xl font-semibold tracking-tight text-ink-900"
-                title={activeConversationTitle}
-              >
-                {truncateConversationTitle(activeConversationTitle)}
-              </h1>
-              <div className="flex shrink-0 items-center gap-2">
-                {!isRehearsalMode && (
-                  <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
-                )}
-                <div
-                  aria-label="会话模式"
-                  className="inline-flex h-10 shrink-0 items-center rounded-full border border-ink-200/80 bg-white/70 p-1 shadow-sm backdrop-blur"
-                  role="group"
-                >
-                  <button
-                    aria-pressed={!isRehearsalMode}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
-                      isRehearsalMode
-                        ? 'font-medium text-ink-500 hover:text-ink-800'
-                        : 'bg-brand-700 font-semibold text-white shadow-sm'
-                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
-                    onClick={() => setConversationDisplayMode('conversation')}
-                    type="button"
-                  >
-                    <Chats aria-hidden="true" className="h-4 w-4" />
-                    对话模式
-                  </button>
-                  {/* A disabled button receives no pointer events, so the reason lives on the
-                      wrapper: hovering the greyed tab still explains why it is unavailable. */}
-                  <span
-                    className="inline-flex"
-                    title={canEnterRehearsal ? undefined : REHEARSAL_REQUIRES_ROUND_HINT}
-                  >
-                    <button
-                      aria-pressed={isRehearsalMode}
-                      className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
-                        isRehearsalMode
-                          ? 'bg-brand-700 font-semibold text-white shadow-sm'
-                          : canEnterRehearsal
-                            ? 'font-medium text-ink-500 hover:text-ink-800'
-                            : 'font-medium text-ink-300'
-                      } disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
-                      disabled={!canEnterRehearsal}
-                      onClick={() => setConversationDisplayMode('rehearsal')}
-                      type="button"
-                    >
-                      <GraduationCap aria-hidden="true" className="h-4 w-4" />
-                      演练模式
-                    </button>
-                  </span>
-                </div>
-              </div>
-            </PageHeader>
+        <>
+          <ConversationSidebar
+            isBusy={false}
+            runningConversationIds={runningConversationIds}
+            activeView={activeView}
+            loadingConversationId={loadingConversationId}
+            onNewConversation={() => {
+              setActiveView('chat');
+              setConversationDisplayMode('conversation');
+              startNewConversation();
+            }}
+            onRefresh={() => void conversationStore.refresh()}
+            onSelect={(conversationId) => {
+              setActiveView('chat');
+              setConversationDisplayMode('conversation');
+              void loadConversation(conversationId);
+            }}
+            onDelete={(conversationId) => void deleteConversation(conversationId)}
+            onRename={renameConversation}
+            onSelectView={(view) =>
+              setActiveView((current) => (current === view ? 'chat' : view))
+            }
+            state={conversationState}
+          />
 
-            <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div
-                aria-hidden={isRehearsalMode}
-                className={`absolute inset-0 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
-                  isRehearsalMode
-                    ? 'pointer-events-none translate-y-1 opacity-0'
-                    : 'translate-y-0 opacity-100'
-                }`}
-                inert={isRehearsalMode}
-              >
-                {historyError && (
-                  <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
-                    <span className="min-w-0 flex-1">{historyError}</span>
-                    {historyErrorConversationId && (
+          {activeView === 'settings' ? (
+            <SettingsPage />
+          ) : activeView === 'knowledge' ? (
+            <KnowledgeBasePage />
+          ) : activeView === 'knowledgeProfile' ? (
+            <KnowledgeProfilePage
+              conversations={conversationState.conversations}
+              onSelectConversation={(conversationId) => {
+                setActiveView('chat');
+                setConversationDisplayMode('conversation');
+                void loadConversation(conversationId);
+              }}
+            />
+          ) : (
+            // Positioned so the artifact panel can float over the chat when the window is too narrow.
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <PageHeader className="justify-between">
+                  <h1
+                    aria-label={activeConversationTitle}
+                    className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-xl font-semibold tracking-tight text-ink-900"
+                    title={activeConversationTitle}
+                  >
+                    {truncateConversationTitle(activeConversationTitle)}
+                  </h1>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!isRehearsalMode && (
+                      <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
+                    )}
+                    <div
+                      aria-label="会话模式"
+                      className="inline-flex h-10 shrink-0 items-center rounded-full border border-ink-200/80 bg-white/70 p-1 shadow-sm backdrop-blur"
+                      role="group"
+                    >
                       <button
-                        className="shrink-0 font-medium underline underline-offset-2"
-                        onClick={() => void loadConversation(historyErrorConversationId)}
+                        aria-pressed={!isRehearsalMode}
+                        className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                          isRehearsalMode
+                            ? 'font-medium text-ink-500 hover:text-ink-800'
+                            : 'bg-brand-700 font-semibold text-white shadow-sm'
+                        } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
+                        onClick={() => setConversationDisplayMode('conversation')}
                         type="button"
                       >
-                        重试
+                        <Chats aria-hidden="true" className="h-4 w-4" />
+                        对话模式
                       </button>
-                    )}
-                  </div>
-                )}
-
-                {isHistoryLoading || isInitialListLoading ? (
-                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-ink-500" role="status">
-                    {isInitialListLoading
-                      ? conversationState.listStatus === 'error'
-                        ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
-                        : '正在加载对话列表…'
-                      : '正在加载历史消息…'}
-                  </div>
-                ) : (
-                  <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <ThreadPrimitive.Viewport
-                className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
-                ref={messageViewportRef}
-              >
-                {hasEarlierMessages && (
-                  <div className="flex shrink-0 flex-col items-center gap-2 py-2">
-                    {earlierMessagesError && (
-                      <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
-                        <span>{earlierMessagesError}</span>
+                      {/* A disabled button receives no pointer events, so the reason lives on the
+                          wrapper: hovering the greyed tab still explains why it is unavailable. */}
+                      <span
+                        className="inline-flex"
+                        title={canEnterRehearsal ? undefined : REHEARSAL_REQUIRES_ROUND_HINT}
+                      >
                         <button
-                          className="font-medium underline underline-offset-2"
-                          disabled={isLoadingEarlierMessages}
-                          onClick={() => void loadEarlierMessages()}
+                          aria-pressed={isRehearsalMode}
+                          className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                            isRehearsalMode
+                              ? 'bg-brand-700 font-semibold text-white shadow-sm'
+                              : canEnterRehearsal
+                                ? 'font-medium text-ink-500 hover:text-ink-800'
+                                : 'font-medium text-ink-300'
+                          } disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
+                          disabled={!canEnterRehearsal}
+                          onClick={() => setConversationDisplayMode('rehearsal')}
                           type="button"
                         >
-                          重试
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      className="rounded-full border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-600 transition hover:border-ink-400 hover:text-ink-900 disabled:cursor-wait disabled:opacity-50"
-                      disabled={isLoadingEarlierMessages || isRunning}
-                      onClick={() => void loadEarlierMessages()}
-                      type="button"
-                    >
-                      {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
-                    </button>
-                  </div>
-                )}
-
-                <AuiIf condition={(state) => state.thread.isEmpty}>
-                  <EmptyState
-                    className="my-auto"
-                    description="先聊清楚你想讲的内容，再去演练模式接受学生的提问。"
-                    hint="例如：帮我用一个生活中的例子解释缓存雪崩"
-                    icon={Sparkle}
-                    title="从一个备课问题开始"
-                  />
-                </AuiIf>
-
-                <ThreadPrimitive.Messages>
-                  {({ message }) => {
-                    if (message.role === 'user') {
-                      return (
-                        <div className="space-y-4" key={message.id}>
-                          <UserMessage messageId={message.id} />
-                          <AgentActivity activity={activity[message.id]} />
-                        </div>
-                      );
-                    }
-
-                    return <AssistantMessage key={message.id} messageId={message.id} />;
-                  }}
-                </ThreadPrimitive.Messages>
-                <TurnProgress activity={liveActivity} />
-                <LiveArtifactFooter files={liveActivity.artifacts} />
-              </ThreadPrimitive.Viewport>
-
-              <div className="mt-2 shrink-0 pb-1 pt-3">
-                <ComposerPrimitive.Root className="relative rounded-3xl border border-ink-200 bg-white p-3 transition-colors duration-200 ease-out focus-within:border-brand-500 motion-reduce:transition-none">
-                  <SlashCommandMenu menu={slashMenu} />
-                  <ComposerAttachmentChips />
-                  {composerCommand && (
-                    <div className="mb-2 flex items-center">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-2 pr-1 text-xs font-medium text-brand-800">
-                        {composerCommandItem?.icon === 'research' ? (
-                          <MagnifyingGlass className="h-3.5 w-3.5" aria-hidden />
-                        ) : (
-                          <Database className="h-3.5 w-3.5" aria-hidden />
-                        )}
-                        {composerCommandItem?.label ?? composerCommand}
-                        <button
-                          aria-label={`移除${composerCommandItem?.label ?? '命令'}`}
-                          className="rounded-full p-0.5 text-brand-600 transition hover:bg-brand-100"
-                          onClick={() => composerCommandStore.reset()}
-                          type="button"
-                        >
-                          <X className="h-3 w-3" aria-hidden />
+                          <GraduationCap aria-hidden="true" className="h-4 w-4" />
+                          演练模式
                         </button>
                       </span>
                     </div>
-                  )}
-                  <ComposerPrimitive.Input
-                    aria-label="发送给备课助手"
-                    className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400"
-                    disabled={isLoadingEarlierMessages}
-                    onKeyDown={slashMenu.handleKeyDown}
-                    placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
-                    ref={composerInputRef}
-                    rows={3}
-                    submitMode="ctrlEnter"
-                  />
-                  <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <AttachmentPickerButton disabled={isLoadingEarlierMessages} />
-                      <span className="text-xs text-ink-500">Ctrl + Enter 发送</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <AuiIf condition={(state) => state.thread.isRunning}>
-                        <ComposerPrimitive.Cancel className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-medium text-ink-600 transition hover:bg-ink-50">
-                          停止生成
-                        </ComposerPrimitive.Cancel>
-                      </AuiIf>
-                      <AuiIf condition={(state) => !state.thread.isRunning}>
-                        <ComposerPrimitive.Send
-                          className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={isLoadingEarlierMessages}
-                        >
-                          发送
-                        </ComposerPrimitive.Send>
-                      </AuiIf>
-                    </div>
                   </div>
-                </ComposerPrimitive.Root>
+                </PageHeader>
+
+                <div className="relative min-h-0 flex-1 overflow-hidden">
+                  <div
+                    aria-hidden={isRehearsalMode}
+                    className={`absolute inset-0 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
+                      isRehearsalMode
+                        ? 'pointer-events-none translate-y-1 opacity-0'
+                        : 'translate-y-0 opacity-100'
+                    }`}
+                    inert={isRehearsalMode}
+                  >
+                    {historyError && (
+                      <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+                        <span className="min-w-0 flex-1">{historyError}</span>
+                        {historyErrorConversationId && (
+                          <button
+                            className="shrink-0 font-medium underline underline-offset-2"
+                            onClick={() => void loadConversation(historyErrorConversationId)}
+                            type="button"
+                          >
+                            重试
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {isHistoryLoading || isInitialListLoading ? (
+                      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-ink-500" role="status">
+                        {isInitialListLoading
+                          ? conversationState.listStatus === 'error'
+                            ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
+                            : '正在加载对话列表…'
+                          : '正在加载历史消息…'}
+                      </div>
+                    ) : (
+                      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <ThreadPrimitive.Viewport
+                    className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
+                    ref={messageViewportRef}
+                  >
+                    {hasEarlierMessages && (
+                      <div className="flex shrink-0 flex-col items-center gap-2 py-2">
+                        {earlierMessagesError && (
+                          <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
+                            <span>{earlierMessagesError}</span>
+                            <button
+                              className="font-medium underline underline-offset-2"
+                              disabled={isLoadingEarlierMessages}
+                              onClick={() => void loadEarlierMessages()}
+                              type="button"
+                            >
+                              重试
+                            </button>
+                          </div>
+                        )}
+                        <button
+                          className="rounded-full border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-600 transition hover:border-ink-400 hover:text-ink-900 disabled:cursor-wait disabled:opacity-50"
+                          disabled={isLoadingEarlierMessages || isRunning}
+                          onClick={() => void loadEarlierMessages()}
+                          type="button"
+                        >
+                          {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
+                        </button>
+                      </div>
+                    )}
+
+                    <AuiIf condition={(state) => state.thread.isEmpty}>
+                      <EmptyState
+                        className="my-auto"
+                        description="先聊清楚你想讲的内容，再去演练模式接受学生的提问。"
+                        hint="例如：帮我用一个生活中的例子解释缓存雪崩"
+                        icon={Sparkle}
+                        title="从一个备课问题开始"
+                      />
+                    </AuiIf>
+
+                    <ThreadPrimitive.Messages>
+                      {({ message }) => {
+                        if (message.role === 'user') {
+                          return (
+                            <div className="space-y-4" key={message.id}>
+                              <UserMessage messageId={message.id} />
+                              <AgentActivity activity={activity[message.id]} />
+                            </div>
+                          );
+                        }
+
+                        return <AssistantMessage key={message.id} messageId={message.id} />;
+                      }}
+                    </ThreadPrimitive.Messages>
+                    <TurnProgress activity={liveActivity} />
+                    <LiveArtifactFooter files={liveActivity.artifacts} />
+                  </ThreadPrimitive.Viewport>
+
+                  <div className="mt-2 shrink-0 pb-1 pt-3">
+                    <ComposerPrimitive.Root className="relative rounded-3xl border border-ink-200 bg-white p-3 transition-colors duration-200 ease-out focus-within:border-brand-500 motion-reduce:transition-none">
+                      <SlashCommandMenu menu={slashMenu} />
+                      <ComposerAttachmentChips />
+                      {composerCommand && (
+                        <div className="mb-2 flex items-center">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-2 pr-1 text-xs font-medium text-brand-800">
+                            {composerCommandItem?.icon === 'research' ? (
+                              <MagnifyingGlass className="h-3.5 w-3.5" aria-hidden />
+                            ) : (
+                              <Database className="h-3.5 w-3.5" aria-hidden />
+                            )}
+                            {composerCommandItem?.label ?? composerCommand}
+                            <button
+                              aria-label={`移除${composerCommandItem?.label ?? '命令'}`}
+                              className="rounded-full p-0.5 text-brand-600 transition hover:bg-brand-100"
+                              onClick={() => composerCommandStore.reset()}
+                              type="button"
+                            >
+                              <X className="h-3 w-3" aria-hidden />
+                            </button>
+                          </span>
+                        </div>
+                      )}
+                      <ComposerPrimitive.Input
+                        aria-label="发送给备课助手"
+                        className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400"
+                        disabled={isLoadingEarlierMessages}
+                        onKeyDown={slashMenu.handleKeyDown}
+                        placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
+                        ref={composerInputRef}
+                        rows={3}
+                        submitMode="ctrlEnter"
+                      />
+                      <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <AttachmentPickerButton disabled={isLoadingEarlierMessages} />
+                          <span className="text-xs text-ink-500">Ctrl + Enter 发送</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <AuiIf condition={(state) => state.thread.isRunning}>
+                            <ComposerPrimitive.Cancel className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-medium text-ink-600 transition hover:bg-ink-50">
+                              停止生成
+                            </ComposerPrimitive.Cancel>
+                          </AuiIf>
+                          <AuiIf condition={(state) => !state.thread.isRunning}>
+                            <ComposerPrimitive.Send
+                              className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={isLoadingEarlierMessages}
+                            >
+                              发送
+                            </ComposerPrimitive.Send>
+                          </AuiIf>
+                        </div>
+                      </div>
+                    </ComposerPrimitive.Root>
+                  </div>
+                      </ThreadPrimitive.Root>
+                    )}
+                  </div>
+                  <div
+                    aria-hidden={!isRehearsalMode}
+                    className={`absolute inset-0 z-10 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
+                      isRehearsalMode
+                        ? 'translate-y-0 opacity-100'
+                        : 'pointer-events-none translate-y-1 opacity-0'
+                    }`}
+                    inert={!isRehearsalMode}
+                  >
+                    <RehearsalMode
+                      conversationId={conversationState.activeConversationId}
+                      hasHistory={hasCompletedRound}
+                    />
+                  </div>
+                </div>
               </div>
-                  </ThreadPrimitive.Root>
-                )}
-              </div>
-              <div
-                aria-hidden={!isRehearsalMode}
-                className={`absolute inset-0 z-10 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
-                  isRehearsalMode
-                    ? 'translate-y-0 opacity-100'
-                    : 'pointer-events-none translate-y-1 opacity-0'
-                }`}
-                inert={!isRehearsalMode}
-              >
-                <RehearsalMode
-                  conversationId={conversationState.activeConversationId}
-                  hasHistory={hasCompletedRound}
-                />
-              </div>
+              {!isRehearsalMode && <ArtifactSidebar />}
             </div>
-          </div>
-          {!isRehearsalMode && <ArtifactSidebar />}
-        </div>
+          )}
+        </>
       )}
       <ToastHost />
     </section>

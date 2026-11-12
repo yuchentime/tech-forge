@@ -135,6 +135,8 @@ const bridge: DesktopBridge = {
     ) as Promise<ContentWidthResult>,
   releaseContentWidth: () =>
     ipcRenderer.invoke('window:release-content-width') as Promise<void>,
+  setClassroomMode: (enabled: boolean) =>
+    ipcRenderer.invoke('window:set-classroom-mode', enabled) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('teachforge', bridge);

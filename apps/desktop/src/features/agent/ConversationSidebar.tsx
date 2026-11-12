@@ -1,5 +1,6 @@
 import {
   Books,
+  Chalkboard,
   ChatCircle,
   DotsThree,
   GearSix,
@@ -14,7 +15,7 @@ import {
 } from './conversation-store';
 
 /** Views the sidebar can switch the main area to; `chat` is the conversation view. */
-export type SidebarView = 'chat' | 'settings' | 'knowledge' | 'knowledgeProfile';
+export type SidebarView = 'chat' | 'settings' | 'knowledge' | 'knowledgeProfile' | 'classroom';
 
 /** Renders the conversation list and actions without owning API or runtime state. */
 export function ConversationSidebar({
@@ -89,6 +90,24 @@ export function ConversationSidebar({
         >
           <Stack aria-hidden="true" className="size-4 shrink-0" />
           <span className="truncate">知识掌握</span>
+        </button>
+        {/*
+          Classroom mode replaces the whole shell with a stage, so this entry never shows a pressed
+          state; it only opens the mode.
+        */}
+        <button
+          aria-pressed={activeView === 'classroom'}
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
+            activeView === 'classroom'
+              ? 'bg-brand-100 text-brand-800'
+              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
+          }`}
+          onClick={() => onSelectView('classroom')}
+          title="课堂模式"
+          type="button"
+        >
+          <Chalkboard aria-hidden="true" className="size-4 shrink-0" />
+          <span className="truncate">课堂模式</span>
         </button>
       </header>
 

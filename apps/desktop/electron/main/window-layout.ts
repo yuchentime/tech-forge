@@ -161,3 +161,52 @@ export function resolveRestoredBounds(input: RestoreInput): WindowRect | null {
   );
   return { x: resolvedX, y: resolvedY, width: resolvedWidth, height: resolvedHeight };
 }
+
+/**
+ * Aspect ratio classroom mode locks the window to.
+ *
+ * The supplied classroom artwork is 1568×882, i.e. exactly 16:9, so the content area must match
+ * that ratio for the stage to fill the window without cropping or letterboxing.
+ */
+export const CLASSROOM_ASPECT_RATIO = 16 / 9;
+
+export type AspectLockInput = {
+  bounds: WindowRect;
+  contentBounds: Size;
+  workArea: WindowRect;
+  aspectRatio: number;
+};
+
+/**
+ * Plans the window rect whose *content* area has `aspectRatio`.
+ *
+ * The current content width is kept, so entering classroom mode only trims the height instead of
+ * jumping to a different size. When the display cannot fit that height the plan scales both axes
+ * down; the result is always inside `workArea` because the window must stay reachable.
+ */
+export function planAspectLock(input: AspectLockInput): WindowRect {
+  const { bounds, contentBounds, workArea, aspectRatio } = input;
+  // Measured, not assumed: Windows frames scale with DPI and differ per theme.
+  const frameWidth = Math.max(0, bounds.width - contentBounds.width);
+  const frameHeight = Math.max(0, bounds.height - contentBounds.height);
+  const maxContentWidth = Math.max(1, workArea.width - frameWidth);
+  const maxContentHeight = Math.max(1, workArea.height - frameHeight);
+
+  let contentWidth = Math.min(contentBounds.width, maxContentWidth);
+  let contentHeight = contentWidth / aspectRatio;
+  if (contentHeight > maxContentHeight) {
+    contentHeight = maxContentHeight;
+    contentWidth = contentHeight * aspectRatio;
+  }
+
+  const width = Math.round(contentWidth + frameWidth);
+  const height = Math.round(contentHeight + frameHeight);
+  const rightmostX = workArea.x + workArea.width - width;
+  const bottommostY = workArea.y + workArea.height - height;
+  return {
+    x: Math.min(Math.max(bounds.x, workArea.x), Math.max(workArea.x, rightmostX)),
+    y: Math.min(Math.max(bounds.y, workArea.y), Math.max(workArea.y, bottommostY)),
+    width,
+    height,
+  };
+}
