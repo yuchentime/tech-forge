@@ -7,6 +7,16 @@ import {
   turnStatusLabel,
 } from './rehearsal-ui-utils';
 
+/** First non-empty line of a draft; the evaluation status line shows only this line. */
+function firstAnswerLine(text: string): string {
+  return (
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean) ?? ''
+  );
+}
+
 /** Question/answer transcript and the composer for the active drill. */
 export function RehearsalSession({
   detail,
@@ -36,25 +46,11 @@ export function RehearsalSession({
   showEndAction: boolean;
 }) {
   const [answer, setAnswer] = useState('');
+  // First line of the answer currently being evaluated; the composer is empty at that point, so
+  // the status line carries the text that was sent.
+  const [submittedPreview, setSubmittedPreview] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const questionId = detail.currentQuestion?.turnId ?? null;
-
-  useEffect(() => {
-    setAnswer('');
-  }, [questionId]);
-
-  // A restored answer whose evaluation never finished is the only text the backend accepts for
-  // that turn, so surface it in the composer instead of an empty box.
-  useEffect(() => {
-    if (pendingAnswer) {
-      setAnswer((current) => current || pendingAnswer.answer);
-    }
-  }, [pendingAnswer]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
-  }, [detail.turns.length, detail.status]);
 
   const busy =
     isSubmitting ||
@@ -69,9 +65,33 @@ export function RehearsalSession({
   // An answer evaluation is running either locally (request in flight) or server-side after a
   // reload; both keep the composer read-only and show one status line.
   const isEvaluating = isEvaluatingAnswer || detail.status === 'evaluating';
+  const evaluatingPreview = isEvaluating
+    ? submittedPreview ?? (pendingAnswer ? firstAnswerLine(pendingAnswer.answer) : null)
+    : null;
+
+  useEffect(() => {
+    setAnswer('');
+    setSubmittedPreview(null);
+  }, [questionId]);
+
+  // A restored answer whose evaluation never finished is the only text the backend accepts for
+  // that turn, so surface it in the composer instead of an empty box. The draft stays empty while
+  // an evaluation runs: the submitted text lives in the status line, not in the box.
+  useEffect(() => {
+    if (pendingAnswer && !isEvaluating) {
+      setAnswer((current) => current || pendingAnswer.answer);
+    }
+  }, [pendingAnswer, isEvaluating]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }, [detail.turns.length, detail.status]);
 
   const submit = (): void => {
     if (!answer.trim() || busy) return;
+    setSubmittedPreview(firstAnswerLine(answer));
+    setAnswer('');
     onAnswer(answer);
   };
 
@@ -146,9 +166,17 @@ export function RehearsalSession({
 
       <div className="mt-3 shrink-0 border-t border-stone-200 pt-3">
         {isEvaluating && (
-          <div className="mb-2 flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
-            <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
-            正在进行评估…
+          <div
+            className="mb-2 flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600"
+            role="status"
+            title={evaluatingPreview ?? undefined}
+          >
+            <CircleNotch aria-hidden className="h-4 w-4 shrink-0 animate-spin" />
+            <span className="min-w-0 flex-1 truncate">
+              {evaluatingPreview
+                ? `正在评估：${evaluatingPreview}`
+                : '正在进行评估…'}
+            </span>
           </div>
         )}
         {pendingAnswer && !isEvaluating ? (
@@ -187,23 +215,21 @@ export function RehearsalSession({
             正在生成总体评估…
           </div>
         ) : canAnswer && detail.currentQuestion ? (
-          <>
-            <textarea
-              aria-label="回答学生的问题"
-              className="min-h-24 w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm leading-6 text-stone-900 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
-              disabled={busy}
-              onChange={(event) => setAnswer(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-              placeholder="用你自己的话回答，尽量给出具体例子…（Ctrl + Enter 提交）"
-              rows={3}
-              value={answer}
-            />
-          </>
+          <textarea
+            aria-label="回答学生的问题"
+            className="min-h-24 w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm leading-6 text-stone-900 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+            disabled={busy}
+            onChange={(event) => setAnswer(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="用你自己的话回答，尽量给出具体例子…（Ctrl + Enter 提交）"
+            rows={3}
+            value={answer}
+          />
         ) : isEvaluating ? null : (
           <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
             <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
