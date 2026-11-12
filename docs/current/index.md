@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/index.md
   - docs/current/platform/index.md
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # 当前实现文档
@@ -25,6 +25,6 @@ last_verified: 2026-11-11
 - [知识库检索](domains/retrieval/index.md)：词法 + 向量双通道、RRF 融合、单字回退、可选查询扩展，以及 `/查询资料库` 与 `/探索主题` 命令触发的分片注入、去重与注入位置（user message，而非 system prompt）。
 - [Artifact 会话产出文件](domains/artifacts/index.md)：模型写入文件的登记、`session`/`external` 路径解析、预览与删除记录接口、探索主题文档/SVG 产物，以及文件侧边栏（缺失文件的记录可删除）。
 - [长期记忆](domains/memory/index.md)：db0 SQLite 存储、本地 bge 嵌入、`memory_*` 工具、每轮 user prefix 注入、中文冲突覆盖、锁与备份，以及设置页管理 API。
-- [本机 Agent 设置](domains/system-settings/index.md)：DeepSeek 模型配置、config.toml / SOULS.md 本地文件、默认 Agent workspace、设置 API 与新 session 配置行为。
+- [本机 Agent 设置](domains/system-settings/index.md)：DeepSeek 模型配置、config.toml / IDENTIFY.md / PREFERENCE.md 本地文件、默认 Agent workspace、设置 API 与新 session 配置行为。
 - [跨领域约定目录](shared/README.md)：多个领域共用的稳定契约。
 - [工程规则目录](rules/README.md)：长期、可执行的工程规则。

@@ -185,6 +185,20 @@ function writeSource(name, content) {
   return path;
 }
 
+test('boots with an empty catalog so a session can always read knowledge/index.md', async () => {
+  const ctx = await createServer();
+
+  try {
+    const catalogPath = join(ctx.configDirectory, 'knowledge', 'index.md');
+    assert.equal(existsSync(catalogPath), true);
+    const catalog = readFileSync(catalogPath, 'utf8');
+    assert.match(catalog, /^## 资料目录/);
+    assert.match(catalog, /资料库当前为空/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('importing a picked file copies it into the app knowledge directory and indexes it', async () => {
   const ctx = await createServer();
   const source = writeSource(
@@ -218,6 +232,10 @@ test('importing a picked file copies it into the app knowledge directory and ind
     );
     assert.equal(existsSync(storedCopy), true);
     assert.deepEqual(readdirSync(join(ctx.configDirectory, 'knowledge', '.importing')), []);
+    assert.match(
+      readFileSync(join(ctx.configDirectory, 'knowledge', 'index.md'), 'utf8'),
+      /title: photosynthesis/,
+    );
 
     const documents = await rows(ctx, 'SELECT * FROM documents');
     assert.equal(documents.length, 1);

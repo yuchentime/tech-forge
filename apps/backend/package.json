@@ -13,6 +13,7 @@
     "test:conversation-history": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-history.test.cjs",
     "test:document-parser": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-parser.test.cjs",
     "test:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-ingest.test.cjs",
+    "test:document-catalog": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/document-catalog.test.cjs",
     "test:knowledge-library": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/knowledge-library.test.cjs",
     "verify:document-parser": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-parser.cjs",
     "verify:document-ingest": "tsc --project tsconfig.build.json --outDir .test-dist && node test/verify-document-ingest.cjs",

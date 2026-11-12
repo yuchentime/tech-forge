@@ -56,7 +56,7 @@ export class DocumentCatalogIndexService {
     const body = renderCatalogIndex(rows);
     const temp = join(root, `.index-${process.pid}-${Date.now()}.tmp`);
     await writeFile(temp, body, { encoding: 'utf8', mode: 0o600 });
-    await rename(temp, join(root, 'index.md'));
+    await rename(temp, this.settings.getKnowledgeCatalogPath());
   }
 }
 
@@ -68,7 +68,11 @@ export function renderCatalogIndex(rows: Array<{ document: Pick<DocumentEntity, 
     `  keywords: [${JSON.parse(version.catalogKeywordsJson ?? '[]').map(indexText).join(', ')}]`,
     `  summary: ${indexText(version.catalogSummary)}`, `  updated_at: ${version.catalogedAt?.toISOString() ?? version.updatedAt.toISOString()}`,
   ].join('\n'));
-  return ['## 资料目录', '', ...entries, ''].join('\n\n');
+  // An empty library still gets an explicit body: a bare heading reads like truncated output.
+  const body = entries.length > 0
+    ? entries.join('\n\n')
+    : '（资料库当前为空，尚未导入任何资料。）';
+  return ['## 资料目录', '', body, ''].join('\n\n');
 }
 
 /**

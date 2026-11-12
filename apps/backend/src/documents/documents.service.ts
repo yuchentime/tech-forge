@@ -169,8 +169,18 @@ export class DocumentsService implements OnModuleInit {
    * Earlier builds stored the retained copies inside the workspace, where a default `grep` could read
    * the uploaded originals. The move is best-effort and never destructive: an existing target wins,
    * and a failure is logged because imports already write to the new location.
+   *
+   * The catalog is then created when the install has never written one. Sessions are told to read
+   * `knowledge/index.md`, but the index used to appear only after an import, so a fresh install
+   * answered that read with ENOENT.
    */
   async onModuleInit(): Promise<void> {
+    await this.migrateLegacyKnowledgeDirectory();
+    await this.ensureKnowledgeCatalog();
+  }
+
+  /** Moves a pre-2026-11-09 upload directory out of the Agent workspace, once. */
+  private async migrateLegacyKnowledgeDirectory(): Promise<void> {
     try {
       const legacyDirectory = join(await this.settings.getWorkspacePath(), 'knowledge');
       const targetDirectory = this.settings.getKnowledgeDirectory();
@@ -186,6 +196,25 @@ export class DocumentsService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(
         `documents.knowledge_dir.migrate_failed ${JSON.stringify({ detail: describeDetail(error) })}`,
+      );
+    }
+  }
+
+  /**
+   * Writes the catalog index when this install has none.
+   *
+   * The file is rebuilt from the database, never parsed from the previous file, so an install that
+   * already imported documents recovers its catalog instead of getting an empty placeholder. A
+   * failure only warns: the backend must start even when the knowledge directory is read-only.
+   */
+  private async ensureKnowledgeCatalog(): Promise<void> {
+    if (existsSync(this.settings.getKnowledgeCatalogPath())) return;
+    try {
+      await this.rebuildCatalogIndex();
+      this.logger.log('documents.knowledge_catalog.created');
+    } catch (error) {
+      this.logger.warn(
+        `documents.knowledge_catalog.create_failed ${JSON.stringify({ detail: describeDetail(error) })}`,
       );
     }
   }

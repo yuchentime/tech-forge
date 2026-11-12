@@ -8,12 +8,14 @@ import { hasDesktopBridge } from "../../types/desktop-bridge";
 interface LocalSettingsView {
   configDirectory: string;
   configFilePath: string;
-  soulsFilePath: string;
+  preferenceFilePath: string;
+  identifyFilePath: string;
   workspacePath: string;
   llm: {
     deepseek: { modelId: string; apiKey: string; apiKeyConfigured: boolean };
   };
-  souls: string;
+  preference: string;
+  identify: string;
 }
 
 /** Renders and persists the local model, workspace and style settings. */
@@ -92,7 +94,8 @@ export function SettingsPage() {
               ...(clearDeepseekApiKey ? { clearApiKey: true } : {}),
             },
           },
-          souls: settings.souls,
+          preference: settings.preference,
+          identify: settings.identify,
         },
       });
       if (response.status !== 200 || !isLocalSettingsView(response.data)) {
@@ -128,10 +131,17 @@ export function SettingsPage() {
     );
   }, []);
 
-  /** Updates the Markdown content stored in the local SOULS.md file. */
-  const updateSouls = useCallback((value: string) => {
+  /** Updates the Markdown content stored in the local PREFERENCE.md file. */
+  const updatePreference = useCallback((value: string) => {
     setSettings((current) =>
-      current ? { ...current, souls: value } : current,
+      current ? { ...current, preference: value } : current,
+    );
+  }, []);
+
+  /** Updates the Markdown content stored in the local IDENTIFY.md file. */
+  const updateIdentify = useCallback((value: string) => {
+    setSettings((current) =>
+      current ? { ...current, identify: value } : current,
     );
   }, []);
 
@@ -218,22 +228,44 @@ export function SettingsPage() {
               <section className="rounded-xl border border-ink-200 bg-white p-5 md:p-6">
                 <div className="mb-4">
                   <h2 className="text-base font-semibold text-ink-900">
+                    身份设定
+                  </h2>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-500">
+                    写下你的身份、目标和学习场景。助手会按你的背景调整讲解方式。
+                  </p>
+                </div>
+                <textarea
+                  aria-label="身份设定内容"
+                  className="min-h-52 w-full resize-y rounded-lg border border-ink-300 bg-white px-3 py-3 text-sm leading-6 text-ink-800 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
+                  disabled={isSaving}
+                  id="identify-content"
+                  onChange={(event) => updateIdentify(event.target.value)}
+                  placeholder={
+                    "例如：\n- 我是一名已有 2 年工作经验的程序员\n- 希望深入学习语言和框架的底层原理，提升原理层面的理解\n- 目标是在大厂面试中拿到更好的机会"
+                  }
+                  value={settings.identify}
+                />
+              </section>
+
+              <section className="rounded-xl border border-ink-200 bg-white p-5 md:p-6">
+                <div className="mb-4">
+                  <h2 className="text-base font-semibold text-ink-900">
                     风格偏好
                   </h2>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-500">
-                    写下希望助手长期遵循的表达方式或备课习惯。内容会作为系统提示词的补充，用于之后新建的模型会话。
+                    写下你希望助手长期遵循的表达方式或备课习惯。
                   </p>
                 </div>
                 <textarea
                   aria-label="风格偏好内容"
                   className="min-h-52 w-full resize-y rounded-lg border border-ink-300 bg-white px-3 py-3 text-sm leading-6 text-ink-800 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
                   disabled={isSaving}
-                  id="souls-content"
-                  onChange={(event) => updateSouls(event.target.value)}
+                  id="preference-content"
+                  onChange={(event) => updatePreference(event.target.value)}
                   placeholder={
                     "例如：\n- 先用贴近课堂的例子解释新概念\n- 重点内容分层说明，避免一次给出过长答案"
                   }
-                  value={settings.souls}
+                  value={settings.preference}
                 />
               </section>
 
@@ -380,10 +412,12 @@ function isLocalSettingsView(value: unknown): value is LocalSettingsView {
   const candidate = value as Partial<LocalSettingsView>;
   return (
     typeof candidate.configFilePath === "string" &&
-    typeof candidate.soulsFilePath === "string" &&
+    typeof candidate.preferenceFilePath === "string" &&
+    typeof candidate.identifyFilePath === "string" &&
     typeof candidate.configDirectory === "string" &&
     typeof candidate.workspacePath === "string" &&
-    typeof candidate.souls === "string" &&
+    typeof candidate.preference === "string" &&
+    typeof candidate.identify === "string" &&
     typeof candidate.llm === "object" &&
     candidate.llm !== null &&
     typeof candidate.llm.deepseek?.modelId === "string" &&

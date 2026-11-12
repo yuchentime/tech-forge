@@ -17,7 +17,7 @@ related:
   - docs/changes/2026-11-10-deep-research-command/design.md
   - docs/changes/2026-11-11-deepseek-web-tools/design.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # Agent Runtime 运行链路
@@ -30,16 +30,16 @@ last_verified: 2026-11-11
 |---|---|
 | `App` / `useRemoteThreadListRuntime` | 以稳定 `ThreadListAdapter` 读取 Conversation 摘要，并为每个访问过的线程创建独立 LocalRuntime；assistant-ui 保持后台线程挂载，切换不会取消其他会话的流。活动 remote ID 仍写入 localStorage 供启动恢复。 |
 | `AgentChatPage` / `ConversationStore` | 恢复活动 ID、加载最近最多 30 条可见消息并以 Message ID 按需前置更早历史；各线程的 composer 附件/命令草稿以稳定 localThreadId 键控。页面采用全高双栏，侧栏列表与消息视口独立滚动，输入区保持可见；设置按钮切换右侧聊天/设置主视图，不卸载根 Conversation Runtime。 |
-| `SettingsPage` / `ConversationSidebar` | 会话行悬停显示「…」，菜单里的「删除会话」直接物理删除（无二次确认），删除当前会话时同时清空线程与输入区；通过侧栏底部设置入口切换视图；从本地设置 API 加载 DeepSeek 模型字段、密钥配置状态与 SOULS 文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
+| `SettingsPage` / `ConversationSidebar` | 会话行悬停显示「…」，菜单里的「删除会话」直接物理删除（无二次确认），删除当前会话时同时清空线程与输入区；通过侧栏底部设置入口切换视图；从本地设置 API 加载 DeepSeek 模型字段、密钥配置状态、IDENTIFY 身份文本与 PREFERENCE 风格文本，并保存用户编辑。Renderer 不读取本机文件；设置页通过本机设置 API 接收明文 API Key，其他 Agent 流程不接收密钥。 |
 | Desktop Agent adapter | 发送最新用户输入和该线程的 `unstable_threadId`（已初始化时为 remote Conversation ID）；不读取全局活动会话，也不让后台 `conversation` SSE 改变选择。活动映射按 requestId 保存，流终止后刷新摘要。 |
 | Electron Main / Preload | Main 代理固定 Agent SSE 路由，并避免 renderer 接触本地 backend token；Preload 暴露类型化流桥接。 |
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `LlmService` | 每次请求创建 Pi session 时重新读取 DeepSeek 模型配置与 SOULS.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。聊天与 skill 轮次再注册 `web_search`/`web_fetch`（内部 JSON 调用不注册）。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆，也不启用网页工具。 |
+| `LlmService` | 每次请求创建 Pi session 时重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。聊天与 skill 轮次再注册 `web_search`/`web_fetch`（内部 JSON 调用不注册）。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
-| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、SOULS.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
+| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
 ## 运行日志
@@ -158,7 +158,7 @@ Session 初始化时，`LlmService` 从 `SettingsService` 单独读取工作空�
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-每次 `stream()` 结束且持久化没有失败时，`LlmService` 用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 DeepSeek 配置，并把非空 `SOULS.md` 文本追加在固定系统提示词之后。API Key 在 backend 用于 DeepSeek Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
+每次 `stream()` 结束且持久化没有失败时，`LlmService` 用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 DeepSeek 配置，并把非空 `IDENTIFY.md` 身份文本（位于风格偏好之前）与 `PREFERENCE.md` 风格文本追加在固定系统提示词之后。API Key 在 backend 用于 DeepSeek Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
 ## 会话附件
 
@@ -177,8 +177,9 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 ## 文件读写边界
 
-- 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml` 与 `SOULS.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
-- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件；知识库根（`<configDir>/knowledge`）默认拒绝，用户在该轮明确点名路径时放行（config/SOULS 无此例外）；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
+- 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml`、`IDENTIFY.md` 与 `PREFERENCE.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
+- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件；知识库根（`<configDir>/knowledge`）默认拒绝，用户在该轮明确点名路径时放行（config/IDENTIFY/PREFERENCE 无此例外）；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
+- 知识库根里唯一的读取例外是生成的目录文件 `<configDir>/knowledge/index.md`：`LlmService` 把它交给 `workspace-file-tools.ts` 的 `readableGuardedPaths`，按精确路径放行，同目录上传原文仍被拒绝，且豁免不会扩展到父目录。`DocumentsService.onModuleInit` 在启动时按数据库重建该文件（缺失才写，空库写成“资料库当前为空”），因此会话按 `AGENTS.md` 读到它时不会得到 ENOENT。
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 
@@ -201,12 +202,12 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `LlmService.generate()`。该调用可传入父 `conversation`，让 `restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
 - `start()` 通过可选的 `onPhase` 回调把 session 引导、provider 调用与 JSON 修复重试写入进程内 `RehearsalPreparingRegistry`，只由只读端点 `GET /api/conversations/:id/rehearsals/preparing` 读取；该登记不参与状态机、不落库，重启即丢失。
 - 后续答题/跳过/报告调用使用新的临时 Pi session，只带 `learningSummary + plan + 已有问答`；不传 `conversation`，不写快照。
-- 演练 system prompt 由代码写死；不加载 SOULS/style preference、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
+- 演练 system prompt 由代码写死；不加载 IDENTIFY/PREFERENCE 文本、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
 - 每题动作只有 `follow_up` / `next_question`；第 15 问（含跳过）由后端转 `reporting`，模型不能提前结束。
 - 报告完成写 `rehearsals.overallEvaluationJson` 和 `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md`。普通对话下一轮由 `ChatService` 调 `buildConversationDigest()`，把最近 3 次摘要放进 `promptContext`；`contextRefsJson.rehearsals` 记录实际注入的 id。
 - `generate()` 不注册 `persistConversationEvent`，因此不会触发 `ConversationsService` 的消息持久化钩子。
 - `generate()` 支持可选的 `buildPrompt({contextWindow})`：在 provider/model 解析完成后、调用 `session.prompt()` 前用同一次解析的实际窗口构造最终输入。不传该回调时保持原有字符串 prompt 行为。会话知识事实使用该入口做预算截断，避免读取两次配置导致模型漂移。
-- 会话知识事实使用同一 `generate()` 边界但独立 AbortSignal、`tools: []`、固定 system prompt，不传父 conversation；后台 worker 不写普通消息、Pi 快照或 SOULS。行为见[演练模式](../domains/rehearsals/index.md#会话知识掌握事实)。
+- 会话知识事实使用同一 `generate()` 边界但独立 AbortSignal、`tools: []`、固定 system prompt，不传父 conversation；后台 worker 不写普通消息、Pi 快照或 PREFERENCE。行为见[演练模式](../domains/rehearsals/index.md#会话知识掌握事实)。
 
 详细状态机与 API 见[演练模式](../domains/rehearsals/index.md)。
 
@@ -221,7 +222,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
 2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
 3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `ChatStreamEvent`、桥接校验和 adapter。
-4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/SOULS；知识库根（`knowledge/`）默认拒绝读取，只有当前用户请求明确点名该路径时才建立一次性读取许可；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
+4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/IDENTIFY/PREFERENCE；知识库根（`knowledge/`）默认拒绝读取，只有当前用户请求明确点名该路径时才建立一次性读取许可；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。

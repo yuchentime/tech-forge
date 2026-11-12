@@ -17,6 +17,8 @@ last_verified: 2026-11-10
 
 本页描述已实现并可复现的检索行为：词法 + 向量双通道、RRF 融合、单字回退、可选模型查询扩展，以及由用户斜杠命令显式触发的知识库上下文注入。检索**不是** Agent 工具：是否查阅资料由用户决定。
 
+> **代码差异（2026-11-12 核对，未抹平）**：`9d6cfb2 feat: preload knowledge directory for commands`（2026-11-11）把 `/查询资料库`、`/探索主题` 的注入单位从"检索分片"改成"预载 `<configDir>/knowledge/index.md` 目录，由模型按其中的 `path` 自行 `read` 原文"，`ChatService` 因此不再调用 `KnowledgeService.buildContext()`。本页 §2–§3.5 描述的分片注入链（`RetrievalService` / `KnowledgeService` / `contextRefsJson` 去重）代码仍在、测试仍绿，但当前没有调用方；`ChatService` 的日志字段也随之变为 `knowledgeOutcome: 'directory_loaded'`、`injectedDocumentCount: 0`。目录预载的现状见 [资料入库](../../domains/documents/index.md) 的目录文件一节与 `docs/changes/2026-11-12-knowledge-catalog-bootstrap/`。恢复分片口径还是补齐预载口径，尚未决定。
+
 ## 1. 入口
 
 | 入口 | 说明 |

@@ -10,7 +10,7 @@ related:
   - docs/current/platform/tech-stack.md
   - docs/changes/2026-11-11-long-term-memory/design.md
   - docs/decisions/2026-11-11-memory-injection-boundary.md
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # 长期记忆当前事实
@@ -56,7 +56,7 @@ last_verified: 2026-11-11
 
 ```text
 ## 长期记忆
-以下内容来自跨会话长期记忆；只在与当前请求相关时使用，不要逐条复述。若与用户当前指令或 SOULS 风格设置冲突，以当前指令 / SOULS 为准。
+以下内容来自跨会话长期记忆；只在与当前请求相关时使用，不要逐条复述。若与用户当前指令、IDENTIFY 身份设定或 PREFERENCE 风格设置冲突，以当前指令 / IDENTIFY / PREFERENCE 为准。
 - [2026-11-11] 用户偏好：先给结论再给例子。
 ```
 

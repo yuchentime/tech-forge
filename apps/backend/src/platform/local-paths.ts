@@ -30,7 +30,7 @@ const DATABASE_DIRECTORY_NAME = 'db';
 const DATABASE_FILE_NAME = 'teachforge.db';
 
 /**
- * Resolves the configuration root (`config.toml`, `SOULS.md`, knowledge, sessions, memory).
+ * Resolves the configuration root (`config.toml`, `PREFERENCE.md`, knowledge, sessions, memory).
  *
  * `TEACHFORGE_CONFIG_DIR` relocates it for portable installs and isolated integration tests.
  * Evaluated per call so tests can set the variable before Nest constructs the providers.

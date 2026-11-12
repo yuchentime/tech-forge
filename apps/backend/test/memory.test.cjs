@@ -210,7 +210,7 @@ test('context injection applies the relevance floor and item caps', async () => 
     const context = await harness.service.buildChatContext('怎么讲这道题');
     assert.match(context, /^## 长期记忆/u);
     assert.match(context, /先给结论/u);
-    assert.match(context, /SOULS/u);
+    assert.match(context, /PREFERENCE/u);
     assert.ok(context.split('\n').filter((line) => line.startsWith('- ')).length <= 2);
   } finally {
     await disposeHarness(harness);

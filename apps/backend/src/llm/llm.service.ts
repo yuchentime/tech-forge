@@ -927,7 +927,7 @@ export class LlmService {
         ...logContext,
         phase,
       });
-      // SettingsService owns config.toml and SOULS.md; pass only their paths so
+      // SettingsService owns config.toml, PREFERENCE.md and IDENTIFY.md; pass only their paths so
       // the Agent tools can deny access while SettingsService remains their owner.
       //
       // The Agent's working directory is the conversation workspace, so a relative path the model
@@ -949,6 +949,9 @@ export class LlmService {
           // Reads are allowed by default everywhere except this guarded subtree, which needs an
           // explicit path in the current user request (same shape as the external write grant).
           guardedDirectories: [this.settings.getKnowledgeDirectory()],
+          // The catalog is app-generated and the session policy tells the model to read it; the
+          // uploaded originals beside it stay denied.
+          readableGuardedPaths: [this.settings.getKnowledgeCatalogPath()],
           // Only stream() supplies this raw current-turn text. generate() has no grant.
           currentUserRequest,
           ...(options.onFileWritten
@@ -1053,12 +1056,15 @@ export class LlmService {
       ];
       let customSystemPrompt: string;
       if (buildOptions.systemPromptAppend?.trim()) {
-        // Rehearsal supplies its own fixed prompt; chat rules and style preference would conflict
-        // with the student role and are intentionally skipped.
+        // Rehearsal supplies its own fixed prompt; chat rules, identity and style preference would
+        // conflict with the student role and are intentionally skipped.
         customSystemPrompt = buildOptions.systemPromptAppend;
       } else {
-        const stylePreference = await this.settings.getStylePreference();
-        customSystemPrompt = [
+        const [stylePreference, identity] = await Promise.all([
+          this.settings.getStylePreference(),
+          this.settings.getIdentitySetting(),
+        ]);
+        const promptSections = [
           "\n\n## Adaptive teaching",
           "- Infer the user's familiarity with the current concept from conversation context, available memory, and demonstrated understanding. Distinguish exposure from mastery; do not assume expertise without evidence.",
           "- Adapt teaching to the current concept: favor explanations, examples, and guided steps for beginners; gradually introduce questions and scaffolding as understanding grows; use Socratic questioning, counterexamples, and application challenges when the user shows sufficient foundations.",
@@ -1072,8 +1078,14 @@ export class LlmService {
           "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
           "- For mind maps, prefer SVG with a left-to-right tree layout.",
           "- When the user states a durable preference, identity, or explicitly asks you to remember something, call memory_write. Never record one-off task details, file contents, teaching mastery (scores/weak spots), or answer style.",
-          `\n\n## User preferences: ${stylePreference}`,
-        ].join("\n");
+        ];
+        if (identity.trim()) {
+          // User-authored context about who they are and what they are working toward. It steers
+          // examples and depth without overriding the current request.
+          promptSections.push(`\n\n## User identity and goals:\n${identity.trim()}`);
+        }
+        promptSections.push(`\n\n## User preferences: ${stylePreference}`);
+        customSystemPrompt = promptSections.join("\n");
       }
 
       // Bundled skill templates are copied into the config root once. The user can then inspect,

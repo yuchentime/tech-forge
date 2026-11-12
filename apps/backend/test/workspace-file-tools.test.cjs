@@ -158,3 +158,28 @@ test('guards a directory by default but honours an explicit user request', async
 
   assert.equal(await fs.readFile(original, 'utf8'), 'uploaded original bytes');
 });
+
+test('reads the generated catalog inside a guarded directory but keeps its siblings denied', async (t) => {
+  const { parent, workspace } = await createWorkspace(t);
+  const knowledge = path.join(parent, 'knowledge');
+  await fs.mkdir(knowledge);
+  const catalog = path.join(knowledge, 'index.md');
+  const original = path.join(knowledge, 'origin.md');
+  const sibling = path.join(knowledge, 'other.md');
+  await fs.writeFile(catalog, '## 资料目录\n\n（资料库当前为空，尚未导入任何资料。）');
+  await fs.writeFile(original, 'uploaded original bytes');
+  await fs.writeFile(sibling, 'sibling bytes');
+  const sdk = await piSdkPromise;
+
+  const tools = await createWorkspaceFileTools(sdk, workspace, undefined, {
+    guardedDirectories: [knowledge],
+    readableGuardedPaths: [catalog],
+  });
+  const readTool = tools.find((tool) => tool.name === 'read');
+
+  const result = await executeTool(readTool, { path: catalog }, workspace);
+  assert.match(JSON.stringify(result), /资料库当前为空/);
+  await assert.rejects(executeTool(readTool, { path: original }, workspace));
+  // The exemption names one file, so it never widens to the directory.
+  await assert.rejects(executeTool(readTool, { path: sibling }, workspace));
+});

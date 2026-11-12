@@ -14,7 +14,7 @@ export class SettingsController {
     return this.settings.getSettings();
   }
 
-  /** Persists the submitted DeepSeek and style preference settings. */
+  /** Persists the submitted DeepSeek, style preference and identity settings. */
   @Put()
   saveSettings(@Body() input: SaveSettingsInput) {
     return this.settings.saveSettings(input);

@@ -166,7 +166,7 @@ export class MemoryService implements OnModuleInit, OnApplicationShutdown {
       );
       return [
         MEMORY_CONTEXT_HEADER,
-        '以下内容来自跨会话长期记忆；只在与当前请求相关时使用，不要逐条复述。若与用户当前指令或 SOULS 风格设置冲突，以当前指令 / SOULS 为准。',
+        '以下内容来自跨会话长期记忆；只在与当前请求相关时使用，不要逐条复述。若与用户当前指令、IDENTIFY 身份设定或 PREFERENCE 风格设置冲突，以当前指令 / IDENTIFY / PREFERENCE 为准。',
         memoryLines,
       ].join('\n');
     } catch (error) {

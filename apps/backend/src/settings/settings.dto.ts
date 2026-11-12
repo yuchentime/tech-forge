@@ -50,7 +50,13 @@ export class SaveSettingsInput {
   @Type(() => LlmSettingsInput)
   llm!: LlmSettingsInput;
 
+  /** User-authored answer-style text; empty is valid. */
   @IsString()
   @MaxLength(131072)
-  souls!: string;
+  preference!: string;
+
+  /** User-authored identity, goals and scenario text; empty is valid. */
+  @IsString()
+  @MaxLength(131072)
+  identify!: string;
 }
