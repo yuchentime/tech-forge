@@ -1,63 +1,41 @@
-import { ArrowLeft, Chalkboard, ChatsCircle, X } from '@phosphor-icons/react';
-import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ChatsCircle, FlagPennant, X } from '@phosphor-icons/react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import classroomBackground from '../../assets/classroom/bg-classroom.png';
 import { ClassroomComposer } from './ClassroomComposer';
+import { EndClassroomDialog } from './EndClassroomDialog';
+import {
+  CLASSROOM_STUDENT,
+  classroomSessionStore,
+} from './classroom-session-store';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
-
-/**
- * The student question shown once the teacher sends a lecture.
- *
- * Hardcoded for the MVP: the classroom state machine (lecture → student turns → report) does not
- * exist yet, so the bubble only proves the layout and the transition. Replacing it with generated
- * questions is the next step.
- */
-const STUDENT_QUESTION = {
-  name: '小满',
-  text: '老师，缓存雪崩到底是从哪一步开始崩的？',
-};
 
 /** How long the sent lecture stays above the composer before it fades into the message sidebar. */
 const LECTURE_PEEK_MS = 3600;
-
-type ClassroomPhase = 'composing' | 'sent';
-
-type ClassroomMessage = {
-  id: string;
-  role: 'teacher' | 'student';
-  label: string;
-  text: string;
-};
 
 /**
  * Renders the immersive classroom stage and owns the window's 16:9 mode.
  *
  * The artwork is exactly 16:9, so the main process locks the OS window to that ratio while this
  * view is mounted and `.tf-classroom-stage` keeps the stage at 16:9 even where the window cannot be
- * locked (browser preview, a maximized window). The stage replaces the sidebar and header, so it
- * carries its own exit control; `Esc` closes the message sidebar first, then leaves.
+ * locked (browser preview, a maximized window). The stage replaces the sidebar and header.
  *
- * MVP flow, all local state:
- * 1. `composing` — the tall four-line box writes the lecture.
- * 2. send — the lecture floats above the box for a few seconds, the box collapses to one line, one
- *    student's question bubble appears, and both messages land in the sidebar behind a badge.
- * 3. answering — each answer is appended to the sidebar and dismisses the question bubble;
- *    "重新讲解" starts over.
- *
- * Nothing here reaches the conversation yet: sending is local until the classroom flow is wired to
- * the Agent thread.
+ * Leaving the view (top-left button, `Esc`) is temporary: the session lives in
+ * `classroomSessionStore`, so entering the classroom again restores the lecture, messages, drafts
+ * and question bubble. The top-right "结束课堂" button is the only way to end the session, and it
+ * asks for confirmation first.
  */
 export function ClassroomMode({ onExit }: { onExit: () => void }) {
-  const [phase, setPhase] = useState<ClassroomPhase>('composing');
-  const [lectureDraft, setLectureDraft] = useState('');
-  const [lecture, setLecture] = useState('');
-  const [reply, setReply] = useState('');
-  const [isQuestionVisible, setIsQuestionVisible] = useState(false);
-  const [messages, setMessages] = useState<ClassroomMessage[]>([]);
+  const session = useSyncExternalStore(
+    classroomSessionStore.subscribe,
+    classroomSessionStore.getSnapshot,
+    classroomSessionStore.getSnapshot,
+  );
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
   const [isLecturePeekVisible, setIsLecturePeekVisible] = useState(false);
-  const messageSequence = useRef(0);
+  const [isEndDialogOpen, setIsEndDialogOpen] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const peekTimerRef = useRef<number | null>(null);
+  const endButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // The ratio lock lives in the main process, not in this component's state: it must be released
   // on unmount for every route out (the exit button, Esc, closing the window).
@@ -93,17 +71,20 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     if (!isMessagesOpen) return;
     const list = messageListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [isMessagesOpen, messages]);
+  }, [isMessagesOpen, session.messages]);
 
   /**
-   * Leaves the mode from the keyboard, since the sidebar's entries are not on screen.
-   *
-   * The sidebar closes first; inside the composer `Esc` does nothing, so a half-written message is
-   * never thrown away by a stray key.
+   * `Esc` closes what is on top first: the end dialog, then the sidebar. Inside the composer it
+   * does nothing, so a half-written message is never thrown away; only outside it leaves the view
+   * (which keeps the session for the next visit).
    */
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (isEndDialogOpen) {
+        closeEndDialog();
+        return;
+      }
       if (isMessagesOpen) {
         setIsMessagesOpen(false);
         return;
@@ -114,9 +95,7 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isMessagesOpen, onExit]);
-
-  const nextMessageId = (): string => `classroom-message-${(messageSequence.current += 1)}`;
+  }, [isEndDialogOpen, isMessagesOpen, onExit]);
 
   /** Shows the just-sent lecture above the composer, then hands it over to the sidebar. */
   const showLecturePeek = (): void => {
@@ -130,45 +109,32 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
 
   /** Moves the written lecture onto the stage and turns the composer into the reply box. */
   const sendLecture = (): void => {
-    const text = lectureDraft.trim();
-    if (!text) return;
-    setLecture(text);
-    setLectureDraft('');
-    setPhase('sent');
-    setIsQuestionVisible(true);
-    setMessages([
-      { id: nextMessageId(), role: 'teacher', label: '老师 · 讲稿', text },
-      { id: nextMessageId(), role: 'student', label: STUDENT_QUESTION.name, text: STUDENT_QUESTION.text },
-    ]);
+    if (!classroomSessionStore.sendLecture()) return;
+    closeTransientPanels();
     showLecturePeek();
+  };
+
+  /** Sending a lecture starts a new round, so any open sidebar or end dialog is stale. */
+  const closeTransientPanels = (): void => {
+    setIsMessagesOpen(false);
+    setIsEndDialogOpen(false);
   };
 
   /** MVP: the answer joins the sidebar and marks the question as handled; no model call yet. */
   const sendReply = (): void => {
-    const text = reply.trim();
-    if (!text) return;
-    setMessages((previous) => [
-      ...previous,
-      { id: nextMessageId(), role: 'teacher', label: '老师', text },
-    ]);
-    setReply('');
-    setIsQuestionVisible(false);
+    classroomSessionStore.sendReply();
   };
 
-  /** Clears the round so the layout can be rehearsed again without leaving the mode. */
+  /** Clears the round so the layout can be rehearsed again without ending the classroom. */
   const restartLecture = (): void => {
     if (peekTimerRef.current !== null) {
       window.clearTimeout(peekTimerRef.current);
       peekTimerRef.current = null;
     }
-    setPhase('composing');
-    setLecture('');
-    setLectureDraft('');
-    setReply('');
-    setIsQuestionVisible(false);
+    classroomSessionStore.reset();
     setIsLecturePeekVisible(false);
-    setMessages([]);
     setIsMessagesOpen(false);
+    setIsEndDialogOpen(false);
   };
 
   /** Opening the sidebar cancels the peek; the lecture is already waiting there in full. */
@@ -181,7 +147,28 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     setIsMessagesOpen(true);
   };
 
-  const lectureCharacterCount = Array.from(lecture).length;
+  /** Cancels the confirmation and returns focus to the button that opened it. */
+  const closeEndDialog = (): void => {
+    setIsEndDialogOpen(false);
+    endButtonRef.current?.focus();
+  };
+
+  /** Ends the whole classroom, clears the session, and returns to the conversation. */
+  const endClassroom = (): void => {
+    if (peekTimerRef.current !== null) {
+      window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+    classroomSessionStore.reset();
+    setIsEndDialogOpen(false);
+    setIsMessagesOpen(false);
+    setIsLecturePeekVisible(false);
+    onExit();
+  };
+
+  const lectureCharacterCount = Array.from(session.lecture).length;
+  const draftInProgress =
+    session.phase === 'composing' ? session.lectureDraft.trim().length > 0 : session.reply.trim().length > 0;
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-ink-900">
@@ -197,29 +184,46 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             className="tf-classroom-art"
             style={{ backgroundImage: `url(${classroomBackground})` }}
           />
-          <div className="tf-classroom-overlay absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 md:p-5">
-            <button
-              autoFocus
-              className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/80 py-2 pl-3 pr-4 text-sm font-medium text-ink-800 shadow-card backdrop-blur-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-              onClick={onExit}
-              type="button"
+          {/* Session lifecycle lives in one top-right segmented control: leaving and ending are
+              the same category, so they share a container instead of occupying opposite corners.
+              The end segment stays neutral until hover/focus; the dialog carries the danger. */}
+          <div className="tf-classroom-overlay absolute inset-x-0 top-0 flex items-start justify-start py-4 pl-[2.5%] pr-4 md:py-5">
+            <div
+              aria-label="课堂操作"
+              className="inline-flex h-10 shrink-0 items-center rounded-full border border-white/70 bg-white/80 p-1 shadow-card backdrop-blur-md"
+              role="group"
             >
-              <ArrowLeft aria-hidden="true" className="size-4" />
-              退出课堂模式
-            </button>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/60 bg-white/70 px-3 py-1.5 text-xs font-semibold text-brand-800 backdrop-blur-md">
-              <Chalkboard aria-hidden="true" className="size-3.5" />
-              课堂模式
-            </span>
+              <button
+                autoFocus
+                className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-ink-800 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                onClick={onExit}
+                title="保留本节课进度，返回对话"
+                type="button"
+              >
+                <ArrowLeft aria-hidden="true" className="size-4" />
+                退出课堂模式
+              </button>
+              <button
+                aria-haspopup="dialog"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-ink-800 transition-colors hover:bg-rose-50/90 hover:text-rose-700 focus-visible:bg-rose-50/90 focus-visible:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                onClick={() => setIsEndDialogOpen(true)}
+                ref={endButtonRef}
+                title="结束本节课，清空本轮内容"
+                type="button"
+              >
+                <FlagPennant aria-hidden="true" className="size-4" />
+                结束课堂
+              </button>
+            </div>
           </div>
 
-          {isQuestionVisible && (
+          {session.isQuestionVisible && (
             <div
               aria-live="polite"
               className="tf-classroom-bubble absolute bottom-[64%] left-1/2 flex w-[38%] max-w-[30rem] -translate-x-1/2 flex-col gap-1 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 text-left shadow-card backdrop-blur-md"
             >
-              <span className="text-xs font-semibold text-brand-700">{STUDENT_QUESTION.name}</span>
-              <p className="text-sm leading-6 text-ink-900">{STUDENT_QUESTION.text}</p>
+              <span className="text-xs font-semibold text-brand-700">{CLASSROOM_STUDENT.name}</span>
+              <p className="text-sm leading-6 text-ink-900">{CLASSROOM_STUDENT.question}</p>
               <span
                 aria-hidden="true"
                 className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 border-b border-r border-white/70 bg-white/90"
@@ -249,17 +253,20 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
                     </button>
                   </div>
                   <p className="tf-scrollbar max-h-24 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-sm leading-6 text-ink-800">
-                    {lecture}
+                    {session.lecture}
                   </p>
                 </section>
               )}
               <ClassroomComposer
-                autoFocus={phase === 'sent'}
+                autoFocus={session.phase === 'sent'}
                 className="shadow-card"
-                onChange={phase === 'sent' ? setReply : setLectureDraft}
-                onSend={phase === 'sent' ? sendReply : sendLecture}
-                value={phase === 'sent' ? reply : lectureDraft}
-                variant={phase === 'sent' ? 'reply' : 'lecture'}
+                onChange={(value) => {
+                  if (session.phase === 'sent') classroomSessionStore.setReply(value);
+                  else classroomSessionStore.setLectureDraft(value);
+                }}
+                onSend={session.phase === 'sent' ? sendReply : sendLecture}
+                value={session.phase === 'sent' ? session.reply : session.lectureDraft}
+                variant={session.phase === 'sent' ? 'reply' : 'lecture'}
               />
             </div>
           </div>
@@ -268,15 +275,15 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             <button
               aria-controls="classroom-messages"
               aria-expanded={false}
-              aria-label={`展开课堂消息（${messages.length} 条）`}
-              className="absolute bottom-[3%] right-[2.5%] z-20 inline-flex size-12 items-center justify-center rounded-full border border-white/70 bg-white/80 text-ink-800 shadow-card backdrop-blur-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+              aria-label={`展开课堂消息（${session.messages.length} 条）`}
+              className="absolute bottom-[3%] right-[2.5%] z-20 inline-flex size-11 items-center justify-center rounded-full border border-white/70 bg-white/80 text-ink-800 opacity-90 shadow-card backdrop-blur-md transition hover:bg-white hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
               onClick={openMessages}
               type="button"
             >
               <ChatsCircle aria-hidden="true" className="size-5" />
-              {messages.length > 0 && (
+              {session.messages.length > 0 && (
                 <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full bg-brand-700 px-1 text-[11px] font-semibold leading-5 text-white">
-                  {messages.length}
+                  {session.messages.length}
                 </span>
               )}
             </button>
@@ -291,8 +298,10 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             inert={!isMessagesOpen}
           >
             <header className="flex shrink-0 items-center gap-2 border-b border-ink-200/70 px-3 py-2">
-              <span className="text-xs font-semibold text-ink-700">课堂消息 · {messages.length}</span>
-              {phase === 'sent' && (
+              <span className="text-xs font-semibold text-ink-700">
+                课堂消息 · {session.messages.length}
+              </span>
+              {session.phase === 'sent' && (
                 <button
                   className="ml-auto text-[11px] font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
                   onClick={restartLecture}
@@ -303,7 +312,7 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
               )}
               <button
                 aria-label="收起课堂消息"
-                className={`${phase === 'sent' ? '' : 'ml-auto'} rounded-full p-1 text-ink-500 transition hover:bg-ink-100 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40`}
+                className={`${session.phase === 'sent' ? '' : 'ml-auto'} rounded-full p-1 text-ink-500 transition hover:bg-ink-100 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40`}
                 onClick={() => setIsMessagesOpen(false)}
                 type="button"
               >
@@ -314,12 +323,12 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
               className="tf-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2"
               ref={messageListRef}
             >
-              {messages.length === 0 ? (
+              {session.messages.length === 0 ? (
                 <p className="px-1 py-6 text-center text-xs leading-5 text-ink-500">
                   发送讲解后，讲稿与学生的提问会出现在这里。
                 </p>
               ) : (
-                messages.map((message) => (
+                session.messages.map((message) => (
                   <article
                     className={
                       message.role === 'teacher'
@@ -338,6 +347,13 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             </div>
           </aside>
 
+          {isEndDialogOpen && (
+            <EndClassroomDialog
+              hasUnsavedDraft={draftInProgress}
+              onCancel={closeEndDialog}
+              onConfirm={endClassroom}
+            />
+          )}
         </div>
       </div>
     </div>

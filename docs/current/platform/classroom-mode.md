@@ -23,8 +23,9 @@ last_verified: 2026-11-12
 |---|---|
 | 入口 | 侧栏「知识掌握」下方的「课堂模式」（`Chalkboard` 图标），对应 `SidebarView = 'classroom'` |
 | 布局 | 进入后不渲染侧栏与聊天头，舞台占满整个窗口内容区；因此窗口内容区的比例就是舞台比例 |
-| 退出 | 舞台左上「退出课堂模式」按钮，或按 `Esc`（焦点在输入框内时除外）；没有侧栏入口可点，退出后回到对话视图。右上角仍是静态「课堂模式」标签；设计稿要求改为红色「结束课堂」+ 确认框（未实现），当前卸载即清空本轮状态 |
-| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 只负责挂载舞台、窗口模式开关与输入框定位 |
+| 临时退出 | 舞台左上分段控件的「退出课堂模式」，或按 `Esc`（焦点在输入框内时除外）：回到对话视图，课堂会话保留在 `classroomSessionStore` 中，再次进入恢复讲稿、消息、草稿与气泡 |
+| 结束课堂 | 舞台左上分段控件的「结束课堂」（`FlagPennant`）：常驻中性，hover/focus 才转为 `rose-700` 文字与浅红底；点击弹确认框，确认后清空会话并返回对话；不可撤销 |
+| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 负责舞台、窗口模式开关、侧栏与确认框；会话状态在 [classroom-session-store.ts](../../../apps/desktop/src/features/classroom/classroom-session-store.ts) |
 
 舞台由两层 CSS 决定（[styles.css](../../../apps/desktop/src/styles.css)）：
 
@@ -44,7 +45,7 @@ last_verified: 2026-11-12
 | 移除 | **附件选择与标签**、**斜杠命令菜单与命令胶囊**（`/查询资料库`、`/探索主题` 只属于备课对话） |
 | `Esc` | 焦点在输入框内时不退出课堂模式，避免丢掉半写的草稿；点击画面后再按 `Esc` 才退出 |
 
-两种状态（`composing → sent`，状态在 [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 内）：
+两种状态（`composing → sent`，状态在 [classroom-session-store.ts](../../../apps/desktop/src/features/classroom/classroom-session-store.ts) 内，因此离开视图不丢进度）：
 
 | 状态 | 输入区 | 讲稿 | 学生气泡 |
 |---|---|---|---|
@@ -54,7 +55,7 @@ last_verified: 2026-11-12
 - 发送按钮在草稿为空时禁用；`Ctrl/Cmd + Enter` 与点击按钮等价，普通 Enter 只换行。
 - 淡出期间讲稿卡绝对定位在输入框上方，不占停靠区高度；`sent` 时停靠区仅 88.6%–97%，学生完全露出。
 - 回复发送后：清空回复框、收起问题气泡（表示已作答），回答追加到消息侧栏。
-- **原型边界**：讲稿与回复都只是本地状态，不写入会话、不调用模型；问题气泡的文案写死。接入课堂状态机后再改为真实提问/回答。
+- **原型边界**：讲稿与回复都只是本地状态，不写入会话、不调用模型；问题气泡的文案写死。会话在视图卸载后保留（内存），应用重启即丢失；接入课堂状态机后再改为真实提问/回答与持久化。
 
 ### 消息侧栏
 
@@ -63,10 +64,24 @@ last_verified: 2026-11-12
 | 默认 | 折叠；右下角圆形 `ChatsCircle` 按钮，有消息时右上角显示条数角标 |
 | 展开 | 右侧覆盖式抽屉：`right 2.5% / top 12% / bottom 3%`、宽 `23%`（`min 16rem`、`max 22rem`）、`bg-white/85` + `backdrop-blur-xl` + `shadow-float`；折叠时 `opacity-0` + `translate-x-3` + `inert`，不参与 Tab |
 | 内容 | 按时间顺序：`老师 · 讲稿`、`小满` 的问题、`老师` 的逐次回答；列表固定高度、内部滚动，打开或有新消息时自动滚到底 |
-| 关闭 | 抽屉头部 `X`；`Esc` 先收抽屉，再按一次才退出课堂模式；输入框内按 `Esc` 仍不退出 |
+| 关闭 | 抽屉头部 `X`；`Esc` 先收抽屉，再按一次才临时退出课堂模式；输入框内按 `Esc` 仍不退出 |
 | 重新讲解 | 抽屉头部，清空本轮讲稿、气泡与消息，回到 `composing` |
 | 尺寸影响 | 抽屉只覆盖、不挤压舞台：窗口仍是 16:9，画面不缩放、不留边；展开时遮住右侧第三名学生与书架，默认折叠因此不影响画面 |
 | 滚动条 | 抽屉列表使用 `.tf-scrollbar`（同输入框），显示应用自己的 10px 条 |
+
+### 结束课堂
+
+左上角是一个分段玻璃控件，把临时退出与结束放在同一容器里；右上顶部不再放按钮，右下保留消息入口：
+
+| 项 | 事实 |
+|---|---|
+| 容器 | `inline-flex h-10 rounded-full border-white/70 bg-white/80 p-1 shadow-card backdrop-blur-md`，`role="group"`、`aria-label="课堂操作"` |
+| 退出段 | 返回箭头 + 「退出课堂模式」，`text-ink-800`，hover `bg-white`；`autoFocus` |
+| 结束段 | `FlagPennant` + 「结束课堂」，常驻 `text-ink-800`；hover/focus 时文字与图标转 `rose-700`、底色 `rose-50/90`，移开恢复中性；焦点环 `brand-500/40`；`aria-haspopup="dialog"` |
+| 确认框 | 遮罩 `bg-ink-900/30`；白卡 `role="dialog"` + `aria-modal`，标题「结束本节课？」，正文说明会整理为课堂记录并返回对话；有未发送草稿时追加一行「正在编辑的内容不会保存。」 |
+| 焦点 | 打开时聚焦「继续上课」；Tab 在「继续上课 / 结束课堂」之间循环；`Esc` 或点击遮罩取消，焦点回到「结束课堂」 |
+| 确认 | 清空 `classroomSessionStore`、关闭侧栏与浮层、解除 16:9、回到对话视图；再次进入是全新的 `composing` |
+| `Esc` 优先级 | 确认框 → 消息侧栏 → 输入框（忽略）→ 临时退出 |
 
 ### 进入动效
 
