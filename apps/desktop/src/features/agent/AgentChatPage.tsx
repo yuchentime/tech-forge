@@ -35,6 +35,7 @@ import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
 import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
 import { ToastHost } from './toast';
 import { describeFailure } from '../../api/backend-error';
+import { PageHeader } from '../../components/PageHeader';
 import {
   AttachmentPickerButton,
   ComposerAttachmentChips,
@@ -511,11 +512,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:px-8 md:py-5">
-            <header className="flex shrink-0 items-center justify-between gap-3 pb-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <PageHeader className="justify-between">
               <h1
                 aria-label={activeConversationTitle}
-                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-sm font-semibold text-stone-800"
+                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-xl font-semibold tracking-tight text-stone-900"
                 title={activeConversationTitle}
               >
                 {truncateConversationTitle(activeConversationTitle)}
@@ -558,9 +559,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </button>
                 </div>
               </div>
-            </header>
+            </PageHeader>
 
-            <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="relative min-h-0 flex-1 overflow-hidden px-5 py-4 md:px-8 md:py-5">
               <div
                 aria-hidden={isRehearsalMode}
                 className={`absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
