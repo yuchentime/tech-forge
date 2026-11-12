@@ -91,6 +91,19 @@ body {
   scrollbar-width: thin;
 }
 
+/*
+ * The message composers keep a fixed height and scroll internally. The global `thin` setting uses
+ * the platform overlay scroller, which only appears while scrolling; the composer opts back into
+ * the app's own 10px bar so an overflowing draft is visibly scrollable instead of hidden.
+ *
+ * Unlayered on purpose: a `*` rule (specificity 0) beats a Tailwind utility in a layer, so this
+ * has to outrank the global rule directly rather than via utilities.
+ */
+.tf-composer-input {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;

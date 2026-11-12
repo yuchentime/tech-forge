@@ -25,10 +25,11 @@ export function ClassroomComposer({
     >
       <ComposerPrimitive.Input
         aria-label="课堂发言"
-        className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400"
+        className="h-24 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400 tf-composer-input"
         disabled={disabled}
         placeholder="写下你准备讲给学生的内容…"
-        rows={3}
+        // Same fixed-height input as the conversation composer: long content scrolls inside.
+        render={<textarea />}
         submitMode="ctrlEnter"
       />
       <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">

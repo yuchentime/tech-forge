@@ -709,12 +709,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       )}
                       <ComposerPrimitive.Input
                         aria-label="发送给备课助手"
-                        className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400"
+                        className="h-24 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400 tf-composer-input"
                         disabled={isLoadingEarlierMessages}
                         onKeyDown={slashMenu.handleKeyDown}
                         placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
                         ref={composerInputRef}
-                        rows={3}
+                        // A plain textarea instead of the primitive's auto-growing one: the box
+                        // keeps a fixed height and scrolls internally once the message is long.
+                        render={<textarea />}
                         submitMode="ctrlEnter"
                       />
                       <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">
