@@ -661,7 +661,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </ThreadPrimitive.Viewport>
 
               <div className="mt-2 shrink-0 pb-1 pt-3">
-                <ComposerPrimitive.Root className="relative rounded-3xl border border-ink-200 bg-white p-3 shadow-card transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-200/50">
+                <ComposerPrimitive.Root className="relative rounded-3xl border border-ink-200 bg-white p-3 transition-colors duration-200 ease-out focus-within:border-brand-500 motion-reduce:transition-none">
                   <SlashCommandMenu menu={slashMenu} />
                   <ComposerAttachmentChips />
                   {composerCommand && (

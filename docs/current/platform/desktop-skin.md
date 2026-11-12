@@ -52,7 +52,10 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
 
 - `PageHeader` 为玻璃态：`bg-white/70` + `backdrop-blur-md` + `border-ink-200/80`，让画布渐变透出。
 - 会话模式切换是胶囊分段控件：选中项填 `brand-700` 白字，「演练模式」恒带 `GraduationCap` 图标；未选中项为 `ink-500` 文本。
-- 输入框是浮动白卡（`rounded-3xl`、`shadow-card`），聚焦时 `brand-400` 边框 + `brand-200/50` 四像素光环；发送按钮 `brand-700`。
+- 输入框是**无投影**白卡（`rounded-3xl`、`border border-ink-200`、不加 `shadow-*`）。聚焦态只高亮边框：`ink-200` 转 `brand-500`（1px，`transition-colors`），不加 `ring`、不加外发光、不加任何 box-shadow，聚焦前后几何完全不变。三种被否掉的方案及其原因见下：
+  - 外扩硬 `ring`：被面板 `overflow-hidden` 在底部切出直线，且外扩半径与卡片圆角不重合，表现为「扩散不自然、底角对不齐」。
+  - 模糊外发光：扁平白卡上出现光晕显得脏。
+  - 保留 `shadow-card`：第二层 `0 12px 32px -18px` 向下约 10px，容器余量不足时被 `overflow-hidden` 切出一条灰色横带，像底部没清理干净；补足余量又会把输入区整体抬高，不如直接不投影。
 - 会话侧栏底色为 `bg-brand-50/60`，选中行 `brand-100/80` + `brand-200` 描边；空对话首屏是带渐变图标的白色圆角卡片，而不是虚线占位框。
 
 ## 验证方式
