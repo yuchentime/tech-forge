@@ -11,7 +11,7 @@ related:
   - docs/changes/2026-11-09-artifact-sidebar/design.md
   - docs/changes/2026-11-09-artifact-sidebar/verification.md
   - docs/changes/2026-11-10-deep-research-command/design.md
-last_verified: 2026-11-10
+last_verified: 2026-11-12
 ---
 
 # Artifact 会话产出文件
@@ -25,6 +25,7 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 - **路径存储**：会话内文件存 `pathKind='session'` + 相对工作区的 POSIX 路径；两个路径列都以空串占位而不是 NULL（SQLite 唯一索引把 NULL 视为互不相等，会让重复写入插入多行）。用户明确指定绝对路径时存 `pathKind='external'` + 绝对路径，便于后续预览与会话删除时区分。
 - **缺失检测**：列表与预览接口现算 `missing`；文件被移走或改名后行仍保留，行名置灰并加删除线，点击提示"文件不存在"。删除线替代了普通下划线，是"这条记录指向的文件已不在"的唯一视觉信号。
 - **预览格式**：按扩展名判定 `markdown`（含 ` ```mermaid ` 块时渲染图表）、`mermaid`、`svg`、`json`（≤256 KiB 且可解析则美化）、`jsonl`、`text`；正文读取上限 512 KiB，超出返回 `truncated`。
+- **公式渲染**：Markdown 预览与聊天正文共用一条管线（`features/agent/markdown-plugins.ts`：`remark-gfm` + `remark-math` + `rehype-katex`），`$…$` 与 `$$…$$` 由 KaTeX 渲染成排版公式，不再显示 `$\alpha$` 这类原文。`throwOnError: false` 让写错的公式以红色文本留在原位，而不是整份文件预览失败；`strict: 'ignore'` 静音 KaTeX 对夹在两个 `$` 之间的中文（如 `$100 和 $200`）的告警。代价是单 `$` 定界符按 Markdown 数学的通行语义解析：成对出现但内容其实是金额时会被当作公式，源文件需写成 `\$100` 或用反引号；未配对的 `$$` 没有闭合定界符，保持原文字面，渲染层无法补救。`$$` 块级公式在面板内横向滚动，不截断。
 - **SVG**：以 `<img>` + `data:image/svg+xml;base64` 显示，不内联成活标记——图片上下文是静态模式，脚本不执行、外部引用不加载、也无法触达 `window.teachforge`。尺寸取 `width`/`height` 像素属性，缺失时用 `viewBox` 且小于 480 px 的坐标系按比例放大到 480，两者都没有则用 640×400 兜底；解析失败或解码失败回退为源码文本。`contentFormat` 为 `svg`，`mimeType` 为 `image/svg+xml`。
 - **知识结构图**：普通问题、解释、学习建议和分析直接在聊天中回答；仅在用户明确要求思维导图、知识图、图表或文件产物时生成图文件。明确请求后默认写 `.svg`——左侧根卡片 + 右侧分支卡片列（分支的要点作为卡片内的 `<text>` 行）、连接线用 `<line>`/`<path>` 垫在卡片下方；画布 560-640 px 宽、按分支数向下增长，带匹配的 `viewBox`，总盒子/线约 20-25 个，标签 ≤12 汉字。SVG 要求自包含：`font-family="system-ui, sans-serif"`、无 `<script>`、无 `<foreignObject>`、无外部字体/图片/样式表。仅当用户明确要 Mermaid 或要可编辑图时才写 `.mmd`（单个 `flowchart LR`；`mindmap` 只在用户要放射状时使用，因为它按力导向铺开，节点一多就成了不可读的网）；用户明确要 `.md` 时写含单个 ```mermaid 块的 Markdown。图表与图片都按自然尺寸渲染，面板内双向滚动，不强行缩放到面板宽度（缩到 400px 时标签不可读）。聊天正文仍按普通 Markdown 渲染，`mermaid` 代码块在侧边栏才展开为图形。
 - **探索主题产物**：`/探索主题 <主题>` 由内置 `deep-research` skill 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，两者按普通会话文件登记，不新增 artifact 类型；SVG 走上面的静态预览，Markdown 走普通 Markdown 预览。模型若只写其中一个，列表与响应卡片也只显示实际存在的文件。

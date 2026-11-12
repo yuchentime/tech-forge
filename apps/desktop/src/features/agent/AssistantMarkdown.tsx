@@ -1,12 +1,13 @@
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
-import remarkGfm from 'remark-gfm';
+import { markdownRehypePlugins, markdownRemarkPlugins } from './markdown-plugins';
 
 /** Renders assistant text parts with the official assistant-ui streaming Markdown primitive. */
 export function AssistantMarkdown() {
   return (
     <MarkdownTextPrimitive
       className="agent-markdown"
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
       urlTransform={transformMarkdownUrl}
     />
   );

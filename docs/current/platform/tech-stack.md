@@ -83,6 +83,7 @@ last_verified: 2026-11-09
 | `react` / `react-dom` | ^19.3.1（19.3.1） | 渲染层 |
 | `@assistant-ui/react` + `@assistant-ui/react-markdown` | ^0.15.32 / ^0.14.24（0.15.32 / 0.14.24） | 对话线程、消息渲染 |
 | `remark-gfm` | ^4.0.1（4.0.1） | Markdown 表格等 GFM 语法 |
+| `remark-math` / `rehype-katex` / `katex` | ^6.0.0 / ^7.0.1 / ^0.18.11（6.0.0 / 7.0.1 / 0.18.11） | `$…$` 与 `$$…$$` 公式渲染；管线集中在 `features/agent/markdown-plugins.ts`，聊天与文件预览共用 |
 | `@phosphor-icons/react` | ^2.1.10（2.1.10） | 图标 |
 | `vite` / `@vitejs/plugin-react` / `tailwindcss` / `@tailwindcss/vite` | ^8.3.6 / ^6.2.1 / ^4.3.4（同） | 渲染层构建与样式 |
 
