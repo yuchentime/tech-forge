@@ -173,6 +173,74 @@ body {
   margin: auto;
 }
 
+/*
+ * Entry choreography: the artwork is unveiled by a soft-edged circular mask growing from the middle
+ * while it settles from a slight overscan, so the room opens around the viewer instead of cutting in.
+ *
+ * The radius is a registered custom property: an unregistered one cannot be interpolated, and the
+ * mask would jump between keyframes. `farthest-corner` makes 100% mean "the far corner", so the
+ * keyframes travel from the centre to the corner and the initial value (100%) is also the fully
+ * visible state when the animation never runs.
+ */
+@property --tf-stage-reveal {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
+.tf-classroom-art {
+  position: absolute;
+  inset: 0;
+  --tf-stage-reveal: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  /* Solid core to `--tf-stage-reveal`, then a 12% band of falloff: the wave front is light, not a
+     hard iris. */
+  mask-image: radial-gradient(
+    circle farthest-corner at 50% 50%,
+    #000 var(--tf-stage-reveal),
+    transparent calc(var(--tf-stage-reveal) + 12%)
+  );
+  animation:
+    tf-stage-reveal 640ms cubic-bezier(0.45, 0, 0.55, 1) both,
+    tf-stage-settle 1300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tf-stage-reveal {
+  from {
+    --tf-stage-reveal: 0%;
+  }
+  to {
+    --tf-stage-reveal: 100%;
+  }
+}
+
+@keyframes tf-stage-settle {
+  from {
+    transform: scale(1.06);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Controls arrive after the room has mostly appeared, so they never ride the wave front. */
+.tf-classroom-overlay {
+  animation: tf-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) 280ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-classroom-art {
+    animation: none;
+    mask-image: none;
+  }
+
+  .tf-classroom-overlay {
+    animation: none;
+  }
+}
+
 
 @keyframes tf-float {
   0%,

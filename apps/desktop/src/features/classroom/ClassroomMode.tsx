@@ -46,11 +46,16 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
       <div className="tf-classroom-viewport">
         <div
           aria-label="课堂模式舞台"
-          className="tf-classroom-stage overflow-hidden bg-ink-200 bg-cover bg-center bg-no-repeat"
+          className="tf-classroom-stage overflow-hidden bg-ink-900"
           role="region"
-          style={{ backgroundImage: `url(${classroomBackground})` }}
         >
-          <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 md:p-5">
+          {/* The artwork owns the reveal animation, so the mask never clips the controls. */}
+          <div
+            aria-hidden="true"
+            className="tf-classroom-art"
+            style={{ backgroundImage: `url(${classroomBackground})` }}
+          />
+          <div className="tf-classroom-overlay absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 md:p-5">
             <button
               autoFocus
               className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/80 py-2 pl-3 pr-4 text-sm font-medium text-ink-800 shadow-card backdrop-blur-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"

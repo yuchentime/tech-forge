@@ -33,6 +33,20 @@ last_verified: 2026-11-12
 - 背景 [bg-classroom.png](../../../apps/desktop/src/assets/classroom/bg-classroom.png)（1568×882，恰好 16:9）按 `cover` 铺满舞台；窗口被锁成 16:9 时舞台与内容区同尺寸，不裁剪、不出现留边。
 - 舞台外的 `ink-900` 底色只在窗口比例无法被约束时露出（普通浏览器预览、最大化窗口）。
 
+### 进入动效
+
+图片不是直接切进来：`.tf-classroom-art`（只承载背景图的那一层）用软边圆形遮罩从中心向外展开，同时从 1.06 倍轻微回落，控制胶囊延后淡入。遮罩只作用于图片层，所以控件不会被圆形边界裁切。
+
+| 参数 | 值 |
+|---|---|
+| 遮罩 | `radial-gradient(circle farthest-corner, #000 var(--tf-stage-reveal), transparent calc(var(--tf-stage-reveal) + 12%))`；半径是注册过的 `--tf-stage-reveal`（`@property`），从 `0%` 到 `100%`，即从中心扩到最远角 |
+| 展开时长 | 640ms，`cubic-bezier(0.45, 0, 0.55, 1)`（先慢后匀），波前是 12% 的柔化过渡而不是硬圆边 |
+| 画面回落 | `tf-stage-settle` 1300ms，`scale(1.06) → 1`，让教室"稳住"而不是定格 |
+| 控件 | `tf-classroom-overlay` 复用 `tf-rise`，延迟 280ms（展开过半后）淡入上浮 |
+| 降级 | `prefers-reduced-motion: reduce` 时三处动画与遮罩全部关闭，图片直接以 `--tf-stage-reveal: 100%` 的完整状态显示 |
+
+遮罩半径必须用注册属性：未注册的自定义属性无法插值，关键帧会跳变；`farthest-corner` 让 `100%` 的语义就是"最远角"，动画结束即完全覆盖，不留暗角。
+
 ## 窗口 16:9
 
 渲染层只声明「课堂模式是否在屏幕上」，几何全部由 main 决定：
