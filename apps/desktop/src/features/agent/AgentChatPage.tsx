@@ -561,10 +561,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </div>
             </PageHeader>
 
-            <div className="relative min-h-0 flex-1 overflow-hidden px-5 py-4 md:px-8 md:py-5">
+            <div className="relative min-h-0 flex-1 overflow-hidden">
               <div
                 aria-hidden={isRehearsalMode}
-                className={`absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+                className={`absolute inset-0 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
                   isRehearsalMode
                     ? 'pointer-events-none translate-y-1 opacity-0'
                     : 'translate-y-0 opacity-100'
@@ -715,7 +715,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </div>
               <div
                 aria-hidden={!isRehearsalMode}
-                className={`absolute inset-0 z-10 flex min-h-0 flex-col bg-white transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+                className={`absolute inset-0 z-10 flex min-h-0 flex-col bg-white px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
                   isRehearsalMode
                     ? 'translate-y-0 opacity-100'
                     : 'pointer-events-none translate-y-1 opacity-0'
