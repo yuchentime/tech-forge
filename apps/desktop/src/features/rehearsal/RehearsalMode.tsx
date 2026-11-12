@@ -6,6 +6,7 @@ import { RehearsalPreparing } from './RehearsalPreparing';
 import { RehearsalReport } from './RehearsalReport';
 import { RehearsalSession } from './RehearsalSession';
 import { RehearsalStart } from './RehearsalStart';
+import { REHEARSAL_REQUIRES_ROUND_HINT } from './rehearsal-availability';
 import { rehearsalStore } from './rehearsal-store';
 
 /** Root of the drill view; switches between start, session, report and history. */
@@ -210,7 +211,7 @@ export function RehearsalMode({
           <RehearsalStart
             disabledReason={
               !hasHistory
-                ? '先进行一轮对话模式，演练会基于当前学习内容出题。'
+                ? REHEARSAL_REQUIRES_ROUND_HINT
                 : state.status === 'error'
                   ? '演练状态加载失败，请重试或切换会话。'
                   : null

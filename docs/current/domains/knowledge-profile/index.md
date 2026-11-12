@@ -8,7 +8,7 @@ related:
   - docs/current/domains/rehearsals/index.md
   - docs/current/domains/conversations/index.md
   - docs/changes/2026-11-10-knowledge-session-cards/design.md
-last_verified: 2026-11-10
+last_verified: 2026-11-12
 ---
 
 # Knowledge Profile
@@ -21,6 +21,7 @@ last_verified: 2026-11-10
 - 列表响应不包含 `knowledgePointDetails`；点击「查看详情」后才读取 `GET /api/conversations/:conversationId/knowledge-facts`。
 - Renderer 按 ID 从现有会话摘要读取标题；API 不重复返回标题。
 - 掌握状态显示为「建议加强 / 证据不足 / 基本掌握 / 熟练掌握」，按该顺序排序；`masteryLevel=null` 的已发布事实显示为「证据不足」，不再被过滤。同组使用列表中的 `updatedAt` 倒序，不为排序预取详情。
+- 没有任何可展示卡片时显示共享空状态（`EmptyState`，图标 `Stack`）：说明卡片来自演练结束后的评估、生成需要时间，并提示先讲清主题再进演练模式。空状态不额外提供刷新按钮；切走再进入该视图会重新读取列表。
 
 ## Boundaries
 

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Stack } from '@phosphor-icons/react';
 import { describeFailure } from '../../api/backend-error';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import type { ConversationSummary } from '../agent/conversation-store';
 import {
@@ -129,8 +131,8 @@ export function KnowledgeProfilePage({
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">知识掌握</h1>
         </PageHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
-          <div className="mx-auto w-full max-w-6xl pb-8">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-6 md:px-8 md:py-8">
+          <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col pb-8">
             {listError && (
               <div
                 className="mb-5 flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
@@ -148,11 +150,17 @@ export function KnowledgeProfilePage({
             )}
 
             {listStatus === 'loading' ? (
-              <p className="py-12 text-center text-sm text-ink-500" role="status">
+              <p className="my-auto py-12 text-center text-sm text-ink-500" role="status">
                 正在加载…
               </p>
             ) : listStatus === 'error' ? null : cards.length === 0 ? (
-              <p className="py-12 text-center text-sm text-ink-500">还没有可展示的知识掌握卡片。</p>
+              <EmptyState
+                className="my-auto"
+                description="每次演练结束，你在问答里的表现会按知识点汇总成卡片：哪里讲透了、哪里还被追问。"
+                hint="先讲清楚一个主题，再进演练模式接受提问；卡片生成需要一点时间。"
+                icon={Stack}
+                title="演练之后，这里会攒下证据"
+              />
             ) : (
               <div
                 className="grid items-stretch gap-4 lg:gap-5"

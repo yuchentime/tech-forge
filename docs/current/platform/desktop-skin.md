@@ -51,14 +51,15 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
 ## 界面约定
 
 - `PageHeader` 为玻璃态：`bg-white/70` + `backdrop-blur-md` + `border-ink-200/80`，让画布渐变透出。
-- 会话模式切换是胶囊分段控件：选中项填 `brand-700` 白字；两个页签都恒带 16px 图标——「对话模式」用 `Chats`（两个对话气泡），「演练模式」用 `GraduationCap`；未选中项为 `ink-500` 图标＋文本，`gap-1.5`。
+- 会话模式切换是胶囊分段控件：选中项填 `brand-700` 白字；两个页签都恒带 16px 图标——「对话模式」用 `Chats`（两个对话气泡），「演练模式」用 `GraduationCap`；未选中项为 `ink-500` 图标＋文本，`gap-1.5`；不可用的页签（当前会话还没有完成一轮对话时的「演练模式」）改用 `ink-300` + `cursor-not-allowed`，不加 `opacity`，避免和禁用主按钮的 40% 透明度混在一起；因原生 `disabled` 按钮不接收指针事件，说明文案放在外层 `span` 的 `title` 上。
 - 输入框是**无投影**白卡（`rounded-3xl`、`border border-ink-200`、不加 `shadow-*`）。聚焦态只高亮边框：`ink-200` 转 `brand-500`（1px，`transition-colors`），不加 `ring`、不加外发光、不加任何 box-shadow，聚焦前后几何完全不变。三种被否掉的方案及其原因见下：
   - 外扩硬 `ring`：被面板 `overflow-hidden` 在底部切出直线，且外扩半径与卡片圆角不重合，表现为「扩散不自然、底角对不齐」。
   - 模糊外发光：扁平白卡上出现光晕显得脏。
   - 保留 `shadow-card`：第二层 `0 12px 32px -18px` 向下约 10px，容器余量不足时被 `overflow-hidden` 切出一条灰色横带，像底部没清理干净；补足余量又会把输入区整体抬高，不如直接不投影。
 - 会话侧栏底色是背景图（见下），选中行 `brand-100/80` + `brand-200` 描边；底部「设置」栏是玻璃条（`bg-white/45` + `backdrop-blur-lg` + `border-t border-white/60`），把它从山峰、山道、云层那块最花的画面上分离出来，文字用 `ink-800`、`font-medium`。
 - 表单控件的基础样式放在 `@layer base`：`button/input/textarea { font: inherit }` 若写在 layer 外会压过 Tailwind 工具类，而且 `font` 简写会重置 `font-weight`，导致按钮上的 `font-medium`/`font-semibold` 全部失效。
-- 空对话首屏直接落在画布上：一个 `brand-400` 星点图标 + 标题 + 两行说明 + 一行示例，无卡片、无边框、无投影、无胶囊底色，避免在输入框上方叠出第二块面板。
+- 空状态统一由 [apps/desktop/src/components/EmptyState.tsx](../../../apps/desktop/src/components/EmptyState.tsx) 渲染：一个 `brand-400` filled 图标（36px）+ 标题 + 两行说明 + 一行提示，无卡片、无边框、无投影、无胶囊底色，避免在内容上方叠出第二块面板。现有使用者是对话首屏（`Sparkle`）、资料库空列表（`Books`）与知识掌握空列表（`Stack`）；图形取侧栏同一入口的图标，视觉重量与首屏星点一致。
+- 空状态在可视区域垂直居中（外层滚动容器改为 `flex flex-col`，空状态自身 `my-auto`）；说明文字最宽 `max-w-sm`，因此每段控制在两行内，第三行只放"下一步做什么"的提示。加载态同样 `my-auto` 居中，避免加载完成时空状态从顶部跳到中间。
 
 ## 验证方式
 

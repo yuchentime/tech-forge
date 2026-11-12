@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ArrowClockwise,
+  Books,
   CheckCircle,
   CircleNotch,
   FileText,
@@ -10,6 +11,7 @@ import {
   XCircle,
 } from '@phosphor-icons/react';
 import { describeFailure, readBackendErrorMessage } from '../../api/backend-error';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
@@ -260,8 +262,8 @@ export function KnowledgeBasePage() {
         </div>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
-        <div className="mx-auto w-full max-w-4xl space-y-4 pb-8">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-6 md:px-8 md:py-8">
+        <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col space-y-4 pb-8">
           {importError && (
             <div
               className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
@@ -354,7 +356,7 @@ export function KnowledgeBasePage() {
           )}
 
           {listStatus === 'loading' ? (
-            <p className="py-12 text-center text-sm text-ink-500" role="status">
+            <p className="my-auto py-12 text-center text-sm text-ink-500" role="status">
               正在加载资料…
             </p>
           ) : listStatus === 'error' ? (
@@ -372,9 +374,13 @@ export function KnowledgeBasePage() {
               </button>
             </div>
           ) : documents.length === 0 ? (
-            <p className="py-12 text-center text-sm leading-6 text-ink-500">
-              还没有资料。导入 PDF、Word、Markdown 或 TXT 后，提问时就能用上它们。
-            </p>
+            <EmptyState
+              className="my-auto"
+              description="导入 PDF、Word、Markdown 或 TXT 后，提问和备课时会先在这些资料里找依据。"
+              hint="点右上角「导入资料」开始，一次可以选多个文件。"
+              icon={Books}
+              title="把要讲的资料放进来"
+            />
           ) : (
             <ul className="space-y-2">
               {documents.map((document) => (

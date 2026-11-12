@@ -10,7 +10,7 @@ related:
   - docs/current/domains/retrieval/index.md
   - docs/changes/2026-11-08-document-parser-adapter/design.md
   - docs/changes/2026-11-08-knowledge-retrieval/design.md
-last_verified: 2026-11-10
+last_verified: 2026-11-12
 ---
 
 # 资料入库当前事实
@@ -62,6 +62,7 @@ last_verified: 2026-11-10
 - 转换后的正文另存为同目录的 `<baseName>.md`：仅对需要转换的格式（PDF/DOCX）写入；`.md`/`.markdown`/`.txt` 本身就是可读文本，不写第二份。内容用 `joinParsedPages`（分块器同一拼装规则），因此 `locator.charStart/charEnd` 对这份文件同样成立；写入失败只产生 `CONVERTED_MARKDOWN_FAILED` 警告，不影响入库与检索。
 - 导入时另存的用户可见副本位于 `<configDir>/knowledge/<documentId>/`，与 Agent workspace 隔离。
 - 界面文案不出现 `向量`、`索引`、`分片`、`embedding`、`OCR` 等内部术语：状态显示为"可以搜索 / 只能关键词搜索 / 正在读取 / 正在整理 / 导入失败"，分片数显示为"N 段"。
+- 列表为空时显示共享空状态（`EmptyState`，图标 `Books`），说明支持的格式与用途，并把下一步指向页头「导入资料」；不在空状态里再放一个重复的导入按钮。
 
 ## 5. 读取模型
 

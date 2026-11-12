@@ -38,6 +38,7 @@ import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
 import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
 import { ToastHost } from './toast';
 import { describeFailure } from '../../api/backend-error';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import {
   AttachmentPickerButton,
@@ -59,7 +60,10 @@ import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage';
-import { hasCompletedConversationRound } from '../rehearsal/rehearsal-availability';
+import {
+  REHEARSAL_REQUIRES_ROUND_HINT,
+  hasCompletedConversationRound,
+} from '../rehearsal/rehearsal-availability';
 import { RehearsalMode } from '../rehearsal/RehearsalMode';
 import { SettingsPage } from '../settings/SettingsPage';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
@@ -455,7 +459,9 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   }, []);
 
   const isHistoryLoading = loadingConversationId !== null;
-  const isRehearsalMode = conversationDisplayMode === 'rehearsal';
+  /** Drills need a completed round, so the toggle and the view both follow that gate. */
+  const canEnterRehearsal = hasCompletedRound;
+  const isRehearsalMode = conversationDisplayMode === 'rehearsal' && canEnterRehearsal;
   const isInitialListLoading =
     !hasLoadedInitialList && conversationState.listStatus !== 'error';
   const activeConversation = conversationState.conversations.find(
@@ -547,19 +553,29 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     <Chats aria-hidden="true" className="h-4 w-4" />
                     对话模式
                   </button>
-                  <button
-                    aria-pressed={isRehearsalMode}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
-                      isRehearsalMode
-                        ? 'bg-brand-700 font-semibold text-white shadow-sm'
-                        : 'font-medium text-ink-500 hover:text-ink-800'
-                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
-                    onClick={() => setConversationDisplayMode('rehearsal')}
-                    type="button"
+                  {/* A disabled button receives no pointer events, so the reason lives on the
+                      wrapper: hovering the greyed tab still explains why it is unavailable. */}
+                  <span
+                    className="inline-flex"
+                    title={canEnterRehearsal ? undefined : REHEARSAL_REQUIRES_ROUND_HINT}
                   >
-                    <GraduationCap aria-hidden="true" className="h-4 w-4" />
-                    演练模式
-                  </button>
+                    <button
+                      aria-pressed={isRehearsalMode}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                        isRehearsalMode
+                          ? 'bg-brand-700 font-semibold text-white shadow-sm'
+                          : canEnterRehearsal
+                            ? 'font-medium text-ink-500 hover:text-ink-800'
+                            : 'font-medium text-ink-300'
+                      } disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
+                      disabled={!canEnterRehearsal}
+                      onClick={() => setConversationDisplayMode('rehearsal')}
+                      type="button"
+                    >
+                      <GraduationCap aria-hidden="true" className="h-4 w-4" />
+                      演练模式
+                    </button>
+                  </span>
                 </div>
               </div>
             </PageHeader>
@@ -630,20 +646,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 )}
 
                 <AuiIf condition={(state) => state.thread.isEmpty}>
-                  {/* The first-run hint sits directly on the canvas: no card, border or chip, so it
-                      reads as part of the page instead of a panel above the composer. */}
-                  <div className="tf-rise my-auto px-6 text-center">
-                    <Sparkle aria-hidden="true" className="mx-auto h-9 w-9 text-brand-400" weight="fill" />
-                    <p className="mt-4 text-xl font-semibold tracking-tight text-ink-900">
-                      从一个备课问题开始
-                    </p>
-                    <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-ink-500">
-                      先聊清楚你想讲的内容，再去演练模式接受学生的提问。
-                    </p>
-                    <p className="mt-5 text-xs leading-5 text-ink-500">
-                      例如：帮我用一个生活中的例子解释缓存雪崩
-                    </p>
-                  </div>
+                  <EmptyState
+                    className="my-auto"
+                    description="先聊清楚你想讲的内容，再去演练模式接受学生的提问。"
+                    hint="例如：帮我用一个生活中的例子解释缓存雪崩"
+                    icon={Sparkle}
+                    title="从一个备课问题开始"
+                  />
                 </AuiIf>
 
                 <ThreadPrimitive.Messages>
