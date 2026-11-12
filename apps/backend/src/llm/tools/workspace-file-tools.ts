@@ -1,4 +1,4 @@
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type Stats } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
   basename,
@@ -53,6 +53,14 @@ export interface WorkspaceFileToolPolicy {
     absolutePath: string;
     tool: 'write' | 'edit';
   }) => Promise<void> | void;
+  /**
+   * Reports how one read target was classified, including which check rejected it.
+   *
+   * `onFileOperationFailed` cannot tell an app-owned file from a guarded-directory denial, so a
+   * denied read needs this refinement to be diagnosable. The target is reported as a path scope,
+   * never as text.
+   */
+  onFileReadResolution?: (report: ReadResolutionReport) => void;
   /** Reports failed file-tool operations without exposing the requested path or file contents. */
   onFileOperationFailed?: (input: {
     toolName: 'read' | 'edit' | 'write';
@@ -67,6 +75,29 @@ export interface WorkspaceFileToolPolicy {
 interface ExternalPathGrant {
   kind: 'directory' | 'file';
   path: string;
+}
+
+/** Names how one read target was accepted or which check rejected it. */
+export type ReadResolutionOutcome =
+  | 'resolved'
+  | 'invalid_path'
+  | 'path_unavailable'
+  | 'not_a_file'
+  | 'managed_file_denied'
+  | 'guarded_directory_denied';
+
+/** Describes one read-target resolution as an input summary plus the deciding check. */
+export interface ReadResolutionReport {
+  outcome: ReadResolutionOutcome;
+  /** Where the target points: the workspace, outside it, or an unusable input. */
+  pathScope: 'workspace' | 'external' | 'invalid';
+  /** Input shape: how many protected paths and guarded directories applied to this read. */
+  protectedPathCount: number;
+  guardedDirectoryCount: number;
+  readGrantKind: ExternalPathGrant['kind'] | 'none';
+  /** True only when this turn's grant lifted a guarded-directory default. */
+  grantLiftedGuard: boolean;
+  elapsedMs: number;
 }
 
 /** Creates the configured workspace and returns its canonical, non-symlink root. */
@@ -120,6 +151,25 @@ export async function createWorkspaceFileTools(
   const externalGrant = deriveExternalWriteGrant(currentUserRequest, workspaceRoot);
   const readGrant = deriveGuardedReadGrant(currentUserRequest, guardedDirectories);
 
+  // Pi resolves one target once per operation (access, readFile, mime detection). Identical reports
+  // are collapsed so a single read tool call does not repeat the same line, and a report carries no
+  // distinguishing text once the path is reduced to its scope anyway.
+  const reportedReadResolutions = new Set<string>();
+  const reportReadResolution = (report: ReadResolutionReport): void => {
+    if (!policy.onFileReadResolution) return;
+    const key = [
+      report.outcome,
+      report.pathScope,
+      report.protectedPathCount,
+      report.guardedDirectoryCount,
+      report.readGrantKind,
+      report.grantLiftedGuard,
+    ].join('|');
+    if (reportedReadResolutions.has(key)) return;
+    reportedReadResolutions.add(key);
+    policy.onFileReadResolution(report);
+  };
+
   const readOperations: ReadOperations = {
     access: async (filePath) => runLoggedFileOperation(
       policy,
@@ -135,6 +185,7 @@ export async function createWorkspaceFileTools(
           guardedDirectories,
           readGrant,
           fileSystem,
+          reportReadResolution,
         );
         await fileSystem.access(safePath, fsConstants.R_OK);
       },
@@ -153,6 +204,7 @@ export async function createWorkspaceFileTools(
           guardedDirectories,
           readGrant,
           fileSystem,
+          reportReadResolution,
         );
         return fileSystem.readFile(safePath);
       },
@@ -171,6 +223,7 @@ export async function createWorkspaceFileTools(
           guardedDirectories,
           readGrant,
           fileSystem,
+          reportReadResolution,
         );
         return sdk.detectSupportedImageMimeTypeFromFile(safePath);
       },
@@ -361,29 +414,77 @@ async function resolveReadableFile(
   guardedDirectories: readonly string[],
   readGrant: ExternalPathGrant | undefined,
   fileSystem: WorkspaceFileSystem,
+  reportReadResolution?: (report: ReadResolutionReport) => void,
 ): Promise<string> {
-  if (typeof filePath !== 'string' || filePath.trim() === '') {
-    throw workspaceBoundaryError();
+  const startedAt = Date.now();
+  const pathScope = getFilePathScope(workspaceRoot, filePath);
+  // Every exit path reports the same input summary plus the check that decided the outcome, so a
+  // denied read is diagnosable without logging the target path.
+  let outcome: ReadResolutionOutcome = 'resolved';
+  let grantLiftedGuard = false;
+  try {
+    if (typeof filePath !== 'string' || filePath.trim() === '') {
+      outcome = 'invalid_path';
+      throw workspaceBoundaryError();
+    }
+    const requestedPath = resolve(workspaceRoot, filePath);
+    let canonicalPath: string;
+    let fileInfo: Stats;
+    try {
+      canonicalPath = await fileSystem.realpath(requestedPath);
+      fileInfo = await fileSystem.lstat(canonicalPath);
+    } catch (error) {
+      outcome = 'path_unavailable';
+      throw error;
+    }
+    if (!fileInfo.isFile()) {
+      outcome = 'not_a_file';
+      throw workspaceBoundaryError();
+    }
+    try {
+      await assertNotManagedFile(
+        requestedPath,
+        canonicalPath,
+        protectedPaths,
+        fileInfo,
+        fileSystem,
+      );
+    } catch (error) {
+      outcome = hasErrorCode(error, 'EWORKSPACE')
+        ? 'managed_file_denied'
+        : 'path_unavailable';
+      throw error;
+    }
+    try {
+      grantLiftedGuard = await assertOutsideGuardedDirectories(
+        requestedPath,
+        canonicalPath,
+        guardedDirectories,
+        readGrant,
+        fileSystem,
+      );
+    } catch (error) {
+      outcome = hasErrorCode(error, 'EWORKSPACE')
+        ? 'guarded_directory_denied'
+        : 'path_unavailable';
+      throw error;
+    }
+    return canonicalPath;
+  } finally {
+    try {
+      reportReadResolution?.({
+        outcome,
+        pathScope,
+        protectedPathCount: protectedPaths.length,
+        guardedDirectoryCount: guardedDirectories.length,
+        readGrantKind: readGrant?.kind ?? 'none',
+        grantLiftedGuard,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch {
+      // A diagnostic failure must never change the read decision.
+    }
   }
-  const requestedPath = resolve(workspaceRoot, filePath);
-  const canonicalPath = await fileSystem.realpath(requestedPath);
-  const fileInfo = await fileSystem.lstat(canonicalPath);
-  if (!fileInfo.isFile()) throw workspaceBoundaryError();
-  await assertNotManagedFile(
-    requestedPath,
-    canonicalPath,
-    protectedPaths,
-    fileInfo,
-    fileSystem,
-  );
-  await assertOutsideGuardedDirectories(
-    requestedPath,
-    canonicalPath,
-    guardedDirectories,
-    readGrant,
-    fileSystem,
-  );
-  return canonicalPath;
 }
 
 /**
@@ -392,6 +493,8 @@ async function resolveReadableFile(
  * Only a path named explicitly in the current user request bypasses the default, so "should I read
  * the knowledge originals" stays a user decision instead of a model one. Symlink and `..` aliases are
  * covered because both the lexical and canonical paths are compared.
+ *
+ * @returns whether this turn's grant lifted the guarded default for the requested target.
  */
 async function assertOutsideGuardedDirectories(
   requestedPath: string,
@@ -399,8 +502,8 @@ async function assertOutsideGuardedDirectories(
   guardedDirectories: readonly string[],
   readGrant: ExternalPathGrant | undefined,
   fileSystem: WorkspaceFileSystem,
-): Promise<void> {
-  if (guardedDirectories.length === 0) return;
+): Promise<boolean> {
+  if (guardedDirectories.length === 0) return false;
   const requested = resolve(requestedPath);
   const resolved = resolve(resolvedPath);
 
@@ -412,9 +515,10 @@ async function assertOutsideGuardedDirectories(
       isPathWithin(lexical, resolved) ||
       isPathWithin(canonical, resolved);
     if (!inside) continue;
-    if (grantCoversPath(readGrant, requested, resolved)) return;
+    if (grantCoversPath(readGrant, requested, resolved)) return true;
     throw workspaceBoundaryError();
   }
+  return false;
 }
 
 /** Reports whether one prompt-derived grant names the requested file or an ancestor directory. */
