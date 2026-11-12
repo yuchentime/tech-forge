@@ -92,14 +92,15 @@ body {
 }
 
 /*
- * The message composers keep a fixed height and scroll internally. The global `thin` setting uses
- * the platform overlay scroller, which only appears while scrolling; the composer opts back into
- * the app's own 10px bar so an overflowing draft is visibly scrollable instead of hidden.
+ * Message composers and the classroom message list keep a fixed height and scroll internally. The
+ * global `thin` setting uses the platform overlay scroller, which only appears while scrolling;
+ * these surfaces opt back into the app's own 10px bar so an overflowing draft or transcript is
+ * visibly scrollable instead of hidden.
  *
  * Unlayered on purpose: a `*` rule (specificity 0) beats a Tailwind utility in a layer, so this
  * has to outrank the global rule directly rather than via utilities.
  */
-.tf-composer-input {
+.tf-scrollbar {
   scrollbar-color: auto;
   scrollbar-width: auto;
 }
@@ -248,6 +249,35 @@ body {
   animation: tf-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) 340ms both;
 }
 
+/* A student question rises above the figure after the room has appeared. */
+.tf-classroom-bubble {
+  animation: tf-rise 380ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both;
+}
+
+/*
+ * The lecture just sent holds above the composer for ~3s, then fades out (total 3.6s, matching the
+ * timer that unmounts it). The fade is deliberate: the message sidebar already owns the full text.
+ */
+.tf-classroom-peek {
+  animation: tf-classroom-peek 3600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tf-classroom-peek {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  8%,
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+
 @media (prefers-reduced-motion: reduce) {
   .tf-classroom-art {
     animation: none;
@@ -255,7 +285,9 @@ body {
   }
 
   .tf-classroom-overlay,
-  .tf-classroom-composer {
+  .tf-classroom-composer,
+  .tf-classroom-bubble,
+  .tf-classroom-peek {
     animation: none;
   }
 }

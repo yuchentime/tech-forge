@@ -709,7 +709,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       )}
                       <ComposerPrimitive.Input
                         aria-label="发送给备课助手"
-                        className="h-24 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400 tf-composer-input"
+                        className="h-24 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400 tf-scrollbar"
                         disabled={isLoadingEarlierMessages}
                         onKeyDown={slashMenu.handleKeyDown}
                         placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"

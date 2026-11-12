@@ -1,7 +1,7 @@
 routes:
   classroom-mode:
-    description: "Add or change the classroom mode stage: a sidebar entry under 知识掌握 opens a full-window 16:9 classroom stage, and the main process locks the window content area to the same ratio on entry, keeps it on manual resize, and releases/restores it on exit"
-    token_budget: 14000
+    description: "Add or change the classroom mode: a 16:9 immersive classroom stage with a lecture composer, student questions and a collapsible message sidebar, plus the distinction between temporarily leaving and ending a classroom session"
+    token_budget: 20000
     code_globs:
       - "apps/desktop/src/features/classroom/**"
       - "apps/desktop/src/features/agent/AgentChatPage.tsx"
@@ -14,6 +14,7 @@ routes:
     required:
       - docs/current/index.md
       - docs/current/platform/classroom-mode.md
+      - docs/source/课堂模式功能设计.md
       - docs/current/platform/architecture-and-code-placement.md
       - docs/current/platform/desktop-skin.md
     optional:
