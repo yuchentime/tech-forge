@@ -1077,14 +1077,15 @@ export class LlmService {
           "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
           "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
           "- For mind maps, prefer SVG with a left-to-right tree layout.",
-          "- When the user states a durable preference, identity, or explicitly asks you to remember something, call memory_write. Never record one-off task details, file contents, teaching mastery (scores/weak spots), or answer style.",
         ];
         if (identity.trim()) {
           // User-authored context about who they are and what they are working toward. It steers
           // examples and depth without overriding the current request.
           promptSections.push(`\n\n## User identity and goals:\n${identity.trim()}`);
         }
-        promptSections.push(`\n\n## User preferences: ${stylePreference}`);
+        if (stylePreference.trim()) {
+          promptSections.push(`\n\n## User preferences: \n${stylePreference}`);
+        }
         customSystemPrompt = promptSections.join("\n");
       }
 
