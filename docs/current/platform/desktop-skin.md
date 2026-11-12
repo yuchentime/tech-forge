@@ -41,10 +41,10 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
 
 | 组件 | 位置 | 行为 |
 |---|---|---|
-| `SidebarScenery` | [apps/desktop/src/components/SidebarScenery.tsx](../../../apps/desktop/src/components/SidebarScenery.tsx) | 会话侧栏底部的山脊、旗帜、云与星点，绝对定位并向上渐隐；列表容器留 `pb-24` 避免遮挡行 |
+| 侧栏背景图 | [apps/desktop/src/assets/sidebar-dreamy-peak.png](../../../apps/desktop/src/assets/sidebar-dreamy-peak.png) | `.tf-sidebar-art`：底对齐、`background-size: 100% auto`（不改宽度、不拉伸），上方空白用图片自身的天空色 `#e9e4fd` 平铺，接缝不可见；窄屏堆叠布局（`max-width: 767px`）改用 `cover`，避免只剩一片天空。必须使用全彩原始文件（RGB PNG）：调色板量化过的副本会丢掉山顶三角旗的珊瑚色 |
 | 准备动图 | [apps/desktop/src/assets/rehearsal-preparing.gif](../../../apps/desktop/src/assets/rehearsal-preparing.gif) | 演练准备画面的主图（427×409 动图，约 340 KB），由 `RehearsalPreparing` 以 `import` 引入，Vite 按 base `./` 生成哈希路径；`alt=""` 且 `aria-hidden` |
 
-侧栏装饰是纯 SVG，颜色全部走 token 变量，因此与色阶同步换肤；两者都 `aria-hidden`、无角色、无交互。
+侧栏背景图由 CSS 提供，不占 DOM 节点、`aria-hidden` 天然成立、无交互；它不受主题 token 控制，换图或换色调时只替换该 PNG 或改 `.tf-sidebar-art` 的 `background-color`。列表容器保留 `pb-24`，让最后几行不压在旗帜与云层上。
 
 准备动图自带 alpha 通道（四角与四周均为透明像素），所以直接叠在画布上即可：不加圆角卡片、描边、投影或 `mix-blend-multiply`，也不用 `mask-image` 收边——任何"背景框"或边缘遮罩都会读成独立面板或裁掉书堆、猫的轮廓。动图不受主题变量控制，展示尺寸固定（`h-52 md:h-64`，等比缩放），换肤时只需替换图片文件。
 
@@ -56,7 +56,9 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
   - 外扩硬 `ring`：被面板 `overflow-hidden` 在底部切出直线，且外扩半径与卡片圆角不重合，表现为「扩散不自然、底角对不齐」。
   - 模糊外发光：扁平白卡上出现光晕显得脏。
   - 保留 `shadow-card`：第二层 `0 12px 32px -18px` 向下约 10px，容器余量不足时被 `overflow-hidden` 切出一条灰色横带，像底部没清理干净；补足余量又会把输入区整体抬高，不如直接不投影。
-- 会话侧栏底色为 `bg-brand-50/60`，选中行 `brand-100/80` + `brand-200` 描边；空对话首屏是带渐变图标的白色圆角卡片，而不是虚线占位框。
+- 会话侧栏底色是背景图（见下），选中行 `brand-100/80` + `brand-200` 描边；底部「设置」栏是玻璃条（`bg-white/45` + `backdrop-blur-lg` + `border-t border-white/60`），把它从山峰、山道、云层那块最花的画面上分离出来，文字用 `ink-800`、`font-medium`。
+- 表单控件的基础样式放在 `@layer base`：`button/input/textarea { font: inherit }` 若写在 layer 外会压过 Tailwind 工具类，而且 `font` 简写会重置 `font-weight`，导致按钮上的 `font-medium`/`font-semibold` 全部失效。
+- 空对话首屏直接落在画布上：一个 `brand-400` 星点图标 + 标题 + 两行说明 + 一行示例，无卡片、无边框、无投影、无胶囊底色，避免在输入框上方叠出第二块面板。
 
 ## 验证方式
 

@@ -6,7 +6,6 @@ import {
   NotePencil,
   Stack,
 } from '@phosphor-icons/react';
-import { SidebarScenery } from '../../components/SidebarScenery';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   CONVERSATION_TITLE_MAX_CHARACTERS,
@@ -46,7 +45,7 @@ export function ConversationSidebar({
   return (
     <aside
       aria-label="对话列表"
-      className="relative isolate flex h-48 min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-ink-200/80 bg-brand-50/60 md:h-full md:w-64 md:border-b-0 md:border-r"
+      className="tf-sidebar-art relative isolate flex h-48 min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-ink-200/60 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="relative z-10 shrink-0 border-b border-ink-200/70 px-2 py-2">
         <div className="flex items-center">
@@ -134,14 +133,14 @@ export function ConversationSidebar({
         )}
       </div>
 
-      <footer className="relative z-10 shrink-0 border-t border-ink-200/70 px-2 py-2">
+      <footer className="relative z-10 shrink-0 border-t border-white/60 bg-white/45 px-2 py-2 backdrop-blur-lg">
         <button
           aria-label={activeView === 'settings' ? '返回对话' : '打开设置'}
           aria-pressed={activeView === 'settings'}
           className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
             activeView === 'settings'
-              ? 'bg-brand-100 text-brand-800'
-              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
+              ? 'bg-brand-100 text-brand-800 shadow-sm'
+              : 'font-medium text-ink-800 hover:bg-white/75 hover:text-ink-900'
           }`}
           onClick={() => onSelectView('settings')}
           title={activeView === 'settings' ? '返回对话' : '设置'}
@@ -151,7 +150,6 @@ export function ConversationSidebar({
           <span>设置</span>
         </button>
       </footer>
-      <SidebarScenery />
     </aside>
   );
 }

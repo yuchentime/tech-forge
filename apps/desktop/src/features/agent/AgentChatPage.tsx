@@ -628,15 +628,17 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 )}
 
                 <AuiIf condition={(state) => state.thread.isEmpty}>
-                  <div className="tf-rise my-auto rounded-3xl border border-brand-100 bg-white/80 px-6 py-9 text-center shadow-card">
-                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-100 to-honey-100 text-brand-600">
-                      <Sparkle aria-hidden="true" className="h-6 w-6" weight="fill" />
-                    </span>
-                    <p className="mt-3 text-base font-semibold text-ink-900">从一个备课问题开始</p>
-                    <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-ink-500">
+                  {/* The first-run hint sits directly on the canvas: no card, border or chip, so it
+                      reads as part of the page instead of a panel above the composer. */}
+                  <div className="tf-rise my-auto px-6 text-center">
+                    <Sparkle aria-hidden="true" className="mx-auto h-9 w-9 text-brand-400" weight="fill" />
+                    <p className="mt-4 text-xl font-semibold tracking-tight text-ink-900">
+                      从一个备课问题开始
+                    </p>
+                    <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-ink-500">
                       先聊清楚你想讲的内容，再去演练模式接受学生的提问。
                     </p>
-                    <p className="mt-4 inline-flex rounded-full bg-ink-50 px-3 py-1.5 text-xs text-ink-600">
+                    <p className="mt-5 text-xs leading-5 text-ink-500">
                       例如：帮我用一个生活中的例子解释缓存雪崩
                     </p>
                   </div>

@@ -67,10 +67,17 @@ body {
   font-family: var(--font-sans);
 }
 
-button,
-input,
-textarea {
-  font: inherit;
+/*
+ * Form controls inherit the app font. This must live in `@layer base`: an unlayered declaration
+ * outranks Tailwind's utilities, and the `font` shorthand also resets font-weight, which silently
+ * disabled every `font-medium`/`font-semibold` utility on buttons and inputs.
+ */
+@layer base {
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
 }
 
 ::selection {
@@ -102,6 +109,29 @@ textarea {
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--color-ink-400);
+}
+
+/*
+ * Sidebar artwork: a dreamy peak with a flag on the summit, anchored to the bottom edge.
+ *
+ * The asset is 941x1672 while the sidebar is only ~256px wide, so filling with `cover` would crop
+ * most of the scene sideways. It is drawn at 100% width instead (no distortion) and the leftover
+ * height above it is painted with the artwork's own sky colour (#e9e4fd), which makes the seam
+ * invisible. On the narrow stacked layout the strip is short, so `cover` is used there to keep the
+ * peak visible rather than showing empty sky.
+ */
+.tf-sidebar-art {
+  background-color: #e9e4fd;
+  background-image: url('./assets/sidebar-dreamy-peak.png');
+  background-position: bottom center;
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+}
+
+@media (max-width: 767px) {
+  .tf-sidebar-art {
+    background-size: cover;
+  }
 }
 
 /*
