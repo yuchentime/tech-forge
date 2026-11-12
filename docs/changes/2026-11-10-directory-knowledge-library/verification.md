@@ -201,3 +201,16 @@ npm run verify:directory-knowledge-library --workspace @teachforge/backend
 ## Version History
 
 无；本验证契约仍处于实施前 v1.0。
+
+## 缺陷修正：目录摘要校验上限不一致（2026-11-12）
+
+- 现象：导入 PDF/DOCX 后列表显示“导入失败”、`0 段`，后端无任何错误日志；`document_versions.catalogError = 'Invalid catalog JSON.'`。
+- 根因：提示词要求 `summary` “不超过 300 个中文字符”，校验器上限是 200。真实 Provider 返回 260 / 397 字符，校验抛错；该分支只写库不写日志，HTTP 仍返回 200 并把 `processingStatus` 置为 `failed`，渲染层同时出现“本次导入 ✓”与“导入失败”。
+- 修正：
+  - 长度改为纯提示词软上限（`CATALOG_SUMMARY_SOFT_LIMIT = 200`，措辞“尽量不超过”）；校验器只校验 JSON 形状与非空字段，不再按长度拒绝。校验失败抛 `DocumentCatalogError('INVALID_SUMMARY')`，message 只含数量，非 JSON 的解析错误不再回显原文片段。
+  - 成功写 `documents.catalog.ready`（`summaryLength`、`keywordCount`），成功与失败日志都不含摘要或正文。
+  - 摘要失败记录 `documents.catalog.failed`（`documentId`、`versionNo`、`code`、`detail`、`trigger`），不记录正文。
+  - 新增 `POST /api/documents/:documentId/catalog/retry`：读取该版本已存的转换文本重跑摘要，成功即 `ready` 并重建 `index.md`；已就绪版本幂等返回。
+  - 读模型增加 `latest.catalogStatus`；桌面端把摘要失败显示为“摘要未生成”+「重试摘要」，导入反馈卡片按 `status: 'failed'` 显示失败文案，行内不再显示恒为 0 的“N 段”。
+- 验证：用户两份真实资料（50 KB DOCX / 11 MB PDF）在修正后导入 `ready`，`index.md` 各写入一条条目；注入 Provider 失败复现 `failed` 与 `documents.catalog.failed`，清除故障后重试 `ready`，重复重试幂等；Electron 渲染层（打桩桥）确认三种状态徽标、重试动作与失败导入卡片。
+- 并发与排队（2026-11-12）：`ConcurrencyGate(IMPORT_CONCURRENCY = 3)` 限制上传并发，解析/摘要并行而数据库写入与 `index.md` 重建继续走 `withDatabaseLock`。5 份同时提交的真实测试中，恰好 3 条 `llm.generate.started` 重叠，第 4、5 条在前一批结束后开始，总耗时约两批（3.1 s）；桌面端同样 3 并发并显示“排队中…”；同字节并发上传由锁内的重复检查收敛为一条版本记录。

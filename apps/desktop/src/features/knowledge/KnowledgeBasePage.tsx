@@ -7,6 +7,7 @@ import {
   FileText,
   Trash,
   UploadSimple,
+  WarningCircle,
   X,
   XCircle,
 } from '@phosphor-icons/react';
@@ -16,7 +17,15 @@ import { PageHeader } from '../../components/PageHeader';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 /** Lifecycle values the backend may report for the latest document version. */
-type DocumentStatus = 'parsing' | 'chunking' | 'indexed' | 'ready' | 'failed';
+type DocumentStatus = 'parsing' | 'cataloging' | 'chunking' | 'indexed' | 'ready' | 'failed';
+
+/** Catalog state of the latest version; `failed` keeps the file but leaves it out of the directory. */
+type CatalogStatus = 'pending' | 'ready' | 'failed';
+
+/** Copy shared by the import card, the row badge and its hint for a missing catalog summary. */
+const CATALOG_FAILED_HINT =
+  '资料已保存，但目录摘要没生成成功。点「重试摘要」再试一次，或删除后重新导入。';
+const CATALOG_FAILED_COPY = '资料已保存，但目录摘要没生成成功，可以在列表里点「重试摘要」。';
 
 /** One row of the knowledge library list, as returned by `GET /api/documents`. */
 interface DocumentSummary {
@@ -27,6 +36,7 @@ interface DocumentSummary {
   latest: {
     versionNo: number;
     status: DocumentStatus;
+    catalogStatus: CatalogStatus;
     originalName: string;
     chunkCount: number;
     byteSize: number | null;
@@ -58,15 +68,24 @@ interface ImportEntry {
   message?: string;
 }
 
+/**
+ * How many uploads run at once; the rest wait with a visible queue entry.
+ *
+ * Mirrors `IMPORT_CONCURRENCY` in the backend, which still admits at most this many per request so a
+ * second client or a direct API call cannot bypass the provider budget.
+ */
+const IMPORT_CONCURRENCY = 3;
+
 /** Monotonic key for import feedback rows; the file path itself is not a stable key. */
 let nextImportId = 0;
 
 /**
  * Renders the knowledge library: imported materials, native file import and deletion.
  *
- * The page only talks to the local backend through the restricted desktop bridge. Import runs one
- * file at a time because the backend serialises ingest anyway, and the list is polled while imports
- * are in flight so `parsing → chunking → ready` is visible without a progress protocol.
+ * The page only talks to the local backend through the restricted desktop bridge. Picked files are
+ * dispatched by a three-wide worker pool, so the remaining files wait with a "排队中" entry instead
+ * of flooding the provider; the list is polled while imports or catalog retries are in flight so
+ * `parsing → cataloging → ready` is visible without a progress protocol.
  */
 export function KnowledgeBasePage() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -79,6 +98,8 @@ export function KnowledgeBasePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [fileCleanupWarning, setFileCleanupWarning] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const [pollFailures, setPollFailures] = useState(0);
 
   /** Loads the library list; silent polls never replace a visible error or clear the rows. */
@@ -128,14 +149,15 @@ export function KnowledgeBasePage() {
   const isImporting = imports.some(
     (entry) => entry.state === 'pending' || entry.state === 'importing',
   );
+  const isBackgroundWork = isImporting || retryingId !== null;
 
   useEffect(() => {
-    if (!isImporting) return;
+    if (!isBackgroundWork) return;
     const timer = window.setInterval(() => {
       void loadDocuments(true);
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [isImporting, loadDocuments]);
+  }, [isBackgroundWork, loadDocuments]);
 
   /** Picks files natively, then imports them one at a time and reports each outcome. */
   const importDocuments = useCallback(async () => {
@@ -158,18 +180,31 @@ export function KnowledgeBasePage() {
 
     if (picked.length === 0) return;
 
-    const queued = picked.map((filePath) => ({
+    const entries = picked.map((filePath) => ({
       id: nextImportId++,
       filePath,
       name: fileNameOf(filePath),
     }));
     setImports((current) => [
-      ...queued.map(({ id, name }) => ({ id, name, state: 'pending' as const })),
+      ...entries.map(({ id, name }) => ({
+        id,
+        name,
+        state: 'pending' as const,
+        message: '排队中…',
+      })),
       ...current,
     ]);
 
-    for (const item of queued) {
-      updateImport(setImports, item.id, (entry) => ({ ...entry, state: 'importing' }));
+    // Workers pull from a copy: the React updater above must keep seeing the full batch, and a
+    // shifted array would render only the files that were still queued at commit time.
+    const pending = entries.slice();
+    const startNext = () => pending.shift();
+    const runOne = async (item: (typeof entries)[number]) => {
+      updateImport(setImports, item.id, (entry) => ({
+        ...entry,
+        state: 'importing',
+        message: undefined,
+      }));
       try {
         const response = await window.teachforge.request<unknown>({
           method: 'POST',
@@ -182,14 +217,24 @@ export function KnowledgeBasePage() {
         const result = response.data;
         // A duplicate can point at an earlier failed attempt; saying "already imported" would hide it.
         const failedBefore = result.duplicate && result.status === 'failed';
+        // The row is saved even when the summary fails, so the card must not read as a plain success.
+        const catalogFailed = !failedBefore && result.status === 'failed';
+        // Picking the same file twice in one batch reports a duplicate while the first copy is still
+        // running; claiming it is already imported would be wrong until that copy settles.
+        const stillRunning =
+          result.duplicate && (result.status === 'parsing' || result.status === 'cataloging');
         updateImport(setImports, item.id, (entry) => ({
           ...entry,
-          state: failedBefore ? 'failed' : result.duplicate ? 'duplicate' : 'done',
+          state: failedBefore || catalogFailed ? 'failed' : result.duplicate ? 'duplicate' : 'done',
           message: failedBefore
-            ? '这份文件上次导入没有成功，请先删除那条失败记录，再重新导入。'
-            : result.duplicate
-              ? '该文件已入库，未重复导入。'
-              : describeImportSuccess(result),
+            ? '这份文件上次导入没成功，请先在列表里重试摘要或删除后重新导入。'
+            : catalogFailed
+              ? CATALOG_FAILED_COPY
+              : stillRunning
+                ? '这份文件正在导入，不会再处理一次。'
+                : result.duplicate
+                  ? '该文件已入库，未重复导入。'
+                  : describeImportSuccess(result),
         }));
       } catch (error) {
         updateImport(setImports, item.id, (entry) => ({
@@ -199,10 +244,44 @@ export function KnowledgeBasePage() {
         }));
       }
       await loadDocuments(true);
-    }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(IMPORT_CONCURRENCY, pending.length) },
+      async () => {
+        for (let item = startNext(); item; item = startNext()) await runOne(item);
+      },
+    );
+    await Promise.all(workers);
 
     await loadDocuments(true);
   }, [loadDocuments]);
+
+  /** Regenerates the catalog summary of one saved document and refreshes its row. */
+  const retryCatalog = useCallback(
+    async (documentId: string) => {
+      setRetryingId(documentId);
+      setRetryError(null);
+      try {
+        const response = await window.teachforge.request<unknown>({
+          method: 'POST',
+          path: `/api/documents/${encodeURIComponent(documentId)}/catalog/retry`,
+        });
+        if (response.status !== 200 || !isRetryResult(response.data)) {
+          throw new Error(readBackendErrorMessage(response.data, '重试摘要失败，请重试。'));
+        }
+        if (response.data.catalogStatus === 'failed') {
+          setRetryError('摘要还是没有生成成功，可以稍后再试一次。');
+        }
+      } catch (error) {
+        setRetryError(describeFailure(error, '重试摘要失败，请重试。'));
+      } finally {
+        setRetryingId(null);
+      }
+      await loadDocuments(true);
+    },
+    [loadDocuments],
+  );
 
   /** Deletes one confirmed document and drops it from the list without a reload. */
   const deleteDocument = useCallback(async (documentId: string) => {
@@ -331,6 +410,22 @@ export function KnowledgeBasePage() {
             </div>
           )}
 
+          {retryError && (
+            <div
+              className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              role="alert"
+            >
+              <span className="min-w-0 flex-1">{retryError}</span>
+              <button
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => setRetryError(null)}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+
           {fileCleanupWarning && (
             <div
               className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
@@ -395,6 +490,8 @@ export function KnowledgeBasePage() {
                     setDeleteError(null);
                     setPendingDeleteId(document.id);
                   }}
+                  onRetryCatalog={() => void retryCatalog(document.id)}
+                  retrying={retryingId === document.id}
                 />
               ))}
             </ul>
@@ -405,24 +502,33 @@ export function KnowledgeBasePage() {
   );
 }
 
-/** Renders one material with its status and a two-step deletion confirmation. */
+/** Renders one material with its status, an optional summary retry and two-step deletion. */
 function DocumentRow({
   document,
   confirmDelete,
   deleting,
+  retrying,
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
+  onRetryCatalog,
 }: {
   document: DocumentSummary;
   confirmDelete: boolean;
   deleting: boolean;
+  retrying: boolean;
   onRequestDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  onRetryCatalog: () => void;
 }) {
   const latest = document.latest;
   const displayName = latest?.originalName ?? document.title;
+  const busy =
+    latest?.status === 'parsing' ||
+    latest?.status === 'cataloging' ||
+    latest?.status === 'chunking' ||
+    retrying;
 
   return (
     <li className="rounded-xl border border-ink-200 bg-white px-4 py-3">
@@ -434,8 +540,11 @@ function DocumentRow({
           </p>
           <p className="mt-1 truncate text-xs text-ink-500">
             {[
-              document.versionCount > 1 ? `v${latest?.versionNo ?? document.versionCount}` : null,
-              latest ? `${latest.chunkCount} 段` : '还没导入完成',
+              latest
+                ? document.versionCount > 1
+                  ? `v${latest.versionNo}`
+                  : null
+                : '还没导入完成',
               latest?.byteSize !== null && latest?.byteSize !== undefined
                 ? formatBytes(latest.byteSize)
                 : null,
@@ -445,7 +554,7 @@ function DocumentRow({
               .join(' · ')}
           </p>
         </div>
-        {latest && <StatusBadge status={latest.status} />}
+        {latest && <StatusBadge latest={latest} />}
       </div>
 
       {confirmDelete ? (
@@ -472,17 +581,24 @@ function DocumentRow({
           </button>
         </div>
       ) : (
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-end gap-2">
+          {latest?.catalogStatus === 'failed' && (
+            <button
+              className="mr-auto flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-amber-800 transition hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 disabled:cursor-wait disabled:opacity-40"
+              disabled={busy}
+              onClick={onRetryCatalog}
+              type="button"
+            >
+              {retrying && <CircleNotch aria-hidden="true" className="size-3.5 animate-spin" />}
+              <span>{retrying ? '正在生成摘要…' : '重试摘要'}</span>
+            </button>
+          )}
           <button
             aria-label={`删除 ${displayName}`}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 disabled:cursor-wait disabled:opacity-40"
-            disabled={deleting || latest?.status === 'parsing' || latest?.status === 'chunking'}
+            disabled={deleting || busy}
             onClick={onRequestDelete}
-            title={
-              latest?.status === 'parsing' || latest?.status === 'chunking'
-                ? '处理完成后才能删除'
-                : '删除这份资料'
-            }
+            title={busy ? '处理完成后才能删除' : '删除这份资料'}
             type="button"
           >
             <Trash aria-hidden="true" className="size-3.5" />
@@ -494,19 +610,24 @@ function DocumentRow({
   );
 }
 
-/** Maps the processing status to a Chinese label and a distinct colour plus icon. */
-function StatusBadge({ status }: { status: DocumentStatus }) {
-  const label = getStatusLabel(status);
-  const hint = getStatusHint(status);
-  const className =
-    status === 'ready'
+/** Maps the latest version state to a Chinese label plus a distinct colour and icon. */
+function StatusBadge({ latest }: { latest: NonNullable<DocumentSummary['latest']> }) {
+  // A failed summary is not a failed file: the row keeps the source and offers a retry, so the badge
+  // reports the degraded capability instead of "导入失败".
+  const catalogFailed = latest.catalogStatus === 'failed';
+  const label = catalogFailed ? '摘要未生成' : getStatusLabel(latest.status);
+  const hint = catalogFailed ? CATALOG_FAILED_HINT : getStatusHint(latest.status);
+  const className = catalogFailed
+    ? 'border-amber-200 bg-amber-50 text-amber-800'
+    : latest.status === 'ready'
       ? 'border-brand-200 bg-brand-50 text-brand-600'
-      : status === 'indexed'
+      : latest.status === 'indexed'
         ? 'border-amber-200 bg-amber-50 text-amber-800'
-        : status === 'failed'
+        : latest.status === 'failed'
           ? 'border-rose-200 bg-rose-50 text-rose-800'
           : 'border-ink-200 bg-ink-100 text-ink-700';
-  const isBusy = status === 'parsing' || status === 'chunking';
+  const isBusy =
+    latest.status === 'parsing' || latest.status === 'cataloging' || latest.status === 'chunking';
 
   return (
     <span
@@ -515,7 +636,9 @@ function StatusBadge({ status }: { status: DocumentStatus }) {
     >
       {isBusy ? (
         <CircleNotch aria-hidden="true" className="size-3 animate-spin" />
-      ) : status === 'failed' ? (
+      ) : catalogFailed ? (
+        <WarningCircle aria-hidden="true" className="size-3" />
+      ) : latest.status === 'failed' ? (
         <XCircle aria-hidden="true" className="size-3" />
       ) : (
         <CheckCircle aria-hidden="true" className="size-3" />
@@ -555,6 +678,8 @@ function getStatusLabel(status: DocumentStatus): string {
       return '导入失败';
     case 'parsing':
       return '正在读取';
+    case 'cataloging':
+      return '正在生成摘要';
     case 'chunking':
       return '正在整理';
     default:
@@ -571,6 +696,8 @@ function getStatusHint(status: DocumentStatus): string | null {
       return '这份资料没能导入成功，可以删除后重新导入。';
     case 'parsing':
       return '正在读取文件内容…';
+    case 'cataloging':
+      return '正在生成资料摘要…';
     case 'chunking':
       return '正在整理内容，方便之后搜索…';
     default:
@@ -578,13 +705,17 @@ function getStatusHint(status: DocumentStatus): string | null {
   }
 }
 
-/** Summarises one successful import without repeating the status label in the panel. */
+/**
+ * Summarises one successful import without repeating the status label in the panel.
+ *
+ * The library is a directory of summaries plus converted text rather than a chunk index, so the
+ * panel reports that the material is searchable and keeps the first parser warning only.
+ */
 function describeImportSuccess(result: ImportResult): string {
-  const base = `${result.chunkCount} 段`;
   const warning = result.warnings
     .map((entry) => getWarningCopy(entry.code))
     .find((copy): copy is string => Boolean(copy));
-  return warning ? `${base} · ${warning}` : base;
+  return warning ? `已加入资料库 · ${warning}` : '已加入资料库';
 }
 
 /**
@@ -599,6 +730,8 @@ function getWarningCopy(code: string): string | null {
       return '暂时只能用关键词搜索';
     case 'UPLOAD_COPY_FAILED':
       return '原文件没能另存到工作空间';
+    case 'CATALOG_FAILED':
+      return '目录摘要没生成成功';
     case 'TOC_LIKE':
       return '目录页已跳过';
     case 'MULTI_COLUMN_SUSPECTED':
@@ -693,9 +826,22 @@ function isImportResult(value: unknown): value is ImportResult {
 function isDocumentStatus(value: unknown): value is DocumentStatus {
   return (
     value === 'parsing' ||
+    value === 'cataloging' ||
     value === 'chunking' ||
     value === 'indexed' ||
     value === 'ready' ||
     value === 'failed'
   );
+}
+
+/** Narrows a value to the known catalog states. */
+function isCatalogStatus(value: unknown): value is CatalogStatus {
+  return value === 'pending' || value === 'ready' || value === 'failed';
+}
+
+/** Validates one catalog retry response before the page reports its outcome. */
+function isRetryResult(value: unknown): value is { documentId: string; catalogStatus: CatalogStatus } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { documentId, catalogStatus } = value as { documentId: unknown; catalogStatus: unknown };
+  return typeof documentId === 'string' && isCatalogStatus(catalogStatus);
 }

@@ -50,3 +50,37 @@ test('renders a non-empty catalog instead of reporting an empty one', async (t) 
   writeFileSync(catalogPath, '   \n', 'utf8');
   assert.match(service.renderLoadedContext(await service.loadForAgent()), /目录为空/);
 });
+
+test('accepts a summary longer than the prompt budget instead of failing the import', () => {
+  const { parseCatalogSummary } = require(join(buildDirectory, 'documents/document-catalog.service.js'));
+  const summary = '长'.repeat(300);
+  const parsed = parseCatalogSummary(
+    JSON.stringify({ summary, keywords: ['甲', '乙', '丙'], documentType: '课程资料' }),
+  );
+  assert.equal(Array.from(parsed.summary).length, 300);
+});
+
+test('rejects malformed catalog output without echoing provider or document text', () => {
+  const { DocumentCatalogError, parseCatalogSummary } = require(
+    join(buildDirectory, 'documents/document-catalog.service.js'),
+  );
+  const isInvalid = (error) =>
+    error instanceof DocumentCatalogError && error.code === 'INVALID_SUMMARY';
+
+  assert.throws(
+    () => parseCatalogSummary('not json DOCUMENT-BODY'),
+    (error) => isInvalid(error) && !error.message.includes('DOCUMENT-BODY'),
+  );
+  assert.throws(
+    () => parseCatalogSummary(JSON.stringify({ summary: '  ', keywords: ['甲', '乙', '丙'], documentType: 'x' })),
+    isInvalid,
+  );
+  assert.throws(
+    () => parseCatalogSummary(JSON.stringify({ summary: '摘要', keywords: ['甲'], documentType: 'x' })),
+    isInvalid,
+  );
+  assert.throws(
+    () => parseCatalogSummary(JSON.stringify({ summary: '摘要', keywords: ['甲', '乙', '丙'], documentType: '' })),
+    isInvalid,
+  );
+});

@@ -45,7 +45,12 @@ import { ConversationDocumentEntity } from './conversation-document.entity';
 import { DocumentChunkEntity } from './document-chunk.entity';
 import { DocumentVersionEntity } from './document-version.entity';
 import { DocumentEntity } from './document.entity';
-import { DocumentCatalogIndexService, DocumentCatalogService } from './document-catalog.service';
+import {
+  catalogReadablePath,
+  DocumentCatalogError,
+  DocumentCatalogIndexService,
+  DocumentCatalogService,
+} from './document-catalog.service';
 
 /** Storage root for copied source files; defaults to the backend data directory. */
 export const DOCUMENTS_STORAGE_ROOT = 'DOCUMENTS_STORAGE_ROOT';
@@ -58,6 +63,9 @@ export const DOCUMENTS_STORAGE_ROOT = 'DOCUMENTS_STORAGE_ROOT';
  * embedding stays at `indexed`: the content remains usable and can be re-embedded later.
  */
 export type DocumentProcessingStatus = 'parsing' | 'cataloging' | 'chunking' | 'indexed' | 'ready' | 'failed';
+
+/** Derived catalog state of one version; `failed` keeps the file but leaves it out of `index.md`. */
+export type DocumentCatalogStatus = 'pending' | 'ready' | 'failed';
 
 /** Caller input for one ingest run: a complete local file path, plus an optional target document. */
 export interface IngestDocumentInput {
@@ -89,6 +97,12 @@ export interface ImportDocumentResult extends IngestDocumentResult {
   storedPath: string | null;
 }
 
+/** Outcome of retrying catalog summarisation for one document's latest version. */
+export interface RetryCatalogResult {
+  documentId: string;
+  catalogStatus: DocumentCatalogStatus;
+}
+
 /** Outcome of one deletion, including whether both file copies could be removed. */
 export interface DeleteDocumentResult {
   /** `partial` means the rows are gone but at least one file copy could not be removed. */
@@ -104,6 +118,7 @@ export interface DocumentSummary {
   latest: {
     versionNo: number;
     status: DocumentProcessingStatus;
+    catalogStatus: DocumentCatalogStatus;
     originalName: string;
     chunkCount: number;
     byteSize: number | null;
@@ -118,6 +133,7 @@ export interface DocumentDetail extends DocumentSummary {
     id: string;
     versionNo: number;
     status: DocumentProcessingStatus;
+    catalogStatus: DocumentCatalogStatus;
     originalName: string;
     byteSize: number | null;
     chunkCount: number;
@@ -130,20 +146,34 @@ export interface DocumentDetail extends DocumentSummary {
 const CHUNK_INSERT_BATCH = 200;
 
 /**
+ * Uploads processed at once; the remainder queue behind them.
+ *
+ * The bound protects the configured provider (TPS and rate limits) rather than the CPU, and it is
+ * mirrored by the desktop queue so the list can show which files are still waiting.
+ */
+export const IMPORT_CONCURRENCY = 3;
+
+/**
  * Owns the document ingest business line: local file path in, persisted document/version/chunks out.
  *
  * Responsibilities: identity and versioning, copying the source file into managed storage, invoking
- * the platform parser, chunking, and persisting chunks inside one transaction. Also owns the
- * knowledge-library use cases that wrap ingest: importing a picked file through the Agent workspace
- * and deleting a document together with every derived row and file copy. Index building and
- * retrieval are separate business lines and are not implemented here.
+ * the platform parser, generating the catalog summary, and persisting versions. Also owns the
+ * knowledge-library use cases that wrap ingest: importing picked files, retrying a summary and
+ * deleting a document together with every derived row and file copy.
+ *
+ * Two limits govern concurrency. Uploads run at most `IMPORT_CONCURRENCY` at a time so the provider
+ * is not flooded; everything else waits for a slot. SQLite still takes one writer at a time, so
+ * every database mutation (and the `index.md` rebuild that reads the database) runs under
+ * `withDatabaseLock`, while parsing and provider calls stay outside it.
  */
 @Injectable()
 export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
   private readonly storageRoot: string;
-  /** Serialises imports and deletions so heavy CPU work and SQLite writes never interleave. */
-  private libraryQueue: Promise<unknown> = Promise.resolve();
+  /** Serialises database mutations and catalog rebuilds; parsing and provider calls stay outside. */
+  private databaseQueue: Promise<unknown> = Promise.resolve();
+  /** Admits at most `IMPORT_CONCURRENCY` uploads; the rest wait here in arrival order. */
+  private readonly importGate = new ConcurrencyGate(IMPORT_CONCURRENCY);
 
   constructor(
     @InjectRepository(DocumentEntity)
@@ -230,12 +260,39 @@ export class DocumentsService implements OnModuleInit {
       throw new Error(`不支持的文件类型：${extname(originalName) || '(无扩展名)'}`);
     }
 
-    // A caller that names a document expects that document to exist; report it before the
-    // content-hash shortcut, otherwise an unknown id would silently return another document's row.
-    const targetDocument = input.documentId ? await this.requireDocument(input.documentId) : null;
+    // The duplicate check and the row creation share one lock. Two uploads of the same bytes are
+    // admitted concurrently by the gate, so only a serialised check lets the second one see the row
+    // the first one just wrote instead of creating a second version for the same content.
+    const admission = await this.withDatabaseLock(async () => {
+      // A caller that names a document expects that document to exist; report it before the
+      // content-hash shortcut, otherwise an unknown id would silently return another document's row.
+      const targetDocument = input.documentId ? await this.requireDocument(input.documentId) : null;
 
-    const duplicate = await this.versions.findOne({ where: { contentHash } });
-    if (duplicate) {
+      const duplicate = await this.versions.findOne({ where: { contentHash } });
+      if (duplicate) return { kind: 'duplicate' as const, duplicate };
+
+      const document = targetDocument ?? (await this.resolveDocument(input, originalName));
+      const versionNo =
+        ((await this.versions.maximum('versionNo', { documentId: document.id })) ?? 0) + 1;
+      const version = await this.versions.save(
+        this.versions.create({
+          id: randomUUID(),
+          documentId: document.id,
+          versionNo,
+          originalName,
+          mimeType: guessMimeType(originalName),
+          workspaceRelativePath: this.copyIntoStorage(filePath, document.id, versionNo, originalName),
+          byteSize,
+          contentHash,
+          processingStatus: 'parsing',
+          processingError: null,
+        }),
+      );
+      return { kind: 'new' as const, document, version, versionNo };
+    });
+
+    if (admission.kind === 'duplicate') {
+      const { duplicate } = admission;
       return {
         documentId: duplicate.documentId,
         documentVersionId: duplicate.id,
@@ -246,23 +303,7 @@ export class DocumentsService implements OnModuleInit {
         warnings: [],
       };
     }
-
-    const document = targetDocument ?? (await this.resolveDocument(input, originalName));
-    const versionNo = ((await this.versions.maximum('versionNo', { documentId: document.id })) ?? 0) + 1;
-    const version = await this.versions.save(
-      this.versions.create({
-        id: randomUUID(),
-        documentId: document.id,
-        versionNo,
-        originalName,
-        mimeType: guessMimeType(originalName),
-        workspaceRelativePath: this.copyIntoStorage(filePath, document.id, versionNo, originalName),
-        byteSize,
-        contentHash,
-        processingStatus: 'parsing',
-        processingError: null,
-      }),
-    );
+    const { document, version, versionNo } = admission;
 
     let parsed: ParseDocumentResult;
     try {
@@ -273,7 +314,7 @@ export class DocumentsService implements OnModuleInit {
         signal: input.signal,
       });
     } catch (error) {
-      await this.markFailed(version.id, describeError(error));
+      await this.withDatabaseLock(() => this.markFailed(version.id, describeError(error)));
       throw error;
     }
 
@@ -296,17 +337,29 @@ export class DocumentsService implements OnModuleInit {
       );
     }
 
-    await this.updateStatus(version.id, 'cataloging');
+    await this.withDatabaseLock(() => this.updateStatus(version.id, 'cataloging'));
     let summary;
     try {
       summary = await this.catalog.summarize(document.title, joinParsedPages(parsed.pages));
     } catch (error) {
-      await this.versions.update(version.id, {
-        processingStatus: 'failed',
-        processingError: null,
-        catalogStatus: 'failed',
-        catalogError: describeError(error).slice(0, 1000),
-      });
+      const failure = classifyCatalogFailure(error);
+      await this.withDatabaseLock(() =>
+        this.versions.update(version.id, {
+          processingStatus: 'failed',
+          processingError: null,
+          catalogStatus: 'failed',
+          catalogError: failure.detail.slice(0, 1000),
+        }),
+      );
+      this.logger.warn(
+        `documents.catalog.failed ${JSON.stringify({
+          documentId: document.id,
+          versionNo,
+          code: failure.code,
+          detail: failure.detail,
+          trigger: 'import',
+        })}`,
+      );
       return {
         documentId: document.id,
         documentVersionId: version.id,
@@ -320,12 +373,23 @@ export class DocumentsService implements OnModuleInit {
         ],
       };
     }
-    await this.versions.update(version.id, {
-      processingStatus: 'ready', processingError: null, catalogStatus: 'ready',
-      catalogSummary: summary.summary, catalogKeywordsJson: JSON.stringify(summary.keywords),
-      catalogDocumentType: summary.documentType, catalogError: null, catalogedAt: new Date(),
+    await this.withDatabaseLock(async () => {
+      await this.versions.update(version.id, {
+        processingStatus: 'ready', processingError: null, catalogStatus: 'ready',
+        catalogSummary: summary.summary, catalogKeywordsJson: JSON.stringify(summary.keywords),
+        catalogDocumentType: summary.documentType, catalogError: null, catalogedAt: new Date(),
+      });
+      await this.rebuildCatalogIndex();
     });
-    await this.rebuildCatalogIndex();
+    this.logger.log(
+      `documents.catalog.ready ${JSON.stringify({
+        documentId: document.id,
+        versionNo,
+        summaryLength: Array.from(summary.summary).length,
+        keywordCount: summary.keywords.length,
+        trigger: 'import',
+      })}`,
+    );
 
     const warnings = parsed.warnings.map((warning) => ({ code: String(warning.code), message: warning.message }));
     if (convertedMarkdownWarning) warnings.push(convertedMarkdownWarning);
@@ -355,7 +419,7 @@ export class DocumentsService implements OnModuleInit {
    * indexed content is already usable.
    */
   async importFromPath(input: { filePath: string; title?: string }): Promise<ImportDocumentResult> {
-    return this.runExclusive(async () => {
+    return this.importGate.run(async () => {
       const sourcePath = this.validateInput({ filePath: input.filePath });
       const originalName = basename(sourcePath);
       if (!this.parser.supportsFile(originalName)) {
@@ -422,6 +486,101 @@ export class DocumentsService implements OnModuleInit {
   }
 
   /**
+   * Regenerates only the catalog summary of one document's latest version.
+   *
+   * A failed import keeps the source copy and the converted Markdown on disk, so a retry never
+   * parses or copies the file again: it reuses the same version row and re-reads the same text that
+   * `index.md` points at. A version that is already catalogued is a no-op.
+   */
+  async retryCatalog(documentId: string): Promise<RetryCatalogResult> {
+    // Admission only reads state and claims the version; the provider call must stay outside the
+    // database lock so other uploads can keep writing while it runs.
+    const admission = await this.withDatabaseLock(async () => {
+      const document = await this.requireDocument(documentId);
+      const latest = await this.versions.findOne({
+        where: { documentId },
+        order: { versionNo: 'DESC' },
+      });
+      if (!latest) throw new NotFoundException('这份资料还没有可用的文件，请重新导入。');
+      if (latest.catalogStatus === 'ready') return { kind: 'ready' as const };
+      if (latest.processingStatus === 'parsing' || latest.processingStatus === 'cataloging') {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'DOCUMENT_PROCESSING',
+          message: '这份资料还在处理中，等处理完再重试。',
+        });
+      }
+
+      const readablePath = join(this.storageRoot, catalogReadablePath(latest.workspaceRelativePath));
+      if (!existsSync(readablePath)) {
+        this.logger.warn(
+          `documents.catalog.retry_missing_text ${JSON.stringify({
+            documentId,
+            versionNo: latest.versionNo,
+          })}`,
+        );
+        throw new NotFoundException('找不到这份资料的正文，请删除后重新导入。');
+      }
+
+      await this.versions.update(latest.id, {
+        processingStatus: 'cataloging',
+        processingError: null,
+        catalogStatus: 'pending',
+      });
+      return { kind: 'retry' as const, document, latest, readablePath };
+    });
+    if (admission.kind === 'ready') return { documentId, catalogStatus: 'ready' };
+
+    const { document, latest, readablePath } = admission;
+    try {
+      const text = readFileSync(readablePath, 'utf8');
+      const summary = await this.importGate.run(() => this.catalog.summarize(document.title, text));
+      await this.withDatabaseLock(async () => {
+        await this.versions.update(latest.id, {
+          processingStatus: 'ready',
+          processingError: null,
+          catalogStatus: 'ready',
+          catalogSummary: summary.summary,
+          catalogKeywordsJson: JSON.stringify(summary.keywords),
+          catalogDocumentType: summary.documentType,
+          catalogError: null,
+          catalogedAt: new Date(),
+        });
+        await this.rebuildCatalogIndex();
+      });
+      this.logger.log(
+        `documents.catalog.retried ${JSON.stringify({
+          documentId,
+          versionNo: latest.versionNo,
+          outcome: 'ready',
+          summaryLength: Array.from(summary.summary).length,
+          keywordCount: summary.keywords.length,
+        })}`,
+      );
+      return { documentId, catalogStatus: 'ready' as const };
+    } catch (error) {
+      const failure = classifyCatalogFailure(error);
+      await this.withDatabaseLock(() =>
+        this.versions.update(latest.id, {
+          processingStatus: 'failed',
+          catalogStatus: 'failed',
+          catalogError: failure.detail.slice(0, 1000),
+        }),
+      );
+      this.logger.warn(
+        `documents.catalog.failed ${JSON.stringify({
+          documentId,
+          versionNo: latest.versionNo,
+          code: failure.code,
+          detail: failure.detail,
+          trigger: 'retry',
+        })}`,
+      );
+      return { documentId, catalogStatus: 'failed' as const };
+    }
+  }
+
+  /**
    * Deletes one document and everything derived from it.
    *
    * Rows are removed in one transaction in foreign-key and FTS-trigger order, then both file copies
@@ -430,7 +589,7 @@ export class DocumentsService implements OnModuleInit {
    * removed is reported as `partial` cleanup instead of being ignored.
    */
   async deleteDocument(documentId: string): Promise<DeleteDocumentResult> {
-    return this.runExclusive(async () => {
+    return this.withDatabaseLock(async () => {
       const document = await this.requireDocument(documentId);
       const versions = await this.versions.find({ where: { documentId } });
       const isProcessing = versions.some(
@@ -543,6 +702,7 @@ export class DocumentsService implements OnModuleInit {
           ? {
               versionNo: latest.versionNo,
               status: latest.processingStatus as DocumentProcessingStatus,
+              catalogStatus: latest.catalogStatus as DocumentCatalogStatus,
               originalName: latest.originalName,
               chunkCount: chunkCounts.get(latest.id) ?? 0,
               byteSize: latest.byteSize,
@@ -568,6 +728,7 @@ export class DocumentsService implements OnModuleInit {
       id: version.id,
       versionNo: version.versionNo,
       status: version.processingStatus as DocumentProcessingStatus,
+      catalogStatus: version.catalogStatus as DocumentCatalogStatus,
       originalName: version.originalName,
       byteSize: version.byteSize,
       chunkCount: chunkCounts.get(version.id) ?? 0,
@@ -585,6 +746,7 @@ export class DocumentsService implements OnModuleInit {
         ? {
             versionNo: latest.versionNo,
             status: latest.status,
+            catalogStatus: latest.catalogStatus,
             originalName: latest.originalName,
             chunkCount: latest.chunkCount,
             byteSize: latest.byteSize,
@@ -681,10 +843,16 @@ export class DocumentsService implements OnModuleInit {
     return stats.size;
   }
 
-  /** Runs one library mutation after the previous one settled, serialising CPU and write load. */
-  private runExclusive<T>(task: () => Promise<T>): Promise<T> {
-    const run = this.libraryQueue.then(task, task);
-    this.libraryQueue = run.catch(() => undefined);
+  /**
+   * Runs one database mutation after the previous one settled.
+   *
+   * SQLite here is a single synchronous connection, so a multi-statement transaction must not
+   * interleave with another writer's statements. Everything that writes or that reads a consistent
+   * snapshot for `index.md` goes through this lock; parsing and provider calls never do.
+   */
+  private withDatabaseLock<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.databaseQueue.then(task, task);
+    this.databaseQueue = run.catch(() => undefined);
     return run;
   }
 
@@ -964,4 +1132,48 @@ function describeIngestFailure(error: unknown): {
     code: 'IMPORT_FAILED',
     detail: describeDetail(error),
   };
+}
+
+/**
+ * Classifies one catalog failure for logs and the version row.
+ *
+ * The stored detail must stay safe: validation failures carry only lengths and counts, and provider
+ * failures keep the provider's short error name/message instead of any prompt or document text.
+ */
+function classifyCatalogFailure(error: unknown): { code: string; detail: string } {
+  if (error instanceof DocumentCatalogError) {
+    return { code: error.code, detail: error.message };
+  }
+  const name = error instanceof Error ? error.name : typeof error;
+  const message = error instanceof Error ? error.message : String(error);
+  return { code: 'SUMMARY_PROVIDER_FAILED', detail: `${name}: ${message}`.slice(0, 300) };
+}
+
+/**
+ * Runs at most `limit` tasks at once and queues the rest in arrival order.
+ *
+ * The gate bounds provider calls, not CPU: a task takes a slot before its heavy work and releases it
+ * in `finally`, so a failed or rejected task never leaks a slot. A settled slot is handed straight to
+ * the next waiter, which keeps `active` at the limit while a queue exists.
+ */
+class ConcurrencyGate {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly limit: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    } else {
+      this.active += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.active -= 1;
+    }
+  }
 }

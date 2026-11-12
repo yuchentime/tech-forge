@@ -13,10 +13,11 @@ import {
   DocumentsService,
   type DocumentSummary,
   type ImportDocumentResult,
+  type RetryCatalogResult,
 } from './documents.service';
 
 /**
- * Exposes the knowledge-library HTTP boundary: list, import one picked file, delete one document.
+ * Exposes the knowledge-library HTTP boundary: list, import one picked file, retry its catalog summary, delete one document.
  *
  * Protocol conversion only; ingest, workspace copying, ordering and deletion rules stay in
  * `DocumentsService`.
@@ -37,6 +38,13 @@ export class DocumentsController {
   @HttpCode(HttpStatus.OK)
   importDocument(@Body() input: ImportDocumentDto): Promise<ImportDocumentResult> {
     return this.documents.importFromPath(input);
+  }
+
+  /** Rebuilds the catalog summary of one document's latest version without re-importing it. */
+  @Post(':documentId/catalog/retry')
+  @HttpCode(HttpStatus.OK)
+  retryCatalog(@Param('documentId') documentId: string): Promise<RetryCatalogResult> {
+    return this.documents.retryCatalog(documentId);
   }
 
   /** Deletes one document with every derived row and file copy. */
