@@ -136,15 +136,15 @@ export function SettingsPage() {
   }, []);
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-ink-50/50">
       <PageHeader className="justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900">
+          <h1 className="text-xl font-semibold tracking-tight text-ink-900">
             设置
           </h1>
         </div>
         <button
-          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50"
+          className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-wait disabled:opacity-50"
           disabled={!settings || isLoading || isSaving}
           form="local-settings-form"
           type="submit"
@@ -157,7 +157,7 @@ export function SettingsPage() {
         <div className="mx-auto w-full max-w-4xl space-y-6 pb-8">
           {isLoading ? (
             <p
-              className="py-12 text-center text-sm text-stone-500"
+              className="py-12 text-center text-sm text-ink-500"
               role="status"
             >
               正在读取本机设置…
@@ -185,12 +185,12 @@ export function SettingsPage() {
                 void saveSettings();
               }}
             >
-              <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
+              <section className="rounded-xl border border-ink-200 bg-white p-5 md:p-6">
                 <div className="mb-5">
-                  <h2 className="text-base font-semibold text-stone-900">
+                  <h2 className="text-base font-semibold text-ink-900">
                     模型配置
                   </h2>
-                  <p className="mt-1 text-sm leading-6 text-stone-500">
+                  <p className="mt-1 text-sm leading-6 text-ink-500">
                     当前对话使用 DeepSeek 官方服务。配置保存在这台设备上。
                   </p>
                 </div>
@@ -215,18 +215,18 @@ export function SettingsPage() {
                 </div>
               </section>
 
-              <section className="rounded-xl border border-stone-200 bg-white p-5 md:p-6">
+              <section className="rounded-xl border border-ink-200 bg-white p-5 md:p-6">
                 <div className="mb-4">
-                  <h2 className="text-base font-semibold text-stone-900">
+                  <h2 className="text-base font-semibold text-ink-900">
                     风格偏好
                   </h2>
-                  <p className="mt-1 max-w-3xl text-sm leading-6 text-stone-500">
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-500">
                     写下希望助手长期遵循的表达方式或备课习惯。内容会作为系统提示词的补充，用于之后新建的模型会话。
                   </p>
                 </div>
                 <textarea
                   aria-label="风格偏好内容"
-                  className="min-h-52 w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+                  className="min-h-52 w-full resize-y rounded-lg border border-ink-300 bg-white px-3 py-3 text-sm leading-6 text-ink-800 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
                   disabled={isSaving}
                   id="souls-content"
                   onChange={(event) => updateSouls(event.target.value)}
@@ -240,7 +240,7 @@ export function SettingsPage() {
               <div aria-live="polite" className="min-h-6 text-sm" role="status">
                 {saveError && <p className="text-rose-700">{saveError}</p>}
                 {statusMessage && (
-                  <p className="text-emerald-800">{statusMessage}</p>
+                  <p className="text-brand-600">{statusMessage}</p>
                 )}
               </div>
             </form>
@@ -269,14 +269,14 @@ function TextField({
   return (
     <div>
       <label
-        className="mb-1.5 block text-sm font-medium text-stone-800"
+        className="mb-1.5 block text-sm font-medium text-ink-800"
         htmlFor={fieldId}
       >
         {label}
       </label>
       <input
         autoComplete={autoComplete}
-        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+        className="w-full rounded-lg border border-ink-300 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
         disabled={disabled}
         id={fieldId}
         onChange={(event) => onChange(event.target.value)}
@@ -311,7 +311,7 @@ function SecretField({
   return (
     <div>
       <label
-        className="mb-1.5 block text-sm font-medium text-stone-800"
+        className="mb-1.5 block text-sm font-medium text-ink-800"
         htmlFor={`key-${label}`}
       >
         {label}
@@ -320,7 +320,7 @@ function SecretField({
         <input
           autoComplete="off"
           autoCapitalize="none"
-          className="w-full rounded-lg border border-stone-300 bg-white py-2.5 pl-3 pr-11 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+          className="w-full rounded-lg border border-ink-300 bg-white py-2.5 pl-3 pr-11 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
           disabled={disabled || clearRequested}
           id={`key-${label}`}
           onChange={(event) => onKeyChange(event.target.value)}
@@ -334,7 +334,7 @@ function SecretField({
         <button
           aria-label={isRevealed ? "隐藏 API Key" : "显示 API Key"}
           aria-pressed={isRevealed}
-          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-stone-500 transition hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-ink-500 transition hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled || clearRequested}
           onClick={() => setIsRevealed((revealed) => !revealed)}
           title={isRevealed ? "隐藏 API Key" : "显示 API Key"}
@@ -347,7 +347,7 @@ function SecretField({
           )}
         </button>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-stone-500">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-500">
         <span>
           {clearRequested
             ? "保存后移除已保存密钥"
@@ -357,7 +357,7 @@ function SecretField({
         </span>
         {configured && (
           <button
-            className="font-medium text-stone-700 underline underline-offset-2 disabled:opacity-50"
+            className="font-medium text-ink-700 underline underline-offset-2 disabled:opacity-50"
             disabled={disabled}
             onClick={() => {
               onClearChange(!clearRequested);

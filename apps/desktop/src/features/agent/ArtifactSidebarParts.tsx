@@ -126,22 +126,22 @@ export function ArtifactFileRow({
   return (
     <div
       className={`group flex w-full items-center gap-1 rounded-lg pr-1 transition ${
-        active ? 'bg-emerald-50' : 'hover:bg-stone-200/70'
+        active ? 'bg-brand-50' : 'hover:bg-ink-200/70'
       }`}
     >
       <button
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm text-stone-800"
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm text-ink-800"
         onClick={() => openArtifactTab(file)}
         title={file.fileName}
         type="button"
       >
         <FileText
           aria-hidden="true"
-          className={`size-4 shrink-0 ${file.missing ? 'text-stone-400' : 'text-stone-500'}`}
+          className={`size-4 shrink-0 ${file.missing ? 'text-ink-400' : 'text-ink-500'}`}
         />
         <span
           className={`min-w-0 flex-1 truncate ${
-            file.missing ? 'text-stone-400 line-through' : ''
+            file.missing ? 'text-ink-400 line-through' : ''
           }`}
         >
           {file.fileName}
@@ -150,7 +150,7 @@ export function ArtifactFileRow({
       {file.missing ? (
         <button
           aria-label={`移除 ${file.fileName} 的文件记录`}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-700/30 disabled:opacity-50"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-500 transition hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-700/30 disabled:opacity-50"
           disabled={deleting}
           onClick={(event) => void handleDelete(event)}
           title="移除记录"
@@ -161,7 +161,7 @@ export function ArtifactFileRow({
       ) : (
         <button
           aria-label="打开文件目录"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
           onClick={handleReveal}
           title="打开文件目录"
           type="button"
@@ -188,8 +188,8 @@ export function ArtifactEntry({ count, visible }: { count: number; visible: bool
       aria-label={`${visible ? '收起' : '查看'}本会话生成的 ${count} 个文件`}
       className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-medium transition ${
         visible
-          ? 'border-emerald-800/30 bg-emerald-50 text-emerald-900'
-          : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-100'
+          ? 'border-brand-600/30 bg-brand-50 text-brand-800'
+          : 'border-ink-200 bg-white text-ink-700 hover:border-ink-300 hover:bg-ink-100'
       }`}
       onClick={() => artifactTabsStore.toggleAll()}
       title={visible ? '收起文件侧边栏' : '查看本会话生成的文件'}
@@ -197,7 +197,7 @@ export function ArtifactEntry({ count, visible }: { count: number; visible: bool
     >
       <Files aria-hidden="true" className="size-4" />
       <span>文件</span>
-      <span className="rounded-full bg-stone-200/80 px-1.5 text-xs font-semibold tabular-nums text-stone-700">
+      <span className="rounded-full bg-ink-200/80 px-1.5 text-xs font-semibold tabular-nums text-ink-700">
         {count}
       </span>
     </button>
@@ -209,42 +209,42 @@ export function ArtifactFileChips({ files }: { files: readonly GeneratedFileRef[
   if (files.length === 0) return null;
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-stone-200 bg-stone-50/70">
+    <div className="mt-3 overflow-hidden rounded-xl border border-ink-200 bg-ink-50/70">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-stone-200/80">
-          <FilePlus aria-hidden="true" className="size-4 text-stone-700" />
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-ink-200/80">
+          <FilePlus aria-hidden="true" className="size-4 text-ink-700" />
         </span>
-        <p className="min-w-0 flex-1 text-sm font-semibold text-stone-900">
+        <p className="min-w-0 flex-1 text-sm font-semibold text-ink-900">
           已更改 {files.length} 个文件
         </p>
         <button
-          className="shrink-0 rounded-lg px-2 py-1 text-xs text-stone-600 transition hover:bg-stone-200/80 hover:text-stone-900"
+          className="shrink-0 rounded-lg px-2 py-1 text-xs text-ink-600 transition hover:bg-ink-200/80 hover:text-ink-900"
           onClick={() => artifactTabsStore.showAll()}
           type="button"
         >
           查看全部
         </button>
       </div>
-      <ul className="border-t border-stone-200 bg-white">
+      <ul className="border-t border-ink-200 bg-white">
         {files.map((file) => (
           <li
-            className="group flex items-center gap-1 border-b border-stone-100 transition last:border-b-0 hover:bg-stone-100"
+            className="group flex items-center gap-1 border-b border-ink-100 transition last:border-b-0 hover:bg-ink-100"
             key={file.id}
           >
             <button
               className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm transition ${
-                file.missing ? 'text-stone-400' : 'text-stone-800 group-hover:text-stone-900'
+                file.missing ? 'text-ink-400' : 'text-ink-800 group-hover:text-ink-900'
               }`}
               onClick={() => openArtifactTab(file)}
               title={file.fileName}
               type="button"
             >
-              <FileText aria-hidden="true" className="size-4 shrink-0 text-stone-500" />
+              <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-500" />
               <span
                 className={`min-w-0 truncate ${
                   file.missing
                     ? 'line-through'
-                    : 'underline decoration-stone-300 decoration-1 underline-offset-2 group-hover:decoration-stone-600'
+                    : 'underline decoration-ink-300 decoration-1 underline-offset-2 group-hover:decoration-ink-600'
                 }`}
               >
                 {file.fileName}
@@ -252,7 +252,7 @@ export function ArtifactFileChips({ files }: { files: readonly GeneratedFileRef[
             </button>
             <button
               aria-label="打开文件目录"
-              className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+              className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
               onClick={(event) => {
                 event.stopPropagation();
                 void revealArtifact(file.id);
@@ -284,13 +284,13 @@ export function ArtifactTabs({
   onClosePanel: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-stretch border-b border-stone-200">
+    <div className="flex shrink-0 items-stretch border-b border-ink-200">
       <div className="flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto px-2 py-1.5">
         <button
           className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition ${
             activeId === ALL_FILES_TAB_ID
-              ? 'bg-stone-900 text-white'
-              : 'text-stone-700 hover:bg-stone-200/70'
+              ? 'bg-ink-900 text-white'
+              : 'text-ink-700 hover:bg-ink-200/70'
           }`}
           onClick={() => onActivate(ALL_FILES_TAB_ID)}
           title="本会话文件"
@@ -303,8 +303,8 @@ export function ArtifactTabs({
           <div
             className={`flex shrink-0 items-center gap-1 rounded-lg pl-2.5 text-sm transition ${
               activeId === tab.id
-                ? 'bg-emerald-50 text-emerald-900'
-                : 'text-stone-700 hover:bg-stone-200/70'
+                ? 'bg-brand-50 text-brand-800'
+                : 'text-ink-700 hover:bg-ink-200/70'
             }`}
             key={tab.id}
           >
@@ -318,7 +318,7 @@ export function ArtifactTabs({
             </button>
             <button
               aria-label={`关闭 ${tab.fileName}`}
-              className="flex size-6 items-center justify-center rounded-md text-stone-500 hover:bg-stone-300/60 hover:text-stone-800"
+              className="flex size-6 items-center justify-center rounded-md text-ink-500 hover:bg-ink-300/60 hover:text-ink-800"
               onClick={() => onClose(tab.id)}
               title="关闭"
               type="button"
@@ -330,7 +330,7 @@ export function ArtifactTabs({
       </div>
       <button
         aria-label="关闭文件侧边栏"
-        className="my-1 mr-1 flex size-7 shrink-0 items-center justify-center self-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+        className="my-1 mr-1 flex size-7 shrink-0 items-center justify-center self-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
         onClick={onClosePanel}
         title="关闭"
         type="button"

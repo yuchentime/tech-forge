@@ -11,7 +11,7 @@ import { markdownRehypePlugins, markdownRemarkPlugins } from './markdown-plugins
  */
 export function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="agent-markdown text-[15px] leading-7 text-stone-800">
+    <div className="agent-markdown text-[15px] leading-7 text-ink-800">
       <ReactMarkdown
         remarkPlugins={markdownRemarkPlugins}
         rehypePlugins={markdownRehypePlugins}

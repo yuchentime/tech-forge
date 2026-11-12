@@ -8,7 +8,6 @@ const {
   estimatePreparingPercent,
   PREPARING_TIME_CAP,
 } = require('../dist-electron/src/features/rehearsal/rehearsal-preparing-progress.js');
-
 const PLAN = {
   topic: '金字塔原理',
   learningSummary: '老师学习了结论先行和 MECE。',
@@ -253,6 +252,14 @@ function installBridge() {
         return { status: 404, data: { message: 'not found' } };
       },
       pickImportFiles: async () => [],
+      // The bridge guard in `hasDesktopBridge()` requires these; a fixture missing one makes every
+      // store request fail as if it ran in a browser preview.
+      pickChatAttachments: async () => [],
+      ensureContentWidth: async (width) => ({
+        contentWidth: width,
+        maxContentWidth: width,
+      }),
+      releaseContentWidth: async () => undefined,
       streamChat: () => '',
       cancelChatStream: () => undefined,
       revealInFolder: async () => true,

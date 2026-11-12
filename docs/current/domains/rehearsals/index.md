@@ -30,8 +30,8 @@ last_verified: 2026-11-10
 
 ### 准备画面
 
-- `POST` 是同步请求；桌面端在 `isStarting` 时显示独立准备画面，元素为标题、进度条、状态文案和底部说明，不显示已用时间或预计时长。状态文案来自只读端点 `GET /api/conversations/:id/rehearsals/preparing` 的 `phase`：`history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`。端点不读库、不做 reconciliation，未登记返回 `null`；轮询 1s（页面不可见 5s），start 结束即停止。
-- 进度条按预计时长推进，上限 90%，start 返回后补到 100% 并显示「准备完成，正在进入演练…」，约 450ms 后切换；失败回到开始页显示可执行文案，不提供取消。准备中切换会话时，旧 start 结果不会写入新会话：`RehearsalStore.start()` 在 await 返回后校验 `conversationId`。
+- `POST` 是同步请求；桌面端在 `isStarting` 时显示独立准备画面：动图主图（`apps/desktop/src/assets/rehearsal-preparing.gif`）、标题、五段真实阶段清单（读取学习内容 / 回顾演练记录 / 加载上下文 / 生成演练题目 / 保存计划）、进度条、状态文案和底部说明，不显示已用时间或预计时长。清单每段都由后端 `phase` 推导：`repair` 归入「生成演练题目」，没有后端无法上报的阶段；动图只是情绪层，`aria-hidden`，不承载信息。状态文案来自只读端点 `GET /api/conversations/:id/rehearsals/preparing` 的 `phase`：`history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`。端点不读库、不做 reconciliation，未登记返回 `null`；轮询 1s（页面不可见 5s），start 结束即停止。
+- 进度条与清单是两个独立信号：进度条按预计时长推进（`estimatePreparingPercent`，5s≈45%、20s≈83%），上限 90%，只用于安抚等待，不代表真实阶段。start 返回后进度条补到 100%、清单全部标记完成，标题换成「准备完成，马上开始演练」、状态行显示「准备完成，正在进入演练…」，约 450ms 后切换；失败回到开始页显示可执行文案，不提供取消。准备中切换会话时，旧 start 结果不会写入新会话：`RehearsalStore.start()` 在 await 返回后校验 `conversationId`。等待超过 45 秒时追加一行模型较慢的提示。
 
 ### 状态机
 

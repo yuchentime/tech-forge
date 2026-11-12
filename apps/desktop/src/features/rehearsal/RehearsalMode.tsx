@@ -28,7 +28,7 @@ export function RehearsalMode({
 
   if (!conversationId) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-stone-500">
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-ink-500">
         先选择或新建一个会话，再开始演练。
       </div>
     );
@@ -36,7 +36,7 @@ export function RehearsalMode({
 
   if (state.status === 'loading' && !state.detail) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-sm text-stone-500" role="status">
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-ink-500" role="status">
         <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
         正在加载演练状态…
       </div>
@@ -86,24 +86,24 @@ export function RehearsalMode({
         <div className="min-w-0">
           {historyBack ? (
             <button
-              className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+              className="rounded-lg border border-ink-300 px-3 py-1.5 text-xs font-medium text-ink-600 transition hover:bg-ink-50"
               onClick={historyBack}
               type="button"
             >
               返回
             </button>
           ) : state.view === 'session' && state.detail ? (
-            <p className="text-sm font-medium text-stone-700">
+            <p className="text-sm font-medium text-ink-700">
               已回答 {answeredCount} 题（最多 {state.detail.progress.limit} 题）
             </p>
           ) : (
-            <p className="text-sm font-medium text-stone-500">演练</p>
+            <p className="text-sm font-medium text-ink-500">演练</p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
             aria-label="历史演练"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-600 transition hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             onClick={() => void rehearsalStore.openHistory()}
             title="历史演练"
             type="button"
@@ -161,7 +161,7 @@ export function RehearsalMode({
           />
         ) : state.view === 'historyDetail' ? (
           state.historyDetailLoading ? (
-            <div className="flex h-full items-center justify-center gap-2 text-sm text-stone-500" role="status">
+            <div className="flex h-full items-center justify-center gap-2 text-sm text-ink-500" role="status">
               <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
               正在加载演练详情…
             </div>
@@ -176,7 +176,7 @@ export function RehearsalMode({
               }
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-stone-500">
+            <div className="flex h-full items-center justify-center text-sm text-ink-500">
               演练详情暂不可用。
             </div>
           )

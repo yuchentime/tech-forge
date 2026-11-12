@@ -20,6 +20,7 @@ last_verified: 2026-11-11
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| 桌面端皮肤与演练准备等待体验（已实施） | `brand`/`ink`/`honey` 语义 token 替换全部原始色板；画布渐变、侧栏山景、玻璃态页头与胶囊模式切换；准备画面拆成动图（情绪）、五段真实 phase 清单（进度）与封顶 90% 的进度条（节奏），动图自带 alpha 故不加框 | [简报](2026-11-12-desktop-skin/brief.md) · [设计](2026-11-12-desktop-skin/design.md) · [验收](2026-11-12-desktop-skin/verification.md) |
 | 文件面板与聊天列宽度预算（已实施，二版） | 面板宽度只作为用户意图保存，实际宽度由空间分配：窗口内容宽先扩到"左栏 256 + 对话 624 + 意图”，上限为显示器 `workArea`；装不下时对话降到 496 并收窄面板，再不够才右侧悬浮；收起面板 250ms 后还原窗口（用户动过尺寸则放弃），窄窗口不再改写面板偏好 | [简报](2026-11-12-artifact-panel-window-budget/brief.md) · [设计](2026-11-12-artifact-panel-window-budget/design.md) · [任务](2026-11-12-artifact-panel-window-budget/tasks.md) · [验收](2026-11-12-artifact-panel-window-budget/verification.md) · [实施记录](2026-11-12-artifact-panel-window-budget/worklog.md) |
 | 会话附件同名转换与图片输入（已实施） | PDF/DOCX 生成同名 `.md`；图片经内联 `image_url` 进入本轮视觉输入；快照丢弃图片块；聊天附件与知识库导入使用不同文件选择器 | [简报](2026-11-11-attachment-images/brief.md) · [验收](2026-11-11-attachment-images/verification.md) |
 | Windows 安装包（已实施） | electron-builder NSIS x64；后端 `dist + assets + 生产 node_modules` 由脚本暂存到 `build/backend` 并作为 `resources/backend` 实文件发布；asar 只含桌面主进程与渲染层；N-API 预编译依赖不重建 | [简报](2026-11-11-windows-installer/brief.md) · [验收](2026-11-11-windows-installer/verification.md) |

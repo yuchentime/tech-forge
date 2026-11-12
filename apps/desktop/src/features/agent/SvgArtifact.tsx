@@ -28,8 +28,8 @@ export function SvgArtifact({ content, fileName }: { content: string; fileName: 
   if (failed || !prepared) {
     return (
       <div className="space-y-2">
-        <p className="text-xs text-stone-500">这段 SVG 无法显示，已按原文显示。</p>
-        <pre className="overflow-x-auto rounded-lg bg-stone-100 p-3 text-xs leading-5 text-stone-800">
+        <p className="text-xs text-ink-500">这段 SVG 无法显示，已按原文显示。</p>
+        <pre className="overflow-x-auto rounded-lg bg-ink-100 p-3 text-xs leading-5 text-ink-800">
           {content}
         </pre>
       </div>
@@ -37,7 +37,7 @@ export function SvgArtifact({ content, fileName }: { content: string; fileName: 
   }
 
   return (
-    <div className="overflow-auto rounded-lg border border-stone-200 bg-white p-3">
+    <div className="overflow-auto rounded-lg border border-ink-200 bg-white p-3">
       <img
         alt={fileName}
         className="block max-w-none"

@@ -28,10 +28,10 @@ export function assessmentLabel(level: AssessmentLevel): string {
 
 /** Returns a theme-safe class set for one assessment level. */
 export function assessmentTone(level: AssessmentLevel): string {
-  if (level === 'correct') return 'bg-emerald-50 text-emerald-800';
+  if (level === 'correct') return 'bg-brand-50 text-brand-600';
   if (level === 'partial') return 'bg-amber-50 text-amber-800';
   if (level === 'incorrect') return 'bg-rose-50 text-rose-800';
-  return 'bg-stone-100 text-stone-700';
+  return 'bg-ink-100 text-ink-700';
 }
 
 /** Returns the Chinese label for a rehearsal end reason. */

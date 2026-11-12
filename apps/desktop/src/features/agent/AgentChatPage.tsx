@@ -14,7 +14,9 @@ import {
   Copy as CopyIcon,
   Database,
   FileText,
+  GraduationCap,
   MagnifyingGlass,
+  Sparkle,
   Stack,
   WarningCircle,
   X,
@@ -517,7 +519,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
             <PageHeader className="justify-between">
               <h1
                 aria-label={activeConversationTitle}
-                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-xl font-semibold tracking-tight text-stone-900"
+                className="min-w-0 max-w-[32rem] flex-1 truncate whitespace-nowrap text-xl font-semibold tracking-tight text-ink-900"
                 title={activeConversationTitle}
               >
                 {truncateConversationTitle(activeConversationTitle)}
@@ -528,16 +530,16 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 )}
                 <div
                   aria-label="会话模式"
-                  className="inline-flex h-10 shrink-0 items-center rounded-xl bg-stone-100 p-1"
+                  className="inline-flex h-10 shrink-0 items-center rounded-full border border-ink-200/80 bg-white/70 p-1 shadow-sm backdrop-blur"
                   role="group"
                 >
                   <button
                     aria-pressed={!isRehearsalMode}
-                    className={`inline-flex h-8 items-center rounded-lg px-3 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                    className={`inline-flex h-8 items-center rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
                       isRehearsalMode
-                        ? 'font-medium text-stone-500 hover:text-stone-700'
-                        : 'bg-white font-semibold text-stone-800 shadow-sm'
-                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1`}
+                        ? 'font-medium text-ink-500 hover:text-ink-800'
+                        : 'bg-brand-700 font-semibold text-white shadow-sm'
+                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
                     onClick={() => setConversationDisplayMode('conversation')}
                     type="button"
                   >
@@ -545,17 +547,15 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </button>
                   <button
                     aria-pressed={isRehearsalMode}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
                       isRehearsalMode
-                        ? 'bg-white font-semibold text-emerald-800 shadow-sm'
-                        : 'font-medium text-stone-500 hover:text-stone-700'
-                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1`}
+                        ? 'bg-brand-700 font-semibold text-white shadow-sm'
+                        : 'font-medium text-ink-500 hover:text-ink-800'
+                    } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`}
                     onClick={() => setConversationDisplayMode('rehearsal')}
                     type="button"
                   >
-                    {isRehearsalMode && (
-                      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
-                    )}
+                    <GraduationCap aria-hidden="true" className="h-4 w-4" />
                     演练模式
                   </button>
                 </div>
@@ -588,7 +588,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 )}
 
                 {isHistoryLoading || isInitialListLoading ? (
-                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-stone-500" role="status">
+                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-ink-500" role="status">
                     {isInitialListLoading
                       ? conversationState.listStatus === 'error'
                         ? conversationState.listError ?? '会话列表加载失败，请在左侧重试。'
@@ -617,7 +617,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       </div>
                     )}
                     <button
-                      className="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-600 transition hover:border-stone-400 hover:text-stone-900 disabled:cursor-wait disabled:opacity-50"
+                      className="rounded-full border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-600 transition hover:border-ink-400 hover:text-ink-900 disabled:cursor-wait disabled:opacity-50"
                       disabled={isLoadingEarlierMessages || isRunning}
                       onClick={() => void loadEarlierMessages()}
                       type="button"
@@ -628,10 +628,16 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 )}
 
                 <AuiIf condition={(state) => state.thread.isEmpty}>
-                  <div className="my-auto rounded-2xl border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center">
-                    <p className="text-sm font-medium text-stone-800">从一个备课问题开始</p>
-                    <p className="mt-2 text-sm leading-6 text-stone-500">
-                      例如：帮我用一个生活中的例子解释缓存雪崩。
+                  <div className="tf-rise my-auto rounded-3xl border border-brand-100 bg-white/80 px-6 py-9 text-center shadow-card">
+                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-100 to-honey-100 text-brand-600">
+                      <Sparkle aria-hidden="true" className="h-6 w-6" weight="fill" />
+                    </span>
+                    <p className="mt-3 text-base font-semibold text-ink-900">从一个备课问题开始</p>
+                    <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-ink-500">
+                      先聊清楚你想讲的内容，再去演练模式接受学生的提问。
+                    </p>
+                    <p className="mt-4 inline-flex rounded-full bg-ink-50 px-3 py-1.5 text-xs text-ink-600">
+                      例如：帮我用一个生活中的例子解释缓存雪崩
                     </p>
                   </div>
                 </AuiIf>
@@ -654,13 +660,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 <LiveArtifactFooter files={liveActivity.artifacts} />
               </ThreadPrimitive.Viewport>
 
-              <div className="mt-2 shrink-0 border-t border-stone-200 bg-white pt-3">
-                <ComposerPrimitive.Root className="relative rounded-2xl border border-stone-300 bg-white p-3 focus-within:border-emerald-800 focus-within:ring-2 focus-within:ring-emerald-800/10">
+              <div className="mt-2 shrink-0 pb-1 pt-3">
+                <ComposerPrimitive.Root className="relative rounded-3xl border border-ink-200 bg-white p-3 shadow-card transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-200/50">
                   <SlashCommandMenu menu={slashMenu} />
                   <ComposerAttachmentChips />
                   {composerCommand && (
                     <div className="mb-2 flex items-center">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-0.5 pl-2 pr-1 text-xs font-medium text-emerald-900">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-2 pr-1 text-xs font-medium text-brand-800">
                         {composerCommandItem?.icon === 'research' ? (
                           <MagnifyingGlass className="h-3.5 w-3.5" aria-hidden />
                         ) : (
@@ -669,7 +675,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                         {composerCommandItem?.label ?? composerCommand}
                         <button
                           aria-label={`移除${composerCommandItem?.label ?? '命令'}`}
-                          className="rounded-full p-0.5 text-emerald-700 transition hover:bg-emerald-100"
+                          className="rounded-full p-0.5 text-brand-600 transition hover:bg-brand-100"
                           onClick={() => composerCommandStore.reset()}
                           type="button"
                         >
@@ -680,7 +686,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   )}
                   <ComposerPrimitive.Input
                     aria-label="发送给备课助手"
-                    className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-stone-900 outline-none placeholder:text-stone-400"
+                    className="min-h-24 w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400"
                     disabled={isLoadingEarlierMessages}
                     onKeyDown={slashMenu.handleKeyDown}
                     placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
@@ -688,20 +694,20 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     rows={3}
                     submitMode="ctrlEnter"
                   />
-                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
+                  <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <AttachmentPickerButton disabled={isLoadingEarlierMessages} />
-                      <span className="text-xs text-stone-500">Ctrl + Enter 发送</span>
+                      <span className="text-xs text-ink-500">Ctrl + Enter 发送</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <AuiIf condition={(state) => state.thread.isRunning}>
-                        <ComposerPrimitive.Cancel className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+                        <ComposerPrimitive.Cancel className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-medium text-ink-600 transition hover:bg-ink-50">
                           停止生成
                         </ComposerPrimitive.Cancel>
                       </AuiIf>
                       <AuiIf condition={(state) => !state.thread.isRunning}>
                         <ComposerPrimitive.Send
-                          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
                           disabled={isLoadingEarlierMessages}
                         >
                           发送
@@ -716,7 +722,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
               </div>
               <div
                 aria-hidden={!isRehearsalMode}
-                className={`absolute inset-0 z-10 flex min-h-0 flex-col bg-white px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
+                className={`absolute inset-0 z-10 flex min-h-0 flex-col px-4 py-4 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none md:px-8 md:py-5 ${
                   isRehearsalMode
                     ? 'translate-y-0 opacity-100'
                     : 'pointer-events-none translate-y-1 opacity-0'
@@ -872,8 +878,8 @@ function AgentActivity({
         open={isExpanded}
         onToggle={(event) => setIsExpanded(event.currentTarget.open)}
       >
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg py-1.5 text-sm text-stone-600 outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30">
-          <Stack aria-hidden="true" className="size-5 shrink-0 text-stone-600" weight="regular" />
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg py-1.5 text-sm text-ink-600 outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30">
+          <Stack aria-hidden="true" className="size-5 shrink-0 text-ink-600" weight="regular" />
           <span>{isFinal ? '已工作' : '正在工作'}</span>
           {elapsedMs !== null && (
             <time
@@ -890,7 +896,7 @@ function AgentActivity({
             weight="bold"
           />
         </summary>
-        <div className="ml-2 space-y-2 border-l-2 border-stone-300 py-1 pl-4">
+        <div className="ml-2 space-y-2 border-l-2 border-ink-300 py-1 pl-4">
           {activity.tools.map((tool) => (
             <ToolActivityRow key={tool.toolCallId} tool={tool} />
           ))}
@@ -916,22 +922,22 @@ function TurnProgress({
   return (
     <div className="flex w-full justify-start" role="status">
       <div className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-2.5 text-sm text-stone-600">
+        <div className="flex min-w-0 items-center gap-2.5 text-sm text-ink-600">
           <CircleNotch
             aria-hidden="true"
-            className="size-4 shrink-0 animate-spin text-emerald-800"
+            className="size-4 shrink-0 animate-spin text-brand-600"
           />
           <span className="min-w-0 animate-pulse truncate">{describeTurnStatus(activity.tools)}</span>
           <time
             aria-live="off"
-            className="shrink-0 tabular-nums text-stone-500"
+            className="shrink-0 tabular-nums text-ink-500"
             dateTime={`PT${Math.floor(elapsedMs / 1000)}S`}
           >
             {formatDuration(elapsedMs)}
           </time>
         </div>
         {isLongWait(elapsedMs) && (
-          <p className="pl-[1.625rem] text-xs leading-5 text-stone-500">
+          <p className="pl-[1.625rem] text-xs leading-5 text-ink-500">
             长文档解析和长回答会更久一些，可以随时停止生成。
           </p>
         )}
@@ -981,17 +987,17 @@ function ToolActivityRow({
   const description = describeToolActivity(tool.toolName, tool.status, tool.args);
 
   return (
-    <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-stone-200/65 px-3 py-2 text-sm text-stone-800">
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-ink-200/65 px-3 py-2 text-sm text-ink-800">
       <ToolStatusIcon status={tool.status} />
       <span className="shrink-0">{description.action}</span>
       {description.pattern && (
-        <code className="min-w-0 break-all font-mono text-[0.9em] text-stone-700">
+        <code className="min-w-0 break-all font-mono text-[0.9em] text-ink-700">
           "{description.pattern}"
         </code>
       )}
       {description.fileName && (
-        <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-100 px-2 py-0.5">
-          <FileText aria-hidden="true" className="size-4 shrink-0 text-stone-600" />
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-ink-300 bg-ink-100 px-2 py-0.5">
+          <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-600" />
           <code className="min-w-0 break-all font-mono text-[0.9em]">{description.fileName}</code>
         </span>
       )}
@@ -1020,7 +1026,7 @@ function ToolStatusIcon({
     return (
       <CircleNotch
         aria-hidden="true"
-        className="size-4 shrink-0 animate-spin text-stone-600"
+        className="size-4 shrink-0 animate-spin text-ink-600"
       />
     );
   }
@@ -1029,7 +1035,7 @@ function ToolStatusIcon({
     return (
       <Check
         aria-hidden="true"
-        className="size-4 shrink-0 text-emerald-700"
+        className="size-4 shrink-0 text-brand-600"
         weight="bold"
       />
     );
@@ -1046,7 +1052,7 @@ function ToolStatusIcon({
   }
 
   return (
-    <XCircle aria-hidden="true" className="size-4 shrink-0 text-stone-500" />
+    <XCircle aria-hidden="true" className="size-4 shrink-0 text-ink-500" />
   );
 }
 
@@ -1068,7 +1074,7 @@ function UserMessage({ messageId }: { messageId: string }) {
   return (
     <MessagePrimitive.Root className="flex justify-end">
       <div className="group flex w-fit max-w-[82%] flex-col items-end gap-1.5">
-        <div className="max-w-full rounded-2xl rounded-br-md bg-stone-100 px-4 py-3 text-sm leading-6 text-stone-900">
+        <div className="max-w-full rounded-2xl rounded-br-md bg-ink-100 px-4 py-3 text-sm leading-6 text-ink-900">
           <UserAttachmentChips messageId={messageId} />
           <MessagePrimitive.Parts />
         </div>
@@ -1087,11 +1093,11 @@ function UserMessageCopyButton() {
   return (
     <ActionBarPrimitive.Copy
       aria-label={isCopied ? '已复制' : '复制消息'}
-      className="rounded-lg p-1.5 text-stone-500 transition hover:bg-stone-100 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 disabled:cursor-not-allowed disabled:opacity-40"
+      className="rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 disabled:cursor-not-allowed disabled:opacity-40"
       title={isCopied ? '已复制' : '复制'}
     >
       {isCopied ? (
-        <Check aria-hidden="true" className="size-4 text-emerald-700" weight="bold" />
+        <Check aria-hidden="true" className="size-4 text-brand-600" weight="bold" />
       ) : (
         <CopyIcon aria-hidden="true" className="size-4" />
       )}
@@ -1109,7 +1115,7 @@ function AssistantMessage({ messageId }: { messageId: string }) {
 
   return (
     <MessagePrimitive.Root className="flex justify-start">
-      <div className="min-w-0 w-full max-w-full text-[15px] leading-7 text-stone-800">
+      <div className="min-w-0 w-full max-w-full text-[15px] leading-7 text-ink-800">
         <MessagePrimitive.Parts>
           {({ part }) =>
             part.type === 'text' ? <AssistantMarkdown /> : null

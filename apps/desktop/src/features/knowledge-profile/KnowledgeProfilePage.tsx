@@ -27,14 +27,14 @@ const STATUS_PRESENTATION: Record<
   },
   proficient: {
     label: '熟练掌握',
-    badgeClass: 'bg-emerald-100 text-emerald-800',
+    badgeClass: 'bg-brand-100 text-brand-600',
   },
 };
 
 /** Published facts may carry no overall level when evidence is insufficient. */
 const INSUFFICIENT_PRESENTATION = {
   label: '证据不足',
-  badgeClass: 'bg-stone-100 text-stone-700',
+  badgeClass: 'bg-ink-100 text-ink-700',
 };
 
 /** Maps a nullable overall level to its badge/card presentation. */
@@ -120,13 +120,13 @@ export function KnowledgeProfilePage({
   }, []);
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-ink-50/50">
       <div
         aria-hidden={Boolean(selectedCard)}
         className={`${selectedCard ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col`}
       >
         <PageHeader className="justify-between">
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900">知识掌握</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink-900">知识掌握</h1>
         </PageHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
@@ -148,11 +148,11 @@ export function KnowledgeProfilePage({
             )}
 
             {listStatus === 'loading' ? (
-              <p className="py-12 text-center text-sm text-stone-500" role="status">
+              <p className="py-12 text-center text-sm text-ink-500" role="status">
                 正在加载…
               </p>
             ) : listStatus === 'error' ? null : cards.length === 0 ? (
-              <p className="py-12 text-center text-sm text-stone-500">还没有可展示的知识掌握卡片。</p>
+              <p className="py-12 text-center text-sm text-ink-500">还没有可展示的知识掌握卡片。</p>
             ) : (
               <div
                 className="grid items-stretch gap-4 lg:gap-5"
@@ -202,14 +202,14 @@ function KnowledgeCardItem({
   const presentation = getStatusPresentation(card.masteryLevel);
 
   return (
-    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-stone-200 bg-white p-4 sm:p-5">
+    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-ink-200 bg-white p-4 sm:p-5">
       <span
         className={`inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${presentation.badgeClass}`}
       >
         {presentation.label}
       </span>
 
-      <h2 className="mt-3 break-words text-base font-semibold leading-6 tracking-tight text-stone-900">
+      <h2 className="mt-3 break-words text-base font-semibold leading-6 tracking-tight text-ink-900">
         {card.conversationTitle}
       </h2>
 
@@ -225,13 +225,13 @@ function KnowledgeCardItem({
       </ul>
 
       <section aria-label="评估摘要" className="mt-4">
-        <h3 className="text-sm font-medium text-stone-700">评估摘要</h3>
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-800">
+        <h3 className="text-sm font-medium text-ink-700">评估摘要</h3>
+        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-ink-800">
           {card.summary}
         </p>
       </section>
 
-      <footer className="mt-auto flex items-center justify-between gap-3 border-t border-stone-200 pt-4">
+      <footer className="mt-auto flex items-center justify-between gap-3 border-t border-ink-200 pt-4">
         <button
           className="inline-flex min-h-9 items-center rounded-lg px-2 text-sm font-medium text-violet-700 hover:bg-violet-50 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-800/30"
           onClick={() => onSelectDetails(card.conversationId)}
@@ -286,13 +286,13 @@ function KnowledgeFactDetailPage({
         >
           ← 返回
         </button>
-        <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-stone-900">
+        <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-ink-900">
           {card.conversationTitle}
         </h1>
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-8">
-        <article className="mx-auto w-full max-w-4xl rounded-2xl border border-stone-200 bg-white p-5 shadow-sm md:p-8">
+        <article className="mx-auto w-full max-w-4xl rounded-2xl border border-ink-200 bg-white p-5 shadow-sm md:p-8">
           <span
             className={`inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${presentation.badgeClass}`}
           >
@@ -311,21 +311,21 @@ function KnowledgeFactDetailPage({
           </ul>
 
           <section aria-label="评估摘要" className="mt-6">
-            <h2 className="text-base font-semibold text-stone-800">评估摘要</h2>
-            <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-900">
+            <h2 className="text-base font-semibold text-ink-800">评估摘要</h2>
+            <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-ink-900">
               {summary}
             </p>
           </section>
 
           {detailStatus === 'loading' && (
-            <p className="mt-8 border-t border-stone-200 pt-6 text-sm text-stone-500" role="status">
+            <p className="mt-8 border-t border-ink-200 pt-6 text-sm text-ink-500" role="status">
               正在加载评估详情…
             </p>
           )}
 
           {detailStatus === 'error' && (
             <div
-              className="mt-8 flex items-center gap-3 border-t border-stone-200 pt-6 text-sm text-rose-800"
+              className="mt-8 flex items-center gap-3 border-t border-ink-200 pt-6 text-sm text-rose-800"
               role="alert"
             >
               <span className="min-w-0 flex-1">{detailError ?? '读取评估详情失败，请重试。'}</span>
@@ -340,16 +340,16 @@ function KnowledgeFactDetailPage({
           )}
 
           {detailStatus === 'ready' && !detailFact && (
-            <p className="mt-8 border-t border-stone-200 pt-6 text-sm text-stone-500">
+            <p className="mt-8 border-t border-ink-200 pt-6 text-sm text-ink-500">
               该会话当前没有可展示的评估详情。
             </p>
           )}
 
           {detailStatus === 'ready' && detailFact && (
-            <section aria-label="评估详情" className="mt-8 border-t border-stone-200 pt-6">
-              <h2 className="text-base font-semibold text-stone-800">评估详情</h2>
+            <section aria-label="评估详情" className="mt-8 border-t border-ink-200 pt-6">
+              <h2 className="text-base font-semibold text-ink-800">评估详情</h2>
               {knowledgePoints.length === 0 ? (
-                <p className="mt-3 text-[15px] leading-7 text-stone-600">
+                <p className="mt-3 text-[15px] leading-7 text-ink-600">
                   当前没有可展示的知识点详情。
                 </p>
               ) : (
@@ -357,21 +357,21 @@ function KnowledgeFactDetailPage({
                   {knowledgePoints.map((point, index) => (
                     <section
                       aria-label={point.name}
-                      className={index === 0 ? '' : 'border-t border-stone-200 pt-5'}
+                      className={index === 0 ? '' : 'border-t border-ink-200 pt-5'}
                       key={`${point.name}-${index}`}
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold text-stone-900">{point.name}</h3>
+                        <h3 className="font-semibold text-ink-900">{point.name}</h3>
                         {point.masteryLevel && (
-                          <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+                          <span className="rounded-full bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700">
                             {STATUS_PRESENTATION[point.masteryLevel].label}
                           </span>
                         )}
                       </div>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-stone-700">
+                      <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-7 text-ink-700">
                         {point.details}
                       </p>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-500">
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-ink-500">
                         {point.changeDescription}
                       </p>
                     </section>

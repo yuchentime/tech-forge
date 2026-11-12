@@ -78,21 +78,21 @@ export function ArtifactPreview({
   }, [state]);
 
   if (state.status === 'loading') {
-    return <p className="p-4 text-sm text-stone-500">正在读取文件…</p>;
+    return <p className="p-4 text-sm text-ink-500">正在读取文件…</p>;
   }
   if (state.status === 'error') {
-    return <p className="p-4 text-sm text-stone-600">{state.message}</p>;
+    return <p className="p-4 text-sm text-ink-600">{state.message}</p>;
   }
 
   const { payload } = state;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
       {payload.binary && (
-        <p className="text-sm text-stone-600">该文件不是文本，无法预览。</p>
+        <p className="text-sm text-ink-600">该文件不是文本，无法预览。</p>
       )}
       {!payload.binary && <ArtifactBody payload={payload} />}
       {payload.truncated && (
-        <p className="text-xs text-stone-500">文件较大，预览只显示前一部分内容。</p>
+        <p className="text-xs text-ink-500">文件较大，预览只显示前一部分内容。</p>
       )}
     </div>
   );
@@ -125,14 +125,14 @@ function ArtifactBody({ payload }: { payload: ArtifactContentResponse }) {
 
   if (payload.contentFormat === 'json') {
     return (
-      <pre className="overflow-x-auto rounded-lg bg-stone-100 p-3 text-xs leading-5 text-stone-800">
+      <pre className="overflow-x-auto rounded-lg bg-ink-100 p-3 text-xs leading-5 text-ink-800">
         {prettyPrintJson(payload.content)}
       </pre>
     );
   }
 
   return (
-    <pre className="overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-3 text-xs leading-5 text-stone-800">
+    <pre className="overflow-x-auto whitespace-pre rounded-lg bg-ink-100 p-3 text-xs leading-5 text-ink-800">
       {payload.content}
     </pre>
   );

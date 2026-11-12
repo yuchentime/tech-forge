@@ -49,8 +49,8 @@ export function MermaidDiagram({ code }: { code: string }) {
   if (failed) {
     return (
       <div className="space-y-2">
-        <p className="text-xs text-stone-500">这段图表源码无法渲染，已按原文显示。</p>
-        <pre className="overflow-x-auto rounded-lg bg-stone-100 p-3 text-xs leading-5 text-stone-800">
+        <p className="text-xs text-ink-500">这段图表源码无法渲染，已按原文显示。</p>
+        <pre className="overflow-x-auto rounded-lg bg-ink-100 p-3 text-xs leading-5 text-ink-800">
           {code}
         </pre>
       </div>
@@ -58,13 +58,13 @@ export function MermaidDiagram({ code }: { code: string }) {
   }
 
   if (!svg) {
-    return <p className="text-xs text-stone-500">正在渲染图表…</p>;
+    return <p className="text-xs text-ink-500">正在渲染图表…</p>;
   }
 
   // Mermaid output is generated from the file's own text under strict security level.
   return (
     <div
-      className="overflow-auto rounded-lg border border-stone-200 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-none"
+      className="overflow-auto rounded-lg border border-ink-200 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-none"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

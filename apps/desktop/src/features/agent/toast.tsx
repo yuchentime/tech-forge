@@ -79,7 +79,7 @@ export function ToastHost(): React.ReactElement | null {
     >
       {toasts.map((toast) => (
         <div
-          className="pointer-events-auto rounded-lg bg-stone-900/92 px-4 py-2 text-sm text-white shadow-lg"
+          className="pointer-events-auto rounded-lg bg-ink-900/92 px-4 py-2 text-sm text-white shadow-lg"
           key={toast.id}
         >
           {toast.text}

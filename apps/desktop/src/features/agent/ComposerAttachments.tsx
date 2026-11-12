@@ -27,16 +27,16 @@ export function ComposerAttachmentChips() {
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
       {items.map((item) => (
         <span
-          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-stone-300 bg-white py-0.5 pl-2 pr-1 text-xs text-stone-700"
+          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-ink-300 bg-white py-0.5 pl-2 pr-1 text-xs text-ink-700"
           key={item.id}
         >
-          <FileText aria-hidden className="size-3.5 shrink-0 text-stone-500" />
+          <FileText aria-hidden className="size-3.5 shrink-0 text-ink-500" />
           <span className="min-w-0 max-w-[12rem] truncate" title={item.name}>
             {item.name}
           </span>
           <button
             aria-label={`移除附件 ${item.name}`}
-            className="rounded-full p-0.5 text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+            className="rounded-full p-0.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
             onClick={() => composerAttachmentStore.remove(item.id)}
             type="button"
           >
@@ -82,7 +82,7 @@ export function AttachmentPickerButton({ disabled }: { disabled: boolean }) {
     <div className="flex min-w-0 items-center gap-2">
       <button
         aria-label="添加附件"
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled || isPicking}
         onClick={() => void pick()}
         title="添加 PDF、Word、Markdown、TXT 或图片（PNG/JPEG/GIF/WebP）"
@@ -119,10 +119,10 @@ export function UserAttachmentChips({ messageId }: { messageId: string }) {
     <div className="mb-2 flex flex-wrap justify-end gap-1.5">
       {attachments.map((attachment) => (
         <span
-          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2 py-0.5 text-xs text-stone-700"
+          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-ink-300 bg-white px-2 py-0.5 text-xs text-ink-700"
           key={attachment.attachmentId}
         >
-          <FileText aria-hidden className="size-3.5 shrink-0 text-stone-500" />
+          <FileText aria-hidden className="size-3.5 shrink-0 text-ink-500" />
           <span className="truncate">{attachment.name}</span>
         </span>
       ))}

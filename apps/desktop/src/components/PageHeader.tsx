@@ -17,7 +17,7 @@ export function PageHeader({
 }) {
   return (
     <header
-      className={`flex h-16 shrink-0 items-center gap-4 border-b border-stone-200 bg-white px-5 md:px-8 ${className}`}
+      className={`flex h-16 shrink-0 items-center gap-4 border-b border-ink-200/80 bg-white/70 px-5 backdrop-blur-md md:px-8 ${className}`}
     >
       {children}
     </header>

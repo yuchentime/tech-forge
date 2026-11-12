@@ -225,15 +225,15 @@ export function KnowledgeBasePage() {
   }, []);
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-ink-50/50">
       <PageHeader className="justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900">资料库</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink-900">资料库</h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
             aria-label="刷新资料列表"
-            className="flex size-9 items-center justify-center rounded-lg text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-wait disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+            className="flex size-9 items-center justify-center rounded-lg text-ink-600 transition hover:bg-ink-100 hover:text-ink-900 disabled:cursor-wait disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
             disabled={listStatus === 'loading'}
             onClick={() => void loadDocuments()}
             title="刷新资料列表"
@@ -245,7 +245,7 @@ export function KnowledgeBasePage() {
             />
           </button>
           <button
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+            className="flex items-center gap-2 rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
             disabled={isPickingFiles || isImporting}
             onClick={() => void importDocuments()}
             type="button"
@@ -279,11 +279,11 @@ export function KnowledgeBasePage() {
           )}
 
           {imports.length > 0 && (
-            <section className="overflow-hidden rounded-xl border border-stone-200 bg-white">
-              <header className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-2.5">
-                <h2 className="text-sm font-medium text-stone-800">本次导入</h2>
+            <section className="overflow-hidden rounded-xl border border-ink-200 bg-white">
+              <header className="flex items-center justify-between gap-3 border-b border-ink-200 px-4 py-2.5">
+                <h2 className="text-sm font-medium text-ink-800">本次导入</h2>
                 <button
-                  className="text-xs font-medium text-stone-500 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="text-xs font-medium text-ink-500 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={isImporting}
                   onClick={() => setImports([])}
                   type="button"
@@ -291,16 +291,16 @@ export function KnowledgeBasePage() {
                   清除记录
                 </button>
               </header>
-              <ul className="divide-y divide-stone-100">
+              <ul className="divide-y divide-ink-100">
                 {imports.map((entry) => (
                   <li className="flex items-start gap-3 px-4 py-2.5 text-sm" key={entry.id}>
                     <ImportStateIcon state={entry.state} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-stone-800">{entry.name}</span>
+                      <span className="block truncate text-ink-800">{entry.name}</span>
                       {entry.message && (
                         <span
                           className={`mt-0.5 block text-xs ${
-                            entry.state === 'failed' ? 'text-rose-700' : 'text-stone-500'
+                            entry.state === 'failed' ? 'text-rose-700' : 'text-ink-500'
                           }`}
                         >
                           {entry.message}
@@ -348,13 +348,13 @@ export function KnowledgeBasePage() {
           )}
 
           {isImporting && pollFailures >= 2 && (
-            <p className="text-xs text-stone-500" role="status">
+            <p className="text-xs text-ink-500" role="status">
               资料列表暂时刷新失败，正在继续重试；导入本身不受影响。
             </p>
           )}
 
           {listStatus === 'loading' ? (
-            <p className="py-12 text-center text-sm text-stone-500" role="status">
+            <p className="py-12 text-center text-sm text-ink-500" role="status">
               正在加载资料…
             </p>
           ) : listStatus === 'error' ? (
@@ -372,7 +372,7 @@ export function KnowledgeBasePage() {
               </button>
             </div>
           ) : documents.length === 0 ? (
-            <p className="py-12 text-center text-sm leading-6 text-stone-500">
+            <p className="py-12 text-center text-sm leading-6 text-ink-500">
               还没有资料。导入 PDF、Word、Markdown 或 TXT 后，提问时就能用上它们。
             </p>
           ) : (
@@ -419,14 +419,14 @@ function DocumentRow({
   const displayName = latest?.originalName ?? document.title;
 
   return (
-    <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+    <li className="rounded-xl border border-ink-200 bg-white px-4 py-3">
       <div className="flex items-start gap-3">
-        <FileText aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-stone-500" />
+        <FileText aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-ink-500" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-stone-900" title={displayName}>
+          <p className="truncate text-sm font-medium text-ink-900" title={displayName}>
             {displayName}
           </p>
-          <p className="mt-1 truncate text-xs text-stone-500">
+          <p className="mt-1 truncate text-xs text-ink-500">
             {[
               document.versionCount > 1 ? `v${latest?.versionNo ?? document.versionCount}` : null,
               latest ? `${latest.chunkCount} 段` : '还没导入完成',
@@ -443,12 +443,12 @@ function DocumentRow({
       </div>
 
       {confirmDelete ? (
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-stone-100 pt-3 text-xs text-stone-700">
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-ink-100 pt-3 text-xs text-ink-700">
           <span className="min-w-0 flex-1">
             确认删除「{displayName}」？删除后这份资料不会再出现在搜索和回答里。
           </span>
           <button
-            className="rounded-lg px-3 py-1.5 font-medium text-stone-600 transition hover:bg-stone-100 disabled:opacity-40"
+            className="rounded-lg px-3 py-1.5 font-medium text-ink-600 transition hover:bg-ink-100 disabled:opacity-40"
             disabled={deleting}
             onClick={onCancelDelete}
             type="button"
@@ -469,7 +469,7 @@ function DocumentRow({
         <div className="mt-2 flex justify-end">
           <button
             aria-label={`删除 ${displayName}`}
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 disabled:cursor-wait disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 disabled:cursor-wait disabled:opacity-40"
             disabled={deleting || latest?.status === 'parsing' || latest?.status === 'chunking'}
             onClick={onRequestDelete}
             title={
@@ -494,12 +494,12 @@ function StatusBadge({ status }: { status: DocumentStatus }) {
   const hint = getStatusHint(status);
   const className =
     status === 'ready'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      ? 'border-brand-200 bg-brand-50 text-brand-600'
       : status === 'indexed'
         ? 'border-amber-200 bg-amber-50 text-amber-800'
         : status === 'failed'
           ? 'border-rose-200 bg-rose-50 text-rose-800'
-          : 'border-stone-200 bg-stone-100 text-stone-700';
+          : 'border-ink-200 bg-ink-100 text-ink-700';
   const isBusy = status === 'parsing' || status === 'chunking';
 
   return (
@@ -528,14 +528,14 @@ function ImportStateIcon({ state }: { state: ImportEntry['state'] }) {
     return (
       <CircleNotch
         aria-hidden="true"
-        className="mt-0.5 size-4 shrink-0 animate-spin text-stone-500"
+        className="mt-0.5 size-4 shrink-0 animate-spin text-ink-500"
       />
     );
   }
   if (state === 'duplicate') {
-    return <X aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-stone-400" />;
+    return <X aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-ink-400" />;
   }
-  return <CheckCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-600" />;
+  return <CheckCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-brand-500" />;
 }
 
 /** Names a status for users who should not have to learn the internal lifecycle. */

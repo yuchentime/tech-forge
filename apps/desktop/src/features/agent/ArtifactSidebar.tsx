@@ -301,8 +301,8 @@ export function ArtifactSidebar() {
         // Row layout: the resize handle is the aside's first child and must sit beside the
         // content, so the container must never become a column.
         isOverlay
-          ? 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 border-l border-stone-200 bg-white shadow-2xl md:w-[var(--artifact-sidebar-width)]'
-          : 'flex w-full min-w-0 shrink-0 border-t border-stone-200 bg-white md:h-full md:w-[var(--artifact-sidebar-width)] md:border-l md:border-t-0'
+          ? 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 border-l border-ink-200 bg-white shadow-2xl md:w-[var(--artifact-sidebar-width)]'
+          : 'flex w-full min-w-0 shrink-0 border-t border-ink-200 bg-white md:h-full md:w-[var(--artifact-sidebar-width)] md:border-l md:border-t-0'
       }
       style={{ '--artifact-sidebar-width': `${plan.panelWidth}px` } as React.CSSProperties}
     >
@@ -312,7 +312,7 @@ export function ArtifactSidebar() {
         aria-valuemax={PANEL_MAX_WIDTH}
         aria-valuemin={PANEL_MIN_WIDTH}
         aria-valuenow={plan.panelWidth}
-        className="hidden w-1.5 shrink-0 cursor-col-resize touch-none items-center justify-center border-r border-stone-200 transition hover:bg-emerald-800/20 focus-visible:bg-emerald-800/25 focus-visible:outline-none md:flex"
+        className="hidden w-1.5 shrink-0 cursor-col-resize touch-none items-center justify-center border-r border-ink-200 transition hover:bg-brand-600/20 focus-visible:bg-brand-600/25 focus-visible:outline-none md:flex"
         onKeyDown={handleResizeKeyDown}
         onPointerDown={handleResizeStart}
         onPointerMove={handleResizeMove}
@@ -331,18 +331,18 @@ export function ArtifactSidebar() {
 
         {activeTab ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-100 px-4 py-2">
-              <h2 className="min-w-0 truncate text-sm font-medium text-stone-900">
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-100 px-4 py-2">
+              <h2 className="min-w-0 truncate text-sm font-medium text-ink-900">
                 {activeTab.fileName}
               </h2>
               <div className="flex shrink-0 items-center gap-1.5">
                 {/* Only the notable case keeps a label; a session file needs no announcement. */}
                 {activeTab.external && (
-                  <span className="text-xs text-stone-500">外部文件</span>
+                  <span className="text-xs text-ink-500">外部文件</span>
                 )}
                 <button
                   aria-label="重新读取文件"
-                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
                   onClick={() => setReloadToken((token) => token + 1)}
                   title="重新读取文件"
                   type="button"
@@ -351,7 +351,7 @@ export function ArtifactSidebar() {
                 </button>
                 <button
                   aria-label="全屏查看"
-                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
                   onClick={() => setIsFullscreen(true)}
                   ref={fullscreenTriggerRef}
                   title="全屏查看"
@@ -365,10 +365,10 @@ export function ArtifactSidebar() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-100 px-4 py-2">
-              <h2 className="text-sm font-medium text-stone-900">本会话生成的文件</h2>
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-100 px-4 py-2">
+              <h2 className="text-sm font-medium text-ink-900">本会话生成的文件</h2>
               <button
-                className="shrink-0 text-xs text-stone-500 underline underline-offset-2 hover:text-stone-800"
+                className="shrink-0 text-xs text-ink-500 underline underline-offset-2 hover:text-ink-800"
                 onClick={() => void artifactListStore.load(conversationId)}
                 type="button"
               >
@@ -377,7 +377,7 @@ export function ArtifactSidebar() {
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-1 py-2">
               {isLoading && files.length === 0 && (
-                <p className="px-3 py-2 text-sm text-stone-500">正在加载文件…</p>
+                <p className="px-3 py-2 text-sm text-ink-500">正在加载文件…</p>
               )}
               {error && (
                 <p className="px-3 py-2 text-sm text-rose-700" role="alert">
@@ -385,7 +385,7 @@ export function ArtifactSidebar() {
                 </p>
               )}
               {!isLoading && !error && files.length === 0 && (
-                <p className="px-3 py-2 text-sm text-stone-500">
+                <p className="px-3 py-2 text-sm text-ink-500">
                   这个会话还没有生成文件。
                 </p>
               )}
@@ -411,17 +411,17 @@ export function ArtifactSidebar() {
             className="fixed inset-0 z-40 flex flex-col bg-white"
             role="dialog"
           >
-            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-200 px-4 py-2">
-              <h2 className="min-w-0 truncate text-sm font-medium text-stone-900">
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-200 px-4 py-2">
+              <h2 className="min-w-0 truncate text-sm font-medium text-ink-900">
                 {activeTab.fileName}
               </h2>
               <div className="flex shrink-0 items-center gap-1.5">
                 {activeTab.external && (
-                  <span className="text-xs text-stone-500">外部文件</span>
+                  <span className="text-xs text-ink-500">外部文件</span>
                 )}
                 <button
                   aria-label="重新读取文件"
-                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
                   onClick={() => setReloadToken((token) => token + 1)}
                   title="重新读取文件"
                   type="button"
@@ -430,7 +430,7 @@ export function ArtifactSidebar() {
                 </button>
                 <button
                   aria-label="退出全屏"
-                  className="flex size-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30"
+                  className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
                   onClick={() => setIsFullscreen(false)}
                   ref={fullscreenCloseRef}
                   title="退出全屏（Esc）"

@@ -185,14 +185,14 @@ export function SlashCommandMenu({ menu }: { menu: SlashCommandMenuState }) {
   return (
     <div
       aria-label="斜杠命令"
-      className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 bg-white shadow-lg"
+      className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto overflow-x-hidden rounded-lg border border-ink-200 bg-white shadow-lg"
       role="listbox"
     >
       {menu.matches.map((item, index) => (
         <button
           aria-selected={index === menu.highlightedIndex}
           className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition ${
-            index === menu.highlightedIndex ? 'bg-stone-100' : 'hover:bg-stone-50'
+            index === menu.highlightedIndex ? 'bg-ink-100' : 'hover:bg-ink-50'
           }`}
           key={item.id}
           onClick={() => menu.select(item)}
@@ -201,12 +201,12 @@ export function SlashCommandMenu({ menu }: { menu: SlashCommandMenuState }) {
           type="button"
         >
           {item.icon === 'research' ? (
-            <MagnifyingGlass className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+            <MagnifyingGlass className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
           ) : (
-            <Database className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+            <Database className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
           )}
-          <span className="shrink-0 font-medium text-stone-900">{item.label}</span>
-          <span className="min-w-0 flex-1 truncate text-stone-500">{item.description}</span>
+          <span className="shrink-0 font-medium text-ink-900">{item.label}</span>
+          <span className="min-w-0 flex-1 truncate text-ink-500">{item.description}</span>
         </button>
       ))}
     </div>

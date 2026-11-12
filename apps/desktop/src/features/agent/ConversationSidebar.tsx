@@ -6,6 +6,7 @@ import {
   NotePencil,
   Stack,
 } from '@phosphor-icons/react';
+import { SidebarScenery } from '../../components/SidebarScenery';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   CONVERSATION_TITLE_MAX_CHARACTERS,
@@ -45,13 +46,13 @@ export function ConversationSidebar({
   return (
     <aside
       aria-label="对话列表"
-      className="flex h-48 min-h-0 w-full shrink-0 flex-col border-b border-stone-200 bg-stone-50/70 md:h-full md:w-64 md:border-b-0 md:border-r"
+      className="relative isolate flex h-48 min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-ink-200/80 bg-brand-50/60 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
-      <header className="shrink-0 border-b border-stone-200 px-2 py-2">
+      <header className="relative z-10 shrink-0 border-b border-ink-200/70 px-2 py-2">
         <div className="flex items-center">
           <button
             aria-label="新建课题"
-            className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-sm text-stone-700 transition hover:bg-stone-200/70 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-ink-800 transition hover:bg-white/70 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={isBusy}
             onClick={onNewConversation}
             title="新建课题"
@@ -64,10 +65,10 @@ export function ConversationSidebar({
         <button
           aria-label={activeView === 'knowledge' ? '返回对话' : '打开资料库'}
           aria-pressed={activeView === 'knowledge'}
-          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 ${
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
             activeView === 'knowledge'
-              ? 'bg-stone-200 text-stone-900'
-              : 'text-stone-600 hover:bg-stone-200/70 hover:text-stone-900'
+              ? 'bg-brand-100 text-brand-800'
+              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
           }`}
           onClick={() => onSelectView('knowledge')}
           title="资料库"
@@ -78,10 +79,10 @@ export function ConversationSidebar({
         </button>
         <button
           aria-pressed={activeView === 'knowledgeProfile'}
-          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 ${
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
             activeView === 'knowledgeProfile'
-              ? 'bg-stone-200 text-stone-900'
-              : 'text-stone-600 hover:bg-stone-200/70 hover:text-stone-900'
+              ? 'bg-brand-100 text-brand-800'
+              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
           }`}
           onClick={() => onSelectView('knowledgeProfile')}
           title="知识掌握"
@@ -105,9 +106,9 @@ export function ConversationSidebar({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-2 py-2 pb-24">
         {state.conversations.length === 0 ? (
-          <p className="px-3 py-5 text-center text-xs leading-5 text-stone-500">
+          <p className="px-3 py-5 text-center text-xs leading-5 text-ink-500">
             {state.listStatus === 'loading'
               ? '正在加载对话…'
               : state.listStatus === 'error'
@@ -133,14 +134,14 @@ export function ConversationSidebar({
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-stone-200 px-2 py-2">
+      <footer className="relative z-10 shrink-0 border-t border-ink-200/70 px-2 py-2">
         <button
           aria-label={activeView === 'settings' ? '返回对话' : '打开设置'}
           aria-pressed={activeView === 'settings'}
-          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800/30 ${
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
             activeView === 'settings'
-              ? 'bg-stone-200 text-stone-900'
-              : 'text-stone-600 hover:bg-stone-200/70 hover:text-stone-900'
+              ? 'bg-brand-100 text-brand-800'
+              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
           }`}
           onClick={() => onSelectView('settings')}
           title={activeView === 'settings' ? '返回对话' : '设置'}
@@ -150,6 +151,7 @@ export function ConversationSidebar({
           <span>设置</span>
         </button>
       </footer>
+      <SidebarScenery />
     </aside>
   );
 }
@@ -194,7 +196,7 @@ function ConversationRow({
     <li className="group relative">
       <button
         aria-current={isActive ? 'true' : undefined}
-        className={`w-full rounded-xl px-3 py-2.5 pr-8 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? 'bg-emerald-900/10 text-stone-900' : 'text-stone-700 hover:bg-stone-200/70'}`}
+        className={`w-full rounded-xl px-3 py-2.5 pr-8 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? 'bg-brand-100/80 text-brand-900 ring-1 ring-inset ring-brand-200/70' : 'text-ink-700 hover:bg-white/70'}`}
         disabled={false}
         onClick={() => onSelect(conversation.id)}
         type="button"
@@ -202,7 +204,7 @@ function ConversationRow({
         <span className="flex min-w-0 items-start gap-2">
           <ChatCircle
             aria-hidden="true"
-            className={`mt-0.5 size-4 shrink-0 ${isActive ? 'text-emerald-900' : 'text-stone-500'}`}
+            className={`mt-0.5 size-4 shrink-0 ${isActive ? 'text-brand-600' : 'text-ink-500'}`}
           />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
@@ -210,13 +212,13 @@ function ConversationRow({
                 {conversation.title || '新对话'}
               </span>
               {isLoading && (
-                <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-emerald-800" />
+                <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" />
               )}
               {isRunning && !isLoading && (
-                <span aria-label="正在生成" className="size-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-emerald-800" />
+                <span aria-label="正在生成" className="size-3 shrink-0 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" />
               )}
             </span>
-            <time className="mt-1 block text-[11px] text-stone-500">
+            <time className="mt-1 block text-[11px] text-ink-500">
               {formatUpdatedAt(conversation.updatedAt)}
             </time>
           </span>
@@ -227,7 +229,7 @@ function ConversationRow({
         aria-expanded={isMenuOpen}
         aria-haspopup="menu"
         aria-label={`会话操作：${conversation.title || '新对话'}`}
-        className={`absolute right-1.5 top-2 flex size-6 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-200 hover:text-stone-900 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0 ${isMenuOpen ? 'bg-stone-200 text-stone-900 opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        className={`absolute right-1.5 top-2 flex size-6 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-900 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-0 ${isMenuOpen ? 'bg-ink-200 text-ink-900 opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
         disabled={false}
         onClick={() => setIsMenuOpen((open) => !open)}
         type="button"
@@ -237,12 +239,12 @@ function ConversationRow({
 
       {isMenuOpen && (
         <div
-          className="absolute right-1.5 top-9 z-20 w-32 rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
+          className="absolute right-1.5 top-9 z-20 w-32 rounded-lg border border-ink-200 bg-white py-1 shadow-card"
           ref={menuRef}
           role="menu"
         >
           <button
-            className="w-full px-3 py-1.5 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+            className="w-full px-3 py-1.5 text-left text-sm text-ink-700 transition hover:bg-ink-100"
             onClick={() => {
               setIsMenuOpen(false);
               setIsRenameOpen(true);
@@ -324,7 +326,7 @@ function RenameConversationDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/30 p-4"
       onClick={(event) => {
         if (event.target === event.currentTarget && !isSaving) onCancel();
       }}
@@ -336,22 +338,22 @@ function RenameConversationDialog({
       <div
         aria-label="重命名会话"
         aria-modal="true"
-        className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-4 shadow-xl"
+        className="w-full max-w-sm rounded-xl border border-ink-200 bg-white p-4 shadow-xl"
         role="dialog"
       >
-        <h1 className="text-sm font-bold text-stone-900">重命名会话</h1>
+        <h1 className="text-sm font-bold text-ink-900">重命名会话</h1>
         <form
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
           }}
         >
-          <label className="mt-3 block text-xs text-stone-500" htmlFor={inputId}>
+          <label className="mt-3 block text-xs text-ink-500" htmlFor={inputId}>
             使用简短且易于识别的名称
           </label>
           <input
             autoFocus
-            className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/20"
+            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
             id={inputId}
             onChange={(event) => {
               // Bound in code points so one emoji counts once, matching the backend limit.
@@ -360,7 +362,7 @@ function RenameConversationDialog({
             ref={inputRef}
             value={title}
           />
-          <p className="mt-1 text-right text-[11px] text-stone-500">
+          <p className="mt-1 text-right text-[11px] text-ink-500">
             {characterCount}/{CONVERSATION_TITLE_MAX_CHARACTERS}
           </p>
           {error && (
@@ -370,7 +372,7 @@ function RenameConversationDialog({
           )}
           <div className="mt-4 flex justify-end gap-2">
             <button
-              className="rounded-lg px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg px-3 py-1.5 text-sm text-ink-700 transition hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isSaving}
               onClick={onCancel}
               type="button"
@@ -378,7 +380,7 @@ function RenameConversationDialog({
               取消
             </button>
             <button
-              className="rounded-lg bg-emerald-900 px-3 py-1.5 text-sm text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-brand-800 px-3 py-1.5 text-sm text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isSaving || characterCount === 0}
               type="submit"
             >

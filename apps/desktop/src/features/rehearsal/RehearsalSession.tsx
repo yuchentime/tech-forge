@@ -98,7 +98,7 @@ export function RehearsalSession({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 pb-3">
-        <h2 className="truncate text-sm font-semibold text-stone-900">
+        <h2 className="truncate text-sm font-semibold text-ink-900">
           {detail.topic || '演练进行中'}
         </h2>
       </div>
@@ -111,22 +111,22 @@ export function RehearsalSession({
           <article
             className={`rounded-2xl border px-4 py-3 ${
               turn.turnId === questionId
-                ? 'border-emerald-300 bg-emerald-50/40'
-                : 'border-stone-200 bg-white'
+                ? 'border-brand-300 bg-brand-50/40'
+                : 'border-ink-200 bg-white'
             }`}
             key={turn.turnId}
           >
-            <div className="flex items-center justify-between gap-3 text-xs text-stone-500">
+            <div className="flex items-center justify-between gap-3 text-xs text-ink-500">
               <span>第 {turn.sequenceNo} 问</span>
               <span>{turnStatusLabel(turn)}</span>
             </div>
-            <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-stone-900">
+            <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-ink-900">
               {turn.question}
             </p>
             {turn.answer && (
-              <div className="mt-3 rounded-xl bg-stone-50 px-3 py-2">
-                <p className="text-xs font-medium text-stone-500">你的回答</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-stone-700">
+              <div className="mt-3 rounded-xl bg-ink-50 px-3 py-2">
+                <p className="text-xs font-medium text-ink-500">你的回答</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-ink-700">
                   {turn.answer}
                 </p>
               </div>
@@ -141,7 +141,7 @@ export function RehearsalSession({
                   {assessmentLabel(turn.assessment.level)}
                 </span>
                 {turn.assessment.issues.length > 0 && (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-stone-600">
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-ink-600">
                     {turn.assessment.issues.map((issue) => (
                       <li key={issue}>{issue}</li>
                     ))}
@@ -152,7 +152,7 @@ export function RehearsalSession({
           </article>
         ))}
         {detail.turns.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-stone-300 p-6 text-sm text-stone-500">
+          <div className="rounded-2xl border border-dashed border-ink-300 p-6 text-sm text-ink-500">
             正在生成第一道题…
           </div>
         )}
@@ -164,10 +164,10 @@ export function RehearsalSession({
         </div>
       )}
 
-      <div className="mt-3 shrink-0 border-t border-stone-200 pt-3">
+      <div className="mt-3 shrink-0 border-t border-ink-200 pt-3">
         {isEvaluating && (
           <div
-            className="mb-2 flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600"
+            className="mb-2 flex items-center gap-2 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-600"
             role="status"
             title={evaluatingPreview ?? undefined}
           >
@@ -198,10 +198,10 @@ export function RehearsalSession({
             </button>
           </div>
         ) : needsNextQuestion ? (
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600">
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-600">
             <span>下一题还没有生成成功。</span>
             <button
-              className="font-medium text-emerald-800 underline underline-offset-2 disabled:opacity-50"
+              className="font-medium text-brand-600 underline underline-offset-2 disabled:opacity-50"
               disabled={isSubmitting || isEnding}
               onClick={onRetrySkip}
               type="button"
@@ -210,14 +210,14 @@ export function RehearsalSession({
             </button>
           </div>
         ) : detail.status === 'reporting' ? (
-          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
+          <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-600" role="status">
             <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
             正在生成总体评估…
           </div>
         ) : canAnswer && detail.currentQuestion ? (
           <textarea
             aria-label="回答学生的问题"
-            className="min-h-24 w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm leading-6 text-stone-900 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-800/10 disabled:bg-stone-50"
+            className="min-h-24 w-full resize-none rounded-xl border border-ink-300 bg-white px-3 py-2 text-sm leading-6 text-ink-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/10 disabled:bg-ink-50"
             disabled={busy}
             onChange={(event) => setAnswer(event.target.value)}
             onKeyDown={(event) => {
@@ -231,7 +231,7 @@ export function RehearsalSession({
             value={answer}
           />
         ) : isEvaluating ? null : (
-          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-sm text-stone-600" role="status">
+          <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-600" role="status">
             <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
             学生正在思考…
           </div>
@@ -254,7 +254,7 @@ export function RehearsalSession({
             {canAnswer && (
               <div className="ml-auto flex items-center gap-6">
                 <button
-                  className="text-xs font-medium text-stone-500 underline underline-offset-2 hover:text-stone-800 disabled:opacity-40"
+                  className="text-xs font-medium text-ink-500 underline underline-offset-2 hover:text-ink-800 disabled:opacity-40"
                   disabled={busy}
                   onClick={onSkip}
                   type="button"
@@ -262,7 +262,7 @@ export function RehearsalSession({
                   跳过此题
                 </button>
                 <button
-                  className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={busy || !answer.trim()}
                   onClick={submit}
                   type="button"

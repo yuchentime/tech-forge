@@ -41,10 +41,10 @@ export function RehearsalReport({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 pb-3">
-        <h2 className="truncate text-base font-semibold text-stone-900">
+        <h2 className="truncate text-base font-semibold text-ink-900">
           {detail.topic || '演练报告'}
         </h2>
-        <p className="mt-1 text-xs text-stone-500">
+        <p className="mt-1 text-xs text-ink-500">
           {mode === 'history' ? '历史演练 · ' : ''}
           {formatRehearsalDate(detail.endedAt ?? detail.createdAt)}
           {detail.endReason ? ` · ${endReasonLabel(detail.endReason)}` : ''}
@@ -54,7 +54,7 @@ export function RehearsalReport({
             : ''}
         </p>
         {detail.persona && (
-          <p className="mt-1 text-xs text-stone-400">
+          <p className="mt-1 text-xs text-ink-400">
             学生画像：{truncateText(detail.persona, 120)}
           </p>
         )}
@@ -62,22 +62,22 @@ export function RehearsalReport({
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {detail.status === 'reporting' ? (
-          <div className="flex items-center gap-2 rounded-2xl bg-stone-50 px-4 py-6 text-sm text-stone-600" role="status">
+          <div className="flex items-center gap-2 rounded-2xl bg-ink-50 px-4 py-6 text-sm text-ink-600" role="status">
             <CircleNotch aria-hidden className="h-4 w-4 animate-spin" />
             正在生成总体评估…
           </div>
         ) : report ? (
           <>
-            <section className="rounded-2xl border border-stone-200 bg-white p-5">
-              <h3 className="text-sm font-semibold text-stone-900">总体评估</h3>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-700">
+            <section className="rounded-2xl border border-ink-200 bg-white p-5">
+              <h3 className="text-sm font-semibold text-ink-900">总体评估</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink-700">
                 {report.summary}
               </p>
               {report.knowledgePointMastery.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {report.knowledgePointMastery.map((point) => (
                     <span
-                      className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-700"
+                      className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-700"
                       key={point.pointId}
                     >
                       {pointLabels.get(point.pointId) ?? point.pointId}：
@@ -92,33 +92,33 @@ export function RehearsalReport({
                 <ReportList title="建议复习" values={report.recommendedReview} />
               </div>
               {report.suggestions.length > 0 && (
-                <div className="mt-4 rounded-xl bg-emerald-50/60 px-3 py-2">
-                  <p className="text-xs font-medium text-emerald-900">下一步建议</p>
-                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-emerald-900">
+                <div className="mt-4 rounded-xl bg-brand-50/60 px-3 py-2">
+                  <p className="text-xs font-medium text-brand-800">下一步建议</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-brand-800">
                     {report.suggestions.map((suggestion) => (
                       <li key={suggestion}>{suggestion}</li>
                     ))}
                   </ul>
                 </div>
               )}
-              <p className="mt-3 text-xs text-stone-400">{report.disclaimer}</p>
+              <p className="mt-3 text-xs text-ink-400">{report.disclaimer}</p>
             </section>
 
             <section className="mt-4 space-y-3">
-              <h3 className="text-sm font-semibold text-stone-900">逐题记录</h3>
+              <h3 className="text-sm font-semibold text-ink-900">逐题记录</h3>
               {detail.turns.map((turn) => (
                 <article
-                  className="rounded-2xl border border-stone-200 bg-white px-4 py-3"
+                  className="rounded-2xl border border-ink-200 bg-white px-4 py-3"
                   key={turn.turnId}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-500">
                     <span>第 {turn.sequenceNo} 问</span>
                     <span>{turnStatusLabel(turn)}</span>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-stone-900">
+                  <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-ink-900">
                     {turn.question}
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-600">
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink-600">
                     {turn.answer?.trim() || '（未作答）'}
                   </p>
                   {turn.assessment && (
@@ -131,7 +131,7 @@ export function RehearsalReport({
                         {assessmentLabel(turn.assessment.level)}
                       </span>
                       {turn.assessment.issues.length > 0 && (
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-stone-600">
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-ink-600">
                           {turn.assessment.issues.map((issue) => (
                             <li key={issue}>{issue}</li>
                           ))}
@@ -164,9 +164,9 @@ export function RehearsalReport({
         )}
       </div>
 
-      <div className="mt-3 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200 pt-3">
+      <div className="mt-3 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-ink-200 pt-3">
         <button
-          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={isStarting}
           onClick={onContinue}
           type="button"
@@ -181,16 +181,16 @@ export function RehearsalReport({
 /** One compact bullet list in the report. */
 function ReportList({ title, values }: { title: string; values: string[] }) {
   return (
-    <div className="rounded-xl bg-stone-50 px-3 py-2">
-      <p className="text-xs font-medium text-stone-600">{title}</p>
+    <div className="rounded-xl bg-ink-50 px-3 py-2">
+      <p className="text-xs font-medium text-ink-600">{title}</p>
       {values.length > 0 ? (
-        <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-stone-700">
+        <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-ink-700">
           {values.map((value) => (
             <li key={value}>{value}</li>
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-xs text-stone-400">无</p>
+        <p className="mt-1 text-xs text-ink-400">无</p>
       )}
     </div>
   );

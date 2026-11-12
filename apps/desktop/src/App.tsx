@@ -19,7 +19,7 @@ export default function App() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <main className="h-dvh min-h-0 w-full overflow-hidden bg-white text-stone-900">
+      <main className="tf-canvas h-dvh min-h-0 w-full overflow-hidden text-ink-900">
         <AgentChatPage runtime={runtime} />
       </main>
     </AssistantRuntimeProvider>
