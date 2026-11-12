@@ -230,13 +230,19 @@ body {
   animation: tf-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) 280ms both;
 }
 
+/* The message box lands last: the room unfolds, then the desk is ready to be written on. */
+.tf-classroom-composer {
+  animation: tf-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) 340ms both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tf-classroom-art {
     animation: none;
     mask-image: none;
   }
 
-  .tf-classroom-overlay {
+  .tf-classroom-overlay,
+  .tf-classroom-composer {
     animation: none;
   }
 }

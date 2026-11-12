@@ -23,8 +23,8 @@ last_verified: 2026-11-12
 |---|---|
 | 入口 | 侧栏「知识掌握」下方的「课堂模式」（`Chalkboard` 图标），对应 `SidebarView = 'classroom'` |
 | 布局 | 进入后不渲染侧栏与聊天头，舞台占满整个窗口内容区；因此窗口内容区的比例就是舞台比例 |
-| 退出 | 舞台左上「退出课堂模式」按钮，或按 `Esc`；没有侧栏入口可点，退出后回到对话视图 |
-| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 只负责挂载舞台与窗口模式开关 |
+| 退出 | 舞台左上「退出课堂模式」按钮，或按 `Esc`（焦点在输入框内时除外）；没有侧栏入口可点，退出后回到对话视图 |
+| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 只负责挂载舞台、窗口模式开关与输入框定位 |
 
 舞台由两层 CSS 决定（[styles.css](../../../apps/desktop/src/styles.css)）：
 
@@ -32,6 +32,20 @@ last_verified: 2026-11-12
 - `.tf-classroom-stage`：`width: min(100cqw, 100cqh * 16 / 9)`、`height: min(100cqh, 100cqw * 9 / 16)`，即视口内最大的 16:9 矩形并居中。只用 `max-width`/`max-height` 会夹住单轴、破坏比例并把学生图拉变形。
 - 背景 [bg-classroom.png](../../../apps/desktop/src/assets/classroom/bg-classroom.png)（1568×882，恰好 16:9）按 `cover` 铺满舞台；窗口被锁成 16:9 时舞台与内容区同尺寸，不裁剪、不出现留边。
 - 舞台外的 `ink-900` 底色只在窗口比例无法被约束时露出（普通浏览器预览、最大化窗口）。
+
+### 消息输入框
+
+舞台底部、前景课桌上的输入框是 [ClassroomComposer.tsx](../../../apps/desktop/src/features/classroom/ClassroomComposer.tsx)：**只有样式**与对话视图的输入框一致，功能是课堂专用的子集。
+
+| 项 | 当前事实 |
+|---|---|
+| 定位 | 舞台内绝对定位，`left/right: 0` + `bottom: 3%` 居中；宽度 `46%`（`min-w-[20rem]`、`max-w-[42rem]`），与插图上前景课桌区域（约 29%–75% 宽、76%–97% 高）对齐 |
+| 卡片 | 与对话输入框同款：白卡、`rounded-3xl`、1px `ink-200` 描边、聚焦只换 `brand-500` 边框；因压在暖色课桌上，额外加 `shadow-card` 做分离 |
+| 保留 | 文本输入、`Ctrl + Enter` 发送、生成中的「停止生成」、空文本时 assistant-ui 的禁用态 |
+| 移除 | **附件选择与标签**、**斜杠命令菜单与命令胶囊**（`/查询资料库`、`/探索主题` 只属于备课对话） |
+| 占位符 | 「写下你准备讲给学生的内容…」（不再是备课对话里那句带 `/` 命令说明的文案） |
+| 发送目标 | 当前活动会话；输入中的草稿仍存在线程的 composer 状态里，退出课堂模式后会出现在对话输入框 |
+| `Esc` | 焦点在输入框内时不退出课堂模式，避免丢掉半写的草稿；点击画面后再按 `Esc` 才退出 |
 
 ### 进入动效
 
@@ -43,6 +57,7 @@ last_verified: 2026-11-12
 | 展开时长 | 640ms，`cubic-bezier(0.45, 0, 0.55, 1)`（先慢后匀），波前是 12% 的柔化过渡而不是硬圆边 |
 | 画面回落 | `tf-stage-settle` 1300ms，`scale(1.06) → 1`，让教室"稳住"而不是定格 |
 | 控件 | `tf-classroom-overlay` 复用 `tf-rise`，延迟 280ms（展开过半后）淡入上浮 |
+| 输入框 | `tf-classroom-composer` 复用 `tf-rise`，延迟 340ms，最后落位 |
 | 降级 | `prefers-reduced-motion: reduce` 时三处动画与遮罩全部关闭，图片直接以 `--tf-stage-reveal: 100%` 的完整状态显示 |
 
 遮罩半径必须用注册属性：未注册的自定义属性无法插值，关键帧会跳变；`farthest-corner` 让 `100%` 的语义就是"最远角"，动画结束即完全覆盖，不留暗角。
