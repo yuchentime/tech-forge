@@ -9,6 +9,7 @@ import {
 } from '@assistant-ui/react';
 import {
   CaretDown,
+  Chats,
   Check,
   CircleNotch,
   Copy as CopyIcon,
@@ -535,7 +536,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 >
                   <button
                     aria-pressed={!isRehearsalMode}
-                    className={`inline-flex h-8 items-center rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-sm transition-colors duration-200 motion-reduce:transition-none ${
                       isRehearsalMode
                         ? 'font-medium text-ink-500 hover:text-ink-800'
                         : 'bg-brand-700 font-semibold text-white shadow-sm'
@@ -543,6 +544,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     onClick={() => setConversationDisplayMode('conversation')}
                     type="button"
                   >
+                    <Chats aria-hidden="true" className="h-4 w-4" />
                     对话模式
                   </button>
                   <button

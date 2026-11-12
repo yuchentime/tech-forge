@@ -110,25 +110,43 @@ test('guards a directory by default but honours an explicit user request', async
   const original = path.join(knowledge, 'origin.md');
   await fs.writeFile(original, 'uploaded original bytes');
   const sdk = await piSdkPromise;
+  const guardedReports = [];
 
   // The model naming a path on its own is not permission: default deny.
   const guarded = await createWorkspaceFileTools(sdk, workspace, undefined, {
     guardedDirectories: [knowledge],
+    onFileReadResolution: (report) => guardedReports.push(report),
   });
   const guardedRead = guarded.find((tool) => tool.name === 'read');
   await assert.rejects(executeTool(guardedRead, { path: original }, workspace));
   await assert.rejects(
     executeTool(guardedRead, { path: path.join('..', 'knowledge', 'origin.md') }, workspace),
   );
+  assert.deepEqual(
+    guardedReports.map(({ outcome, grantLiftedGuard, readGrantKind }) => ({
+      outcome,
+      grantLiftedGuard,
+      readGrantKind,
+    })),
+    [
+      { outcome: 'guarded_directory_denied', grantLiftedGuard: false, readGrantKind: 'none' },
+    ],
+  );
 
   // The user asking for that exact file in this turn lifts the default.
+  const grantedReports = [];
   const granted = await createWorkspaceFileTools(sdk, workspace, undefined, {
     guardedDirectories: [knowledge],
     currentUserRequest: `请读一下 ${original}`,
+    onFileReadResolution: (report) => grantedReports.push(report),
   });
   const grantedRead = granted.find((tool) => tool.name === 'read');
   const result = await executeTool(grantedRead, { path: original }, workspace);
   assert.match(JSON.stringify(result), /uploaded original bytes/);
+  assert.deepEqual(grantedReports.map(({ outcome, grantLiftedGuard }) => ({
+    outcome,
+    grantLiftedGuard,
+  })), [{ outcome: 'resolved', grantLiftedGuard: true }]);
 
   // A contradictory request ("don't read ...") must not grant anything.
   const negated = await createWorkspaceFileTools(sdk, workspace, undefined, {

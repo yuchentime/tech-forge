@@ -30,7 +30,7 @@
 | 检查 | 观察 |
 |---|---|
 | 应用外壳 | 画布紫罗兰晨光 + 右上暖光；侧栏 `brand-50/60` 与底部山脊/旗帜/星点可见；页头玻璃态透出渐变；输入框为无投影白卡（仅 1px 边框），发送按钮 `brand-700` |
-| 模式切换 | 默认「对话模式」填充紫；点击后「演练模式」填充紫并显示 `GraduationCap`，另一侧回落为静默文本 |
+| 模式切换 | 默认「对话模式」填充紫；点击后「演练模式」填充紫，另一侧回落为静默文本；两个页签各自带 16px 图标（`Chats` / `GraduationCap`），`aria-pressed` 与图标随状态同步 |
 | 空对话首屏 | 计算样式：容器 `background: rgba(0,0,0,0)`、`border-width: 0`、`box-shadow: none`；截图确认图标与两段文案直接落在画布渐变上 |
 | 准备画面 | 动图逐帧变化（人物动作、猫睁眼）；进度条 3s ≈ 28%、10s ≈ 62%，未越 90% |
 | 动图无背景框 | `getBoundingClientRect` 后 `elementFromPoint(box+6,box+6)` 命中 `<img>` 本身；`borderRadius: 0px`、`boxShadow: none`、`mixBlendMode: normal`、无 `mask-image`；书堆底边、猫尾、耳机弧线完整 |

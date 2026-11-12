@@ -954,6 +954,31 @@ export class LlmService {
           ...(options.onFileWritten
             ? { onFileWritten: options.onFileWritten }
             : {}),
+          onFileReadResolution: ({
+            outcome,
+            pathScope,
+            protectedPathCount,
+            guardedDirectoryCount,
+            readGrantKind,
+            grantLiftedGuard,
+            elapsedMs,
+          }) => {
+            writeStructuredEvent(
+              this.logger,
+              outcome === "resolved" ? "log" : "warn",
+              "llm.file_tool.read.resolution",
+              {
+                ...logContext,
+                outcome,
+                pathScope,
+                protectedPathCount,
+                guardedDirectoryCount,
+                readGrantKind,
+                grantLiftedGuard,
+                elapsedMs,
+              },
+            );
+          },
           onFileOperationFailed: ({
             toolName,
             operation,

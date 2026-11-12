@@ -29,7 +29,7 @@
 | 表面 | 设计 |
 |---|---|
 | 页头 | `bg-white/70` + `backdrop-blur-md` + `border-ink-200/80`，高度仍固定 `h-16` |
-| 模式切换 | 胶囊分段控件：选中项 `brand-700` 白字，「演练模式」恒带 `GraduationCap`；未选中 `ink-500` |
+| 模式切换 | 胶囊分段控件：选中项 `brand-700` 白字；两侧恒带 16px 图标（对话 `Chats`、演练 `GraduationCap`），`gap-1.5`；未选中 `ink-500` |
 | 会话侧栏 | 底色是「梦幻云海登峰」背景图：底对齐、`100% auto`、上方用天空色 `#e9e4fd` 补满，窄屏改 `cover`；选中行 `brand-100/80` + `brand-200` 内描边；导航项激活态为 `brand-100`/`brand-800`；底部「设置」用玻璃条 + `ink-800`/`font-medium` 与画面分离 |
 | 输入区 | 无投影白卡 `rounded-3xl` + `border-ink-200`；聚焦态只把边框换成 `brand-500`（1px，`transition-colors`），无 ring、无光晕、无 box-shadow；发送按钮 `brand-700` |
 | 空对话首屏 | 无容器：星点图标 + 标题 + 说明 + 示例直接落在画布上，不叠卡片/边框/投影/胶囊底色 |
