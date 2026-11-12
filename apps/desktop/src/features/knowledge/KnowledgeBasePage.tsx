@@ -224,8 +224,6 @@ export function KnowledgeBasePage() {
     }
   }, []);
 
-  const readyCount = documents.filter((document) => document.latest?.status === 'ready').length;
-
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-stone-50/50">
       <PageHeader className="justify-between">

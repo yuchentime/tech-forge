@@ -1006,7 +1006,6 @@ export class LlmService {
         : [];
       const customTools = [...workspaceFileTools, ...webTools];
       // Chat turns load long-term memory; internal JSON calls (`generate`) opt out.
-      const loadMemory = buildOptions.loadMemory ?? true;
       // Extensions are in-process only. `noExtensions` keeps Pi from discovering packages, so a
       // session registers exactly the persistence hook plus the allowlisted memory tools.
       const extensionFactories: PiExtensionFactory[] = [];
@@ -1017,10 +1016,6 @@ export class LlmService {
           ),
         );
       }
-      if (loadMemory) {
-        const memoryExtension = await this.memory.createToolExtension();
-        if (memoryExtension) extensionFactories.push(memoryExtension);
-      }
 
       const toolAllowlist = buildOptions.tools ?? [
         "read",
@@ -1029,7 +1024,6 @@ export class LlmService {
         "grep",
         "find",
         "ls",
-        ...(loadMemory ? ["memory_*"] : []),
         ...(webToolsEnabled ? [...WEB_TOOL_NAMES] : []),
       ];
       let customSystemPrompt: string;
@@ -1040,14 +1034,20 @@ export class LlmService {
       } else {
         const stylePreference = await this.settings.getStylePreference();
         customSystemPrompt = [
-          "\n\nWorkspace and file rules:",
+          "\n\n## Adaptive teaching",
+          "- Infer the user's familiarity with the current concept from conversation context, available memory, and demonstrated understanding. Distinguish exposure from mastery; do not assume expertise without evidence.",
+          "- Adapt teaching to the current concept: favor explanations, examples, and guided steps for beginners; gradually introduce questions and scaffolding as understanding grows; use Socratic questioning, counterexamples, and application challenges when the user shows sufficient foundations.",
+          "- Treat these as flexible preferences, not fixed stages. Reassess understanding as new evidence emerges and reduce question difficulty or explain directly when the user struggles.",
+          "- Respect the user's immediate intent. Answer direct questions directly when appropriate, and avoid unnecessary quizzes or repetitive probing.",
+          "- When knowledge level is uncertain, start accessibly and calibrate through natural interaction rather than mandatory assessments.",
+          "\n\n## Workspace and file rules:",
           `- Your working directory is: ${cwd}.`,
           "- Create files only when explicitly requested by the user. Answer ordinary questions directly in chat.",
           "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
           "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
           "- For mind maps, prefer SVG with a left-to-right tree layout.",
           "- When the user states a durable preference, identity, or explicitly asks you to remember something, call memory_write. Never record one-off task details, file contents, teaching mastery (scores/weak spots), or answer style.",
-          `\n\nUser preferences: ${stylePreference}`,
+          `\n\n## User preferences: ${stylePreference}`,
         ].join("\n");
       }
 
@@ -1176,8 +1176,6 @@ export class LlmService {
         extensionCount: extensionFactories.length,
         customToolCount: customTools.length,
         toolCount: toolAllowlist.length,
-        loadMemory,
-        memoryToolAvailable: loadMemory && this.memory.isAvailable(),
         webToolsEnabled,
         webToolCount: webTools.length,
         skillsDirectory: this.settings.getSkillsDirectory(),

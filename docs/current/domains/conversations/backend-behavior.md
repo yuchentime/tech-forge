@@ -12,7 +12,7 @@ related:
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/changes/2026-11-07-agent-flow-logging/design.md
   - docs/changes/2026-11-07-agent-flow-logging/verification.md
-last_verified: 2026-11-10
+last_verified: 2026-11-12
 ---
 
 # Conversation 后端行为
@@ -51,6 +51,7 @@ Conversation 查询接口由 `ConversationsController` 暴露，并经现有本�
 
 - `POST /api/conversations` 创建无消息的 UUIDv4 Conversation 并返回 `{ conversationId }`。该接口仅为首次发送前的线程初始化服务；创建不写消息、不会把空会话误作已有一轮对话。
 - `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要。标题优先使用非空 `Conversation.title`，否则使用首条 user 消息的文本（折叠空白并限制为 80 个字符），没有文本时为 `新对话`。该读取不回写标题。
+- `PATCH /api/conversations/:conversationId` 写入用户指定的 `title`（折叠空白后 1–20 个 Unicode 码点）。空、纯空白或超长标题返回 400 且不写库；不存在的会话返回 404。写入后摘要列表优先返回该值，后续轮次不会用首条消息覆盖它；改名的 `updatedAt` 更新使会话移动到列表顶部。生成中的会话也可以改名，因为该写只触碰 `conversations.title`。
 - `GET /api/conversations/:conversationId/messages` 接受 UUIDv4；Conversation 不存在时返回 404。默认读取最近最多 30 条有可见文本的 `user`/`assistant` 终态消息，按 `sequenceNo ASC` 返回 `{ messages, hasMore }`。最多向后端查询 31 条可见消息以准确计算 `hasMore`，响应仍最多 30 条。
 - 可选 `beforeMessageId` 必须是目标会话中的现存 Message ID。服务定位该行的 `sequenceNo`，严格读取它之前最近一页；非法 UUID 或跨会话/不存在的游标返回 400。页间使用稳定消息 ID，不使用可能漂移的 offset。
 - 候选行按 `sequenceNo DESC` 分批读取并在后端投影为可见文本，直到获得 31 条或耗尽候选，再将最多 30 条反转为升序。查询仍只读本地 SQLite，不更改模型侧的全量历史读取。

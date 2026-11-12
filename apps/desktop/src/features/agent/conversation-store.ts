@@ -57,6 +57,9 @@ export interface ConversationStoreSnapshot {
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = 'teachforge.agent.activeConversationId';
 
+/** User-supplied sidebar titles are short labels; the backend enforces the same bound. */
+export const CONVERSATION_TITLE_MAX_CHARACTERS = 20;
+
 /** Reads the active Conversation ID without requiring browser storage to exist. */
 function readStoredConversationId(): string | null {
   try {
@@ -169,6 +172,28 @@ export class ConversationStore {
 
     if (this.snapshot.activeConversationId === conversationId) {
       this.setActiveConversationId(null);
+    }
+    await this.refresh();
+  }
+
+  /**
+   * Renames one conversation on the backend, then refreshes the sidebar.
+   *
+   * The backend persists the title on the conversation row, so the new name outranks the derived
+   * first-prompt title on every later list. Failures keep the old title and surface to the dialog.
+   */
+  async renameConversation(conversationId: string, title: string): Promise<void> {
+    if (!hasDesktopBridge()) {
+      throw new Error('浏览器预览无法重命名本地会话，请通过 TeachForge 桌面应用打开。');
+    }
+
+    const response = await window.teachforge.request<unknown>({
+      method: 'PATCH',
+      path: `/api/conversations/${encodeURIComponent(conversationId)}`,
+      body: { title },
+    });
+    if (response.status !== 200) {
+      throw new Error(readBackendErrorMessage(response.data, '重命名会话失败，请重试。'));
     }
     await this.refresh();
   }

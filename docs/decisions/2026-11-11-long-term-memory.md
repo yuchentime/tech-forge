@@ -26,7 +26,7 @@ decided_at: 2026-11-11
 2. **嵌入**：通过 `HarnessConfig.embeddingFn` / `batchEmbeddingFn` 注入现有 `EmbeddingService`；`db0_meta.embedding_id = local:bge-small-zh-v1.5:512`，变化时走 `migrateEmbeddings`。
 3. **存储**：`<configDir>/memory/db0.sqlite`；独占锁 `.lock` + 每日备份 3 份；写操作串行化。sql.js 每次写整库覆盖的代价由“少量写入 + 不写 log/state”控制。
 4. **作用域**：只写 `user`，`agent_id=teachforge`、`user_id=local-user`、`session_id=NULL`；删除会话不影响记忆。
-5. **注入**：不改系统提示词；`ChatService` 把 `## 长期记忆` 块拼进 per-turn user prefix，快照清洗负责剥离。阈值 0.65、top 3、每条 200 字、1.5 s 超时。
+5. **注入**：不改系统提示词；`ChatService` 把 `## 长期记忆` 块拼进 per-turn user prefix，快照清洗负责剥离。阈值 0.72、top 2、每条 150 字、1.5 s 超时；捕获排在检索之后，注入头由 `memory-context.ts` 统一导出（见 [注入边界 ADR](2026-11-11-memory-injection-boundary.md)）。
 6. **写入**：模型工具 + 显式中文意图捕获；写入前做精确去重与中文极性冲突判定，必要时 `supersedes`；教学掌握度、凭据、一次性任务与风格不写入。
 7. **失败**：锁冲突、引擎或嵌入不可用时整体禁用，聊天继续；管理入口为 `GET/DELETE /api/memories` 与设置页列表。
 

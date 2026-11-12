@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsOptional, IsUUID } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
 
 /** Describes one sidebar row returned by the Conversation list API. */
 export interface ConversationSummaryDto {
@@ -54,6 +54,12 @@ export interface ConversationToolActivityDto {
 export interface ConversationKnowledgeScopeDto {
   /** Documents this conversation may search; empty means the default range applies. */
   documentIds: string[];
+}
+
+/** Validates one conversation title replacement; length and emptiness are enforced in the service. */
+export class RenameConversationDto {
+  @IsString()
+  title!: string;
 }
 
 /** Validates an explicit knowledge scope replacement. */

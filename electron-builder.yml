@@ -1,0 +1,43 @@
+# Windows desktop packaging. The Electron main process is compiled to `apps/desktop/dist-electron`,
+# the renderer to `apps/desktop/dist`, and the NestJS backend is staged by
+# `scripts/stage-backend.mjs` into `build/backend` (dist + assets + production node_modules) and
+# shipped as real files under `resources/backend`, so its asset paths and native modules resolve.
+appId: com.teachforge.desktop
+productName: TeachForge
+copyright: Copyright © 2026 TeachForge
+directories:
+  app: "apps/desktop"
+  output: "release"
+  buildResources: "build"
+asar: true
+files:
+  - "dist/**"
+  - "dist-electron/**"
+  - "public/**"
+extraResources:
+  # electron-builder's copy filter drops a directory named exactly `node_modules` at the root of a
+  # `from` mapping, so dependencies are mapped as their own resource set.
+  - from: "build/backend/dist"
+    to: "backend/dist"
+  - from: "build/backend/assets"
+    to: "backend/assets"
+  - from: "build/backend/node_modules"
+    to: "backend/node_modules"
+# Every backend native dependency is N-API based and ships a prebuilt win32-x64 binary
+# (better-sqlite3 prebuilds, onnxruntime-node napi binding); rebuilding from source would require
+# a C++ toolchain and is not part of the packaging contract.
+npmRebuild: false
+win:
+  icon: "build/icon.png"
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TeachForge
+  artifactName: "TeachForge-${version}-setup.${ext}"

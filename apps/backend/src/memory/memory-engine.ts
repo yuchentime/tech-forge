@@ -91,6 +91,8 @@ export async function openMemoryEngine(
         batchEmbeddingFn,
         profile: core.mergeProfiles(core.PROFILE_CODING_ASSISTANT, {
           ...core.PROFILE_CODING_ASSISTANT,
+          // Fallback only: every caller (prompt pack, tool search, write dedupe) passes its own
+          // minScore/limit, so the injection floor lives in `memory.service.ts`.
           retrieval: {
             scoring: 'similarity',
             minScore: 0.65,

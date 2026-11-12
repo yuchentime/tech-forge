@@ -13,7 +13,8 @@
     "dev:backend": "cross-env TEACHFORGE_PORT=4318 TEACHFORGE_AUTH_TOKEN=teachforge-local-dev-token npm run start:dev --workspace @teachforge/backend",
     "build": "npm run build:backend && npm run build --workspace @teachforge/desktop",
     "build:backend": "npm run build --workspace @teachforge/backend",
-    "start:desktop": "npm run build && npm run start --workspace @teachforge/desktop"
+    "start:desktop": "npm run build && npm run start --workspace @teachforge/desktop",
+    "package:win": "npm run build && node scripts/stage-backend.mjs && electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
@@ -23,6 +24,7 @@
     "@types/react-dom": "^19.3.0",
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.9.3",
     "wait-on": "^9.5.1"
   },

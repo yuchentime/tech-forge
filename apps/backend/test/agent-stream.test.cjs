@@ -728,6 +728,58 @@ test('ChatService stores an aborted assistant row as a cancelled turn', async ()
   assert.deepEqual(finishes, ['cancelled']);
 });
 
+test('explicit memory is captured only after this turn retrieves its context', async () => {
+  const order = [];
+  const memory = {
+    buildChatContext: async () => {
+      order.push('retrieve');
+      return '';
+    },
+    captureUserMessage: () => {
+      order.push('capture');
+    },
+  };
+  const llm = {
+    stream() {
+      return (async function* () {})();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({ text: '', refsJson: null, rehearsalIds: [] }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+    memory,
+  );
+
+  await collect(
+    service.stream(
+      '记住，以后都用简体中文',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  assert.deepEqual(order, ['retrieve', 'capture']);
+});
+
 test('truncated assistant rows are stored as failed', () => {
   assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'length' }), 'failed');
   assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'aborted' }), 'cancelled');

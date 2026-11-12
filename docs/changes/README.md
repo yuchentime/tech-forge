@@ -21,6 +21,7 @@ last_verified: 2026-11-11
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
 | 会话附件同名转换与图片输入（已实施） | PDF/DOCX 生成同名 `.md`；图片经内联 `image_url` 进入本轮视觉输入；快照丢弃图片块；聊天附件与知识库导入使用不同文件选择器 | [简报](2026-11-11-attachment-images/brief.md) · [验收](2026-11-11-attachment-images/verification.md) |
+| Windows 安装包（已实施） | electron-builder NSIS x64；后端 `dist + assets + 生产 node_modules` 由脚本暂存到 `build/backend` 并作为 `resources/backend` 实文件发布；asar 只含桌面主进程与渲染层；N-API 预编译依赖不重建 | [简报](2026-11-11-windows-installer/brief.md) · [验收](2026-11-11-windows-installer/verification.md) |
 | DeepSeek 网页搜索与抓取工具（已实施） | DeepSeek Search/Fetch 作为 `web_search`/`web_fetch` 自定义工具；普通聊天与 `/探索主题` 可用，`generate()` 禁用；内置 skill 支持资料库 + 网络证据；输出截断、重试、取消与隐私日志 | [简报](2026-11-11-deepseek-web-tools/brief.md) · [设计](2026-11-11-deepseek-web-tools/design.md) · [任务](2026-11-11-deepseek-web-tools/tasks.md) · [验收](2026-11-11-deepseek-web-tools/verification.md) |
 | 长期记忆（已实施） | db0 core + SQLite（`<configDir>/memory/db0.sqlite`）、本地 bge 512 维嵌入、`memory_*` 工具、每轮 user 前缀注入、显式意图写入、设置页管理；不装 `@db0-ai/pi` | [简报](2026-11-11-long-term-memory/brief.md) · [设计](2026-11-11-long-term-memory/design.md) · [任务](2026-11-11-long-term-memory/tasks.md) · [验收](2026-11-11-long-term-memory/verification.md) · [实施记录](2026-11-11-long-term-memory/worklog.md) |
 | `/探索主题` 斜杠命令 | 固定先检索知识库，再用内置 `deep-research` Pi skill 生成知识文档与自包含 SVG 知识地图；不新增 Agent/表，产物按普通会话 artifact 登记 | [简报](2026-11-10-deep-research-command/brief.md) · [设计](2026-11-10-deep-research-command/design.md) · [验收](2026-11-10-deep-research-command/verification.md) |

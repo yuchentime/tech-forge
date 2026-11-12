@@ -1,7 +1,7 @@
 import type { RemoteThreadListAdapter, ThreadMessage } from '@assistant-ui/react';
 import type { AssistantStream } from 'assistant-stream';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
-import type { ConversationSummary } from './conversation-store';
+import { conversationStore, type ConversationSummary } from './conversation-store';
 
 /** Converts the persisted conversation summaries into assistant-ui remote thread metadata. */
 function toThread(summary: ConversationSummary) {
@@ -68,8 +68,9 @@ export const threadListAdapter: RemoteThreadListAdapter = {
     requireStatus(response.status, 200, '删除会话');
   },
 
-  async rename() {
-    // Titles are derived by the backend from the first user message; no UI exposes rename.
+  async rename(remoteId, newTitle) {
+    // The backend owns the persisted title; the shared store refreshes the sidebar afterwards.
+    await conversationStore.renameConversation(remoteId, newTitle);
   },
 
   async archive() {

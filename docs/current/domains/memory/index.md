@@ -9,6 +9,7 @@ related:
   - docs/current/domains/system-settings/index.md
   - docs/current/platform/tech-stack.md
   - docs/changes/2026-11-11-long-term-memory/design.md
+  - docs/decisions/2026-11-11-memory-injection-boundary.md
 last_verified: 2026-11-11
 ---
 
@@ -59,13 +60,13 @@ last_verified: 2026-11-11
 - [2026-11-11] 用户偏好：先给结论再给例子。
 ```
 
-- 阈值：`minScore 0.65`、最多 3 条、每条 200 字、超时 1.5 s；空库、低分、超时或异常都返回空串；
+- 阈值：`minScore 0.72`、最多 2 条、每条 150 字、超时 1.5 s；空库、低分、超时或异常都返回空串；0.72 高于原校准值 0.65，用于挡掉对几乎任何提问都能过线的通用偏好；
 - 快照清洗：`replaceInjectedUserText()` 把 `## 长期记忆` 列入注入头，历史 user 条目在 `## 用户输入` 分隔符处剥离；当前条目替换为干净 prompt，记忆块不进入 SQLite 消息、不进入下一轮快照。
 
 ## 4. 写入策略
 
 1. **模型工具**：系统提示词要求只在用户陈述长期偏好、身份或明确要求记住时调用 `memory_write`；禁止记录一次性任务、文件内容、教学掌握度（正确率/薄弱点）和回答风格。
-2. **显式意图自动写入**：`ChatService` 在用户消息持久化后调用 `MemoryService.captureUserMessage()`。仅匹配 `记住/记一下/以后都/每次都/不要再用/我的偏好是…` 等中文意图，按句切分，最多 2 句，每句 4–300 字；命中 `掌握|正确率|错题|薄弱|API key|密码` 等排除规则时跳过。
+2. **显式意图自动写入**：`ChatService` 在本轮记忆检索之后调用 `MemoryService.captureUserMessage()`；本轮注入因此看不到用户刚说出的那句话，写出的内容只影响后续轮次。仅匹配 `记住/记一下/以后都/每次都/不要再用/我的偏好是…` 等中文意图，按句切分，最多 2 句，每句 4–300 字；命中 `掌握|正确率|错题|薄弱|API key|密码` 等排除规则时跳过。
 3. **中文冲突**：写入前搜索相似度 ≥0.80 的 user 记忆；若新旧极性相反（否定词表 vs 肯定词表），用 `supersedes` 覆盖旧行并保留旧行为 `superseded`（可审计，不参与检索与注入）。
 4. 写入经 `writeQueue` 串行化，避免 sql.js 并发持久化。
 
@@ -90,6 +91,7 @@ last_verified: 2026-11-11
 
 ## 7. 代码位置
 
+- 注入头标记：`apps/backend/src/memory/memory-context.ts`（`MemoryService` 与快照清洗共用）
 - 引擎、锁与备份：`apps/backend/src/memory/memory-engine.ts`
 - 策略：`apps/backend/src/memory/memory-policy.ts`
 - 工具扩展：`apps/backend/src/memory/memory-extension.ts`

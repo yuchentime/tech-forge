@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/index.md
   - docs/source/index.md
-last_verified: 2026-11-07
+last_verified: 2026-11-11
 ---
 
 # 平台架构
@@ -16,6 +16,7 @@ last_verified: 2026-11-07
 |---|---|
 | 前后端代码放置 | [架构与代码放置指南](architecture-and-code-placement.md) |
 | 技术栈 | [当前技术栈](tech-stack.md) |
+| Windows 安装包 | [打包与安装包布局](packaging.md) |
 | Agent 运行与扩展边界 | [Agent Runtime](agent-runtime.md) |
 | 本机模型与风格设置 | [本机 Agent 设置](../domains/system-settings/index.md) |
 

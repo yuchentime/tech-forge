@@ -6,10 +6,11 @@ import {
   NotePencil,
   Stack,
 } from '@phosphor-icons/react';
-import { useEffect, useRef, useState } from 'react';
-import type {
-  ConversationStoreSnapshot,
-  ConversationSummary,
+import { useEffect, useId, useRef, useState } from 'react';
+import {
+  CONVERSATION_TITLE_MAX_CHARACTERS,
+  type ConversationStoreSnapshot,
+  type ConversationSummary,
 } from './conversation-store';
 
 /** Views the sidebar can switch the main area to; `chat` is the conversation view. */
@@ -25,6 +26,7 @@ export function ConversationSidebar({
   onRefresh,
   onSelect,
   onDelete,
+  onRename,
   activeView,
   onSelectView,
 }: {
@@ -36,6 +38,7 @@ export function ConversationSidebar({
   onRefresh: () => void;
   onSelect: (conversationId: string) => void;
   onDelete: (conversationId: string) => void;
+  onRename: (conversationId: string, title: string) => Promise<void>;
   activeView: SidebarView;
   onSelectView: (view: SidebarView) => void;
 }) {
@@ -123,6 +126,7 @@ export function ConversationSidebar({
                 key={conversation.id}
                 onSelect={onSelect}
                 onDelete={onDelete}
+                onRename={onRename}
               />
             ))}
           </ul>
@@ -159,6 +163,7 @@ function ConversationRow({
   isRunning,
   onSelect,
   onDelete,
+  onRename,
 }: {
   activeConversationId: string | null;
   conversation: ConversationSummary;
@@ -167,10 +172,12 @@ function ConversationRow({
   isRunning: boolean;
   onSelect: (conversationId: string) => void;
   onDelete: (conversationId: string) => void;
+  onRename: (conversationId: string, title: string) => Promise<void>;
 }) {
   // Only the chat view shows a conversation; other views must not keep a row highlighted.
   const isActive = isChatView && activeConversationId === conversation.id;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isRenameOpen, setIsRenameOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // A row menu closes as soon as the user interacts anywhere outside it.
@@ -235,6 +242,17 @@ function ConversationRow({
           role="menu"
         >
           <button
+            className="w-full px-3 py-1.5 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+            onClick={() => {
+              setIsMenuOpen(false);
+              setIsRenameOpen(true);
+            }}
+            role="menuitem"
+            type="button"
+          >
+            重命名
+          </button>
+          <button
             aria-disabled={isRunning}
             className="w-full px-3 py-1.5 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isRunning}
@@ -250,7 +268,126 @@ function ConversationRow({
           </button>
         </div>
       )}
+
+      {isRenameOpen && (
+        <RenameConversationDialog
+          initialTitle={conversation.title || '新对话'}
+          onCancel={() => setIsRenameOpen(false)}
+          onSave={async (title) => {
+            await onRename(conversation.id, title);
+            setIsRenameOpen(false);
+          }}
+        />
+      )}
     </li>
+  );
+}
+
+/** Renders the rename modal; it owns the draft text and reports a failed save in place. */
+function RenameConversationDialog({
+  initialTitle,
+  onCancel,
+  onSave,
+}: {
+  initialTitle: string;
+  onCancel: () => void;
+  onSave: (title: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(initialTitle);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputId = useId();
+  const characterCount = Array.from(title).length;
+
+  // The current name is preselected so typing replaces it without extra clicks.
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  // An empty draft never reaches the backend: the service rejects it with a 400.
+  const submit = async (): Promise<void> => {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setError('会话名称不能为空。');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onSave(nextTitle);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '重命名会话失败，请重试。');
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !isSaving) onCancel();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !isSaving) onCancel();
+      }}
+      role="presentation"
+    >
+      <div
+        aria-label="重命名会话"
+        aria-modal="true"
+        className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-4 shadow-xl"
+        role="dialog"
+      >
+        <h1 className="text-sm font-bold text-stone-900">重命名会话</h1>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <label className="mt-3 block text-xs text-stone-500" htmlFor={inputId}>
+            使用简短且易于识别的名称
+          </label>
+          <input
+            autoFocus
+            className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/20"
+            id={inputId}
+            onChange={(event) => {
+              // Bound in code points so one emoji counts once, matching the backend limit.
+              setTitle(Array.from(event.target.value).slice(0, CONVERSATION_TITLE_MAX_CHARACTERS).join(''));
+            }}
+            ref={inputRef}
+            value={title}
+          />
+          <p className="mt-1 text-right text-[11px] text-stone-500">
+            {characterCount}/{CONVERSATION_TITLE_MAX_CHARACTERS}
+          </p>
+          {error && (
+            <p className="mt-1 text-xs text-rose-700" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              className="rounded-lg px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              onClick={onCancel}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="rounded-lg bg-emerald-900 px-3 py-1.5 text-sm text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || characterCount === 0}
+              type="submit"
+            >
+              {isSaving ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

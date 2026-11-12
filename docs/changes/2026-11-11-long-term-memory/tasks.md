@@ -31,7 +31,7 @@ created_at: 2026-11-11
   - 动态 import `@db0-ai/core` / `@db0-ai/backends-sqlite`（复用 `new Function('specifier', 'return import(specifier)')` 手法）；
   - **先取 `<configDir>/memory/.lock`**（`wx` + PID；陈旧锁清理；拿不到则 `disabledReason='locked'`）；
   - `createSqliteBackend({ dbPath: join(memoryDir, 'db0.sqlite') })`；
-  - `mergeProfiles(PROFILE_CODING_ASSISTANT, { retrieval: { scoring: 'similarity', minScore: 0.65, topK: 3, graphExpand: { enabled: false } }, context: { includeEdges: false } })`；
+  - `mergeProfiles(PROFILE_CODING_ASSISTANT, { retrieval: { scoring: 'similarity', minScore: 0.65, topK: 3, graphExpand: { enabled: false } }, context: { includeEdges: false } })`（profile 兜底值；pack/search/write 都显式传 `minScore` 与 limit）；
   - `embeddingFn` / `batchEmbeddingFn` 绑定 `EmbeddingService`；
   - `EMBEDDING_ID = \`local:${embedding.modelId}:${embedding.dimension}\``，初始化时 `metaGet('embedding_id')` → 写入 / `migrateEmbeddings` / 无操作；
   - **每日备份**：复制到 `backup/db0-<date>.sqlite`，最多 3 份；
@@ -75,14 +75,14 @@ created_at: 2026-11-11
 
 - [x] `MemoryService.buildChatContext()`：
   - `disabledReason` 非空返回 `''`；
-  - `pack(userPrompt, { scopes: ['user'], tokenBudget: 400, maxItems: 3, minScore: 0.65 })`，1.5 s 超时；
-  - 过滤 active、按分数与日期排序、每条 200 字、最多 3 条；
+  - `pack(userPrompt, { scopes: ['user'], tokenBudget: 400, maxItems: 2, minScore: 0.72 })`，1.5 s 超时；
+  - 过滤 active、按分数与日期排序、每条 150 字、最多 2 条；
   - 输出带日期与“SOULS/当前指令优先”声明的 `## 长期记忆` 块；
   - 空/失败/超时返回 `''`。
 - [x] `ChatService` 注入 `MemoryService`（`ChatModule` 导入 `MemoryModule`）：
   - `const memoryContext = await this.memory.buildChatContext(userPrompt);`
   - `promptContext = [attachmentContext, memoryContext].filter(Boolean).join('\n\n')`；
-  - 用户消息持久化后调用 `this.memory.captureUserMessage(userPrompt)`（不 `await`）。
+  - 本轮记忆检索之后调用 `this.memory.captureUserMessage(userPrompt)`（不 `await`），避免同轮回灌。
 - [x] `MemoryService.captureUserMessage()`：`memory-policy.ts` 的意图正则 + 排除正则 + 切句 + 最多 2 句；逐句调用 `write(sentence, ['explicit'])`；异常吞掉。
 - [x] `session-entries.ts` 的 `injectedHeaders` 增加 `'## 长期记忆'`；`session-entries.test.cjs` 增加“以长期记忆头开头的历史条目被剥离”的用例。
 
@@ -120,7 +120,7 @@ created_at: 2026-11-11
   4. 去重：同文两次 → `duplicate`；
   5. **冲突**：先写“用英文标题”，再写“以后不要用英文标题” → `superseded`，旧行 `status='superseded'`，检索只返回新句；
   6. 排除：包含“掌握/正确率/密码”的句子不写入；
-  7. 注入：无关句（stub 余弦 0.6）不进注入块；相关句（0.75）按日期排序、≤3 条、每条 ≤200 字；
+  7. 注入：无关句（stub 余弦 0.6）不进注入块；相关句（0.75）按日期排序、≤2 条、每条 ≤150 字；
   8. 失败隔离：embedding 抛错时 `buildChatContext` 返回 `''`、不抛错；
   9. 超时：pack 超过 1.5 s 时返回 `''`；
   10. 锁：模拟已有存活 PID 的 `.lock` → `disabledReason='locked'`，工具工厂返回 `undefined`；

@@ -85,7 +85,9 @@ app.on('second-instance', () => {
 function configureDevelopmentDockIcon(): void {
   if (app.isPackaged || process.platform !== 'darwin' || !app.dock) return;
 
-  const iconPath = path.join(app.getAppPath(), 'public', 'logo.png');
+  // Compiled main lives at `dist-electron/electron/main`, so the asset path is stable in both
+  // development (`apps/desktop/public`) and packaged (`app.asar/apps/desktop/public`) layouts.
+  const iconPath = path.join(__dirname, '../../../public', 'logo.png');
   const icon = nativeImage.createFromPath(iconPath);
   if (!icon.isEmpty()) app.dock.setIcon(icon);
 }
@@ -93,7 +95,7 @@ function configureDevelopmentDockIcon(): void {
 /** Resolves the backend entry for packaged and development Electron builds. */
 function getBackendEntry(): string {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'backend', 'main.js');
+    return path.join(process.resourcesPath, 'backend', 'dist', 'main.js');
   }
 
   return path.resolve(__dirname, '../../../../backend/dist/main.js');
@@ -183,9 +185,6 @@ function startBackend(): Promise<void> {
     } else {
       env.TEACHFORGE_LEGACY_DATA_DIR = app.getPath('userData');
     }
-    if (app.isPackaged) {
-      env.NODE_PATH = path.join(app.getAppPath(), 'node_modules');
-    }
 
     const onOutput = (chunk: Buffer | string): void => {
       output += chunk.toString();
@@ -238,6 +237,11 @@ function startBackend(): Promise<void> {
         serviceName: 'TeachForge Backend',
         stdio: 'pipe',
         env,
+        // TypeORM resolves migration glob results against the process cwd. Inheriting the
+        // launcher's cwd breaks that when it sits on another drive (a shortcut starts in
+        // `C:\Windows\System32` while the backend may be installed on `D:`), so pin it to the
+        // backend directory exactly like the development `spawn` below does.
+        cwd: path.dirname(entry),
       });
       backendChild = child;
       child.stdout?.on('data', onOutput);
@@ -692,7 +696,7 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: '#f0f2ed',
     title: 'TeachForge',
-    icon: path.join(app.getAppPath(), 'public', 'logo.ico'),
+    icon: path.join(__dirname, '../../../public', 'logo.ico'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,

@@ -44,6 +44,9 @@ import {
 const CONVERSATION_HISTORY_PAGE_SIZE = 30;
 const CONVERSATION_HISTORY_SCAN_BATCH_SIZE = 64;
 
+/** User-supplied sidebar titles are short labels, counted in Unicode code points. */
+const CONVERSATION_TITLE_MAX_CHARACTERS = 20;
+
 /** Carries the ordered history and turn marker for one Agent request. */
 export interface ConversationTurn {
   conversationId: string;
@@ -125,6 +128,63 @@ export class ConversationsService {
       conversationId,
     });
     return { conversationId };
+  }
+
+  /**
+   * Replaces the stored sidebar title of one conversation.
+   *
+   * The stored title outranks the derived first-prompt title in `listConversations()`, so a rename
+   * survives later turns. Whitespace is collapsed and the length bound is applied in Unicode code
+   * points, so one emoji counts once; an empty or oversized title is rejected instead of truncated.
+   */
+  async renameConversation(
+    conversationId: string,
+    title: string,
+    logContext?: RequestLogContext,
+  ): Promise<{ id: string; title: string }> {
+    const startedAt = Date.now();
+    const normalized = title.trim().replace(/\s+/g, ' ');
+    const characters = Array.from(normalized);
+    if (characters.length === 0) {
+      throw new BadRequestException('会话名称不能为空。');
+    }
+    if (characters.length > CONVERSATION_TITLE_MAX_CHARACTERS) {
+      throw new BadRequestException(
+        `会话名称最多 ${CONVERSATION_TITLE_MAX_CHARACTERS} 个字符。`,
+      );
+    }
+
+    let affected: number | null | undefined;
+    try {
+      const result = await this.dataSource
+        .getRepository(ConversationEntity)
+        .update({ id: conversationId }, { title: normalized });
+      affected = result.affected;
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'conversations.rename.failed', {
+        ...logContext,
+        conversationId,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
+    }
+
+    if (!affected) {
+      writeStructuredEvent(this.logger, 'warn', 'conversations.rename.not_found', {
+        ...logContext,
+        conversationId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw new NotFoundException('Conversation was not found.');
+    }
+    writeStructuredEvent(this.logger, 'log', 'conversations.rename.completed', {
+      ...logContext,
+      conversationId,
+      characterCount: characters.length,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { id: conversationId, title: normalized };
   }
 
   /** Loads lightweight sidebar summaries and derives titles from first prompts. */

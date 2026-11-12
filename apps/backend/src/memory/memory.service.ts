@@ -22,6 +22,7 @@ import {
   MemoryUnavailableError,
 } from './memory-errors';
 export { MemoryRejectedError, MemoryUnavailableError } from './memory-errors';
+import { MEMORY_CONTEXT_HEADER } from './memory-context';
 import {
   isExcludedMemory,
   memoryPolarity,
@@ -29,16 +30,20 @@ import {
   selectMemoryCandidates,
 } from './memory-policy';
 
-/** Rendered header for the per-turn memory block. */
-export const MEMORY_CONTEXT_HEADER = '## 长期记忆';
 /** db0 estimates tokens as text.length / 4; the item cap covers the Chinese undercount. */
 const MEMORY_TOKEN_BUDGET = 400;
-/** Maximum memories injected into one turn. */
-const MEMORY_MAX_ITEMS = 3;
-/** Similarity floor for injection, calibrated on Chinese bge probes. */
-const MEMORY_MIN_SCORE = 0.65;
+/** Maximum memories injected into one turn; more than two adds noise, not recall. */
+const MEMORY_MAX_ITEMS = 2;
+/**
+ * Similarity floor for injection.
+ *
+ * The original calibration treated 0.59–0.65 as unrelated, but generic preference statements clear
+ * that line against almost any prompt and were therefore injected every turn. 0.72 stays inside
+ * the measured relevant band (0.70–0.76) and only lets the closest matches through.
+ */
+const MEMORY_MIN_SCORE = 0.72;
 /** Characters kept from one memory in the prompt block. */
-const MEMORY_CONTENT_MAX_CHARS = 200;
+const MEMORY_CONTENT_MAX_CHARS = 150;
 /** Injection must never delay the first token noticeably. */
 const MEMORY_CONTEXT_TIMEOUT_MS = 1500;
 /** Tool search is intentionally looser than injection so the assistant can judge. */
@@ -155,14 +160,14 @@ export class MemoryService implements OnModuleInit, OnApplicationShutdown {
         )
         .slice(0, MEMORY_MAX_ITEMS);
       if (items.length === 0) return '';
-      const lines = items.map((memory) => `- ${formatMemoryLine(memory)}`);
+      const memoryLines = items.map((memory) => `- ${formatMemoryLine(memory)}`).join("\n");
       this.logger.log(
-        `memory.context.built items=${lines.length} elapsedMs=${Date.now() - startedAt}`,
+        `memory.context.built items=${items.length} elapsedMs=${Date.now() - startedAt}`,
       );
       return [
         MEMORY_CONTEXT_HEADER,
         '以下内容来自跨会话长期记忆；只在与当前请求相关时使用，不要逐条复述。若与用户当前指令或 SOULS 风格设置冲突，以当前指令 / SOULS 为准。',
-        ...lines,
+        memoryLines,
       ].join('\n');
     } catch (error) {
       this.logger.warn(

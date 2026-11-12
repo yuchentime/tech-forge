@@ -17,7 +17,7 @@ created_at: 2026-11-11
 | M4 | `memory.test.cjs` | 去重 | 相同内容写入两次，第二次返回 `duplicate`，表行数不增加 |
 | M5 | `memory.test.cjs` | 维度保护 | 手动插入 384 维向量后检索抛 `Vector dimension mismatch` |
 | M6 | `memory.test.cjs` | 显式意图写入 | `记住，我以后都用简体中文` 写入；`帮我看看这道题` 不写入 |
-| M7 | `memory.test.cjs` | 注入格式 | 空库返回 `''`；有记忆时以 `## 长期记忆` 开头，≤3 条、每条 ≤200 字、带 `YYYY-MM-DD` 日期与“SOULS/当前指令优先”声明 |
+| M7 | `memory.test.cjs` | 注入格式 | 空库返回 `''`；有记忆时以 `## 长期记忆` 开头，≤2 条、每条 ≤150 字、带 `YYYY-MM-DD` 日期与“SOULS/当前指令优先”声明 |
 | M8 | `memory.test.cjs` | 失败降级 | embedding 抛错或 `pack` 超时（1.5 s）时 `buildChatContext()` 返回 `''`，无异常外溢 |
 | M9 | `memory-extension.test.cjs` | 工具契约 | 3 个工具都有对象 `parameters`；`execute` 返回 `{ content: [{type:'text'}], details }`；名称为 `memory_write` / `memory_search` / `memory_list` |
 | M10 | `memory-extension.test.cjs` | 工具行为 | `memory_write` 返回 `saved`/`duplicate`/`superseded`；`memory_search` 按分数降序；`memory_list` 不返回 superseded |
@@ -25,17 +25,18 @@ created_at: 2026-11-11
 | M12 | `tool-activity-label.test.cjs` | 桌面文案 | `memory_write`/`memory_search`/`memory_list` 不显示原始工具名 |
 | M13 | `memory-policy.test.cjs` | 中文策略 | `polarity()` 识别“不要/别再/不用”为否定、“要/继续/喜欢”为肯定；排除正则命中“掌握/正确率/密码”；切句上限 2 条 |
 | M14 | `memory.test.cjs` | 冲突覆盖 | 先写“用英文标题”，再写“以后不要用英文标题” → 第二次 `superseded`，旧行 `status='superseded'`，检索只返回新句 |
-| M15 | `memory.test.cjs` | 注入阈值 | stub 余弦 0.60 的无关记忆不注入；0.75 的相关记忆注入；总数不超过 3 |
+| M15 | `memory.test.cjs` | 注入阈值 | stub 余弦 0.60 的无关记忆不注入；0.75 的相关记忆注入；总数不超过 2；单条正文截断到 150 字符 |
 | M16 | `memory.test.cjs` | 排除规则 | 含“掌握/正确率/密码”的句子写入被跳过 |
 | M17 | `memory.test.cjs` | 锁与备份 | 已存在存活 PID 的 `.lock` → `disabledReason='locked'`、工厂返回 `undefined`；初始化后 `backup/` 中最多 3 个副本 |
 | M18 | `memory-http.test.cjs` | 管理 API（若实现） | GET 列表不含 embedding；DELETE 单条 404 语义；清空返回数量且列表为空 |
+| M19 | `agent-stream.test.cjs` | 写入时序 | 一轮内 `buildChatContext` 先于 `captureUserMessage` 执行，同轮检索看不到刚捕获的句子 |
 
 命令：
 
 ```bash
 npm run test:memory --workspace @teachforge/backend
 npm run test:session-entries --workspace @teachforge/backend
-npm run test:agent-stream --workspace @teachforge/desktop
+npm run test:agent-stream --workspace @teachforge/backend
 ```
 
 回归：
@@ -82,12 +83,14 @@ sqlite3 ~/.tech-forge/memory/db0.sqlite \
 | 2026-11-11 | 实施 | `npm run test:memory --workspace @teachforge/backend` | 20 passed |
 | 2026-11-11 | 实施 | `npm run test:session-entries --workspace @teachforge/backend` | 7 passed |
 | 2026-11-11 | 实施 | `npm run test:rehearsal --workspace @teachforge/backend` | 20 passed |
-| 2026-11-11 | 实施 | `npm run test:agent-stream --workspace @teachforge/desktop` | 11 passed |
+| 2026-11-11 | 实施 | `npm run test:agent-stream --workspace @teachforge/backend` | 11 passed |
 | 2026-11-11 | 实施 | `nest build` + Electron `tsc` + renderer `tsc --noEmit` | 通过 |
+| 2026-11-11 | 实施 | `npm run test:memory --workspace @teachforge/backend`（阈值调整为 0.72 / 2 条 / 150 字后） | 21 passed |
+| 2026-11-11 | 实施 | `tsc --project tsconfig.build.json --outDir .test-dist` + `node --test test/agent-stream.test.cjs`（`dist` 被运行中的后端进程占用） | 15 passed，含写入时序用例 |
 
 ## 5. 未覆盖 / 后续
 
-- 记忆质量（召回率、误记率）需要真实教师语料标定 0.65 注入阈值与意图正则；
+- 记忆质量（召回率、误记率）需要真实教师语料标定 0.72 注入阈值与意图正则；
 - 跨平台仅 Windows x64 有运行证据；sql.js WASM 在打包后的 `utilityProcess` 中需单独验证；
 - LLM 抽取、候选/确认状态、来源表与能力等级投影不在 v1（见 design §14）；若 T0 决策 2 未纳入，则“查看/删除记忆”也不在 v1，需作为已知缺口记录。
 

@@ -211,7 +211,22 @@ test('context injection applies the relevance floor and item caps', async () => 
     assert.match(context, /^## 长期记忆/u);
     assert.match(context, /先给结论/u);
     assert.match(context, /SOULS/u);
-    assert.ok(context.split('\n').filter((line) => line.startsWith('- ')).length <= 3);
+    assert.ok(context.split('\n').filter((line) => line.startsWith('- ')).length <= 2);
+  } finally {
+    await disposeHarness(harness);
+  }
+});
+
+test('one injected memory is truncated to the prompt character cap', async () => {
+  const harness = await createHarness();
+  try {
+    harness.state.embed = () => axisVector(1);
+    await harness.service.write(`用户偏好：${'长'.repeat(400)}`);
+    const context = await harness.service.buildChatContext('随便问问');
+    const line = context.split('\n').find((entry) => entry.startsWith('- '));
+    assert.ok(line, 'expected one memory line');
+    const text = line.slice(line.indexOf('] ') + 2);
+    assert.equal(text.length, 150);
   } finally {
     await disposeHarness(harness);
   }

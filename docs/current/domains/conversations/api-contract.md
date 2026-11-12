@@ -8,15 +8,15 @@ related:
   - docs/current/domains/conversations/index.md
   - docs/current/domains/conversations/backend-behavior.md
   - docs/current/platform/architecture-and-code-placement.md
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # Conversation 查询接口契约
 
 ## Scope
 
-- 覆盖本地个人工作台中 Agent 会话摘要列表与选中会话历史读取。
-- 不包含会话重命名、摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史按固定页大小读取。
+- 覆盖本地个人工作台中 Agent 会话摘要列表、选中会话历史读取、会话重命名与删除。
+- 不包含摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史按固定页大小读取。
 - 两个端点通过现有 Electron JSON bridge 调用，并受本地随机 token 和 loopback origin 检查保护；当前产品为单人 Personal Agent，没有用户或租户参数。
 - 当前没有单独的跨领域 API conventions 页面；响应遵循本项目现有 JSON bridge 的 `{ status, data }` 包装。
 
@@ -226,6 +226,69 @@ HTTP 200 的响应体为分页对象。`messages` 按 `sequenceNo ASC` 排列，
 - 每页最多返回 30 条；后续请求携带当前最早消息 ID 到 `beforeMessageId`，按稳定锚点读取更早页。加载最近页或更早页时，Renderer 按持久 user message ID 恢复活动摘要；整轮耗时未持久化，历史 UI 不显示该计时。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。
 
+### Rename one conversation
+
+- **方法**：`PATCH`
+- **路径**：`/api/conversations/:conversationId`
+- **功能职责**：把用户输入的会话名称写入 `conversations.title`，使侧栏与页头使用该名称而不是首条用户消息的投影。
+- **鉴权/归属**：经 Electron 本地认证桥接调用；只改名给定 ID 的本地 Conversation。
+
+#### Request Summary
+
+| 位置 | 名称 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| Path | `conversationId` | `String` | 是 | 要重命名的 Conversation UUIDv4。 |
+| Header | `x-teachforge-token` | `String` | 是 | Electron Main 注入的本地随机 token；Renderer 不直接接触 token。 |
+
+#### Request Schema
+
+##### Path Params
+
+| 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|---|
+| `conversationId` | `String` | 是 | URL path | 要重命名的 Conversation ID | UUIDv4 | 缺失或格式错误返回 400 |
+
+##### Request Body
+
+```json
+{ "title": "期末复习：缓存三件套" }
+```
+
+| 字段 | 类型 | 必填 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|
+| `title` | `String` | 是 | 新会话名称 | 折叠空白后 1–20 个 Unicode 码点；非字符串返回 400 | 空或纯空白返回 400；不截断 |
+
+#### Response Schema
+
+HTTP 200 返回持久化后的名称。
+
+```json
+{ "id": "a6ef77cc-2431-4f97-98ee-f12b2bc81c78", "title": "期末复习：缓存三件套" }
+```
+
+| 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 | 为空语义 |
+|---|---|---|---|---|---|---|
+| `id` | `String` | 是 | 请求路径 | 被重命名的会话 ID | UUIDv4 | 不为空 |
+| `title` | `String` | 是 | 写入后的 `ConversationEntity.title` | 折叠空白后的名称 | 1–20 个 Unicode 码点 | 不为空 |
+
+#### Error Cases
+
+| 场景 | code | 说明 |
+|---|---|---|
+| `conversationId` 不是 UUIDv4 | `400` | `ParseUUIDPipe` 在 Service 操作前拒绝该路径参数。 |
+| `title` 不是字符串 | `400` | Body DTO 校验失败，不写库。 |
+| `title` 折叠空白后为空或超过 20 个码点 | `400` | 不写库，也不截断为合法长度。 |
+| ID 格式正确但 Conversation 不存在 | `404` | 不创建会话。 |
+| 本地 token 缺失或错误 | `401` | 后端拒绝未认证的本地请求。 |
+| 请求带有 Origin header | `403` | 后端拒绝来自浏览器跨域路径的请求。 |
+
+#### Notes
+
+- 长度按 Unicode 码点计数，一个 emoji 计 1 个；与 Renderer 输入框上限一致。
+- 写入后 `listConversations()` 优先使用该标题，首条用户消息不再参与显示，后续轮次不会覆盖。
+- 重命名会更新 `updatedAt`，因此该会话移动到侧栏顶部。
+- 生成中的会话允许重命名：改名只写 `conversations.title`，不影响运行中的流。
+
 ### Delete one conversation
 
 - **方法**：`DELETE`
@@ -280,4 +343,4 @@ HTTP 200 返回被删除的会话 ID 与本地文件清理结果。
 
 - 删除在一个事务内完成，子表优先：`rehearsal_turns` → `rehearsals` → `artifacts` → `conversation_documents` → `messages` → `pi_session_snapshots` → `conversations`（全部外键为 `NO ACTION`，顺序不可调换）。
 - 本地 session 目录在事务提交后删除：文件清理失败不会回滚数据库结论，只返回 `sessionCleanup: "partial"` 并记录结构化日志。
-- 桌面端在会话行悬停时显示「…」，点击后出现「删除会话」，点击即删除，没有二次确认；被删除的正是当前会话时，Renderer 同时清空线程与输入区状态。
+- 桌面端在会话行悬停时显示「…」，菜单包含「重命名」和「删除会话」；重命名打开输入弹窗（下方为「取消」「保存」），删除点击即执行，没有二次确认；被删除的正是当前会话时，Renderer 同时清空线程与输入区状态。

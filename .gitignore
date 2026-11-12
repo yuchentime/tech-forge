@@ -4,6 +4,7 @@
 **/dist-electron/
 **/release/
 **/coverage/
+/build/backend/
 **/.data/
 *.log
 .DS_Store

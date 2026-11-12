@@ -103,7 +103,7 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；每轮还调用 `RehearsalsService.buildConversationDigest()`，把尚未投递的 completed 演练摘要经 `LlmRequestOptions.contextMessage` 交给 `LlmService` 追加为持久 `custom_message` entry，并用 `mergeUserMessageContextRefs()` 合并 `rehearsals` 引用、`markDigestDelivered()` 置位。`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
-`assessments`、`memory`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn，并暂缓长期记忆；不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。
+`assessments`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn；长期记忆由 `memory` 域实现，但存储在独立的 db0 SQLite 文件中，不建 Memory 表（见[长期记忆](../domains/memory/index.md)）。不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。
 
 ## 5. 后端分层约定
 

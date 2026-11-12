@@ -149,7 +149,8 @@ core.db0.harness({
   embeddingFn: (text) => this.embedding.embedOne(text),
   batchEmbeddingFn: (texts) => this.embedding.embed(texts),
   profile: core.mergeProfiles(core.PROFILE_CODING_ASSISTANT, {
-    retrieval: { scoring: 'similarity', minScore: MEMORY_MIN_SCORE, topK: 3, graphExpand: { enabled: false } },
+    // 兜底值：pack/search/write 都显式传 minScore 与 limit，注入阈值只由 §6 决定
+    retrieval: { scoring: 'similarity', minScore: 0.65, topK: 3, graphExpand: { enabled: false } },
     context: { includeEdges: false },
   }),
 });
@@ -192,19 +193,19 @@ core.db0.harness({
 常量：
 
 ```ts
-const MEMORY_CONTEXT_HEADER = '## 长期记忆';
+const MEMORY_CONTEXT_HEADER = '## 长期记忆';   // memory-context.ts，与快照清洗共用
 const MEMORY_TOKEN_BUDGET = 400;   // db0 用 text.length / 4 估算；中文另按字符上限兜底
-const MEMORY_MAX_ITEMS = 3;
-const MEMORY_MIN_SCORE = 0.65;     // 本机实测：无关中文句 0.59–0.64，相关句 0.70–0.76
-const MEMORY_CONTENT_MAX_CHARS = 200;
+const MEMORY_MAX_ITEMS = 2;
+const MEMORY_MIN_SCORE = 0.72;     // 相关句 0.70–0.76；0.65 会放进通用偏好（见下）
+const MEMORY_CONTENT_MAX_CHARS = 150;
 const MEMORY_CONTEXT_TIMEOUT_MS = 1500;
 ```
 
 `buildChatContext(userPrompt)`：
 
 1. `disabledReason !== null` 或引擎未就绪 → 返回 `''`（不触发同步初始化）。
-2. `harness.context().pack(userPrompt, { scopes: ['user'], tokenBudget: 400, maxItems: 3, minScore: 0.65 })`，外层用 `MEMORY_CONTEXT_TIMEOUT_MS` 包 `Promise.race`；超时或异常返回 `''`。
-3. 过滤 `status === 'active'`，按 `score` 降序、同分按 `createdAt` 降序；最多 3 条。
+2. `harness.context().pack(userPrompt, { scopes: ['user'], tokenBudget: 400, maxItems: 2, minScore: 0.72 })`，外层用 `MEMORY_CONTEXT_TIMEOUT_MS` 包 `Promise.race`；超时或异常返回 `''`。
+3. 过滤 `status === 'active'`，按 `score` 降序、同分按 `createdAt` 降序；最多 2 条。
 4. 用 `ctx.memories` 自己排版（不直接用 db0 的英文 `## Relevant Memory` 头）：
 
 ```text
@@ -214,9 +215,9 @@ const MEMORY_CONTEXT_TIMEOUT_MS = 1500;
 - [2026-11-05] 用户是初中数学老师，学生基础较弱。
 ```
 
-5. 每条截断到 200 字符；日期取 `createdAt` 的 `YYYY-MM-DD`。空列表返回 `''`。
+5. 每条截断到 150 字符；日期取 `createdAt` 的 `YYYY-MM-DD`。空列表返回 `''`。
 
-阈值依据：本机探针中“公开课准备”“讲课风格偏好”“用中文输出”的 top-1 分别为 0.7586 / 0.7539 / 0.7070，而无关记忆落在 0.59–0.65；0.65 是当前语料下的分离点，仍需真实教师语料复核。若上线后召回不足，优先降到 0.62，而不是回到 0.5。
+阈值依据：本机探针中“公开课准备”“讲课风格偏好”“用中文输出”的 top-1 分别为 0.7586 / 0.7539 / 0.7070，而无关记忆落在 0.59–0.65。初版取 0.65，但通用偏好（如“先给结论”）对几乎任何提问都能过线并逐轮注入；现取 0.72，仍在相关带 0.70–0.76 内，只放行最近似的条目，并把条数降到 2、每条降到 150 字。若上线后召回不足，优先降到 0.68，而不是回到 0.5。
 
 `ChatService` 拼接：
 
@@ -419,12 +420,12 @@ db0 的 `persist()` 是直接覆盖写且吞掉失败，无法在上游改为 te
 | 风险 | 说明 / 缓解 |
 |---|---|
 | sql.js 整库同步写 | 每次写 `writeFileSync`；v1 写入量小，且不写 log/state；锁与备份见 §9，长期评估 `better-sqlite3` 自写 backend |
-| 注入阈值未标定 | 0.65 来自本机探针（相关 0.70–0.76，无关 0.59–0.65），仍需真实教师语料复核；召回不足优先降到 0.62 |
-| 中文 token 估算偏差 | db0 用 `length / 4`，中文会低估 token；用 3 条 × 200 字符做硬上限 |
+| 注入阈值未标定 | 0.72 取自本机探针（相关 0.70–0.76，无关 0.59–0.65），仍需真实教师语料复核；召回不足优先降到 0.68 |
+| 中文 token 估算偏差 | db0 用 `length / 4`，中文会低估 token；用 2 条 × 150 字符做硬上限 |
 | supersede 误判 | 阈值 0.80 + 极性投票；只在极性相反时自动覆盖，时间转折不覆盖；保留 superseded 行可审计 |
 | ESM/CJS | 运行时动态 import；类型用 `typeof import(...)`（包 `types` 字段可被 node10 解析）；构建后必须跑 `nest build` 验证 |
 | 打包 | 开发/`node dist/main.js` 下 sql.js WASM 从 `node_modules/sql.js` 解析；若将来改为打包后端，需要显式 `wasmUrl` |
-| 记忆导致的提示词膨胀 | 只注入 top 3、每条 200 字符，约 600 字符上限 |
+| 记忆导致的提示词膨胀 | 只注入 top 2、每条 150 字符，约 300 字符上限 |
 
 ## 13. 文档同步
 
@@ -459,7 +460,7 @@ db0 的 `persist()` 是直接覆盖写且吞掉失败，无法在上游改为 te
 | P0 | **非原子写 + 失败静默**：`persist()` 直接覆盖目标文件，没有 temp+rename；写失败被吞掉（“Best-effort persistence”） | 同上 | 备份副本；写后校验文件可读；评估 better-sqlite3 backend |
 | P0 | **无候选/确认/纠错**：与产品 §15.3 冲突；教师无法看到或修改记忆 | 本文件 §8 | v1 上线前至少提供“记忆列表 + 删除/清空”设置页；或把模型写入降级为候选状态，确认后才注入 |
 | P1 | **中文冲突与去重基本失效**：db0 `hasNegation` 只有英文词表，`extractEntities` 按英文模式；中文“以后不要用…”不会判定为与旧记忆冲突 | `core/src/components/context.ts`、`extraction/entities.ts` | 应用层写入路径重做：相似度 ≥0.80 + 中文极性投票 → `supersedes`（§8.3）；注入按日期排序并标注 |
-| P1 | **无关记忆被注入**：实测中文无关句余弦 0.59–0.64，原阈值 0.5 会带入无关项 | 本机 bge 探针 | 注入阈值 0.65、top 3、每条 200 字（§6）；工具检索仍用 0.35；召回不足优先降到 0.62 |
+| P1 | **无关记忆被注入**：实测中文无关句余弦 0.59–0.64，原阈值 0.5 会带入无关项；0.65 仍会放进对任何提问都过线的通用偏好 | 本机 bge 探针 | 注入阈值 0.72、top 2、每条 150 字（§6）；工具检索仍用 0.35；召回不足优先降到 0.68 |
 | P1 | **与 SOULS.md / 会话知识事实重叠**：SOULS 已是风格偏好唯一入口，`conversation_knowledge_facts` 已是教学状态存储 | `system-settings` 当前事实、`knowledge-facts` 迁移 | v1 明确禁止记忆记录风格偏好与掌握度；声明 SOULS 优先 |
 | P2 | **首 token 延迟**：每轮等待一次嵌入；首次模型加载约 150 ms（低端机更久），发生在流开始前 | `EmbeddingService.getPipeline()` | 启动后台预热；context 构建与附件准备并行；给 context 构建设置超时降级 |
 | P2 | **依赖风险**：db0 0.3.0（16 stars，年轻，`main` 与发布版已有差异），sql.js 整库驻留内存 | npm/GitHub | 精确锁版本（不用 `^`）、`MemoryService` 隔离、测试覆盖 |
@@ -483,7 +484,7 @@ db0 的 `persist()` 是直接覆盖写且吞掉失败，无法在上游改为 te
 | 无候选/确认 | §14.3 决策 1；若不允许，补候选状态（范围变更） | T0 决策 |
 | 无纠错入口 | §10.2 `GET`/`DELETE /api/memories` + 设置页列表 | T0 决策后新增 T6.5 |
 | 中文冲突 | §8.3 写入前极性判定 + supersede | T3 |
-| 无关注入 | §6 阈值 0.65 / top 3 / 200 字 + 日期 | T5 |
+| 无关注入 | §6 阈值 0.72 / top 2 / 150 字 + 日期 | T5 |
 | SOULS/知识事实重叠 | §8.4 排除规则；§6 注入声明 SOULS 优先 | T3 / T5 |
 | 首 token 延迟 | 启动预热、context 1.5 s 超时、并行构建 | T2 / T5 |
 | 依赖漂移 | 精确版本；`MemoryService` 隔离 | T1 |

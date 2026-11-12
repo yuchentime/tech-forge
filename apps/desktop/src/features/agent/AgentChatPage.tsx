@@ -440,6 +440,16 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     [runtime],
   );
 
+  /**
+   * Renames one conversation; the sidebar dialog owns the optimistic/error presentation.
+   *
+   * The backend persists the title, so the sidebar and header pick it up on the refresh that
+   * `conversationStore.renameConversation` performs.
+   */
+  const renameConversation = useCallback(async (conversationId: string, title: string) => {
+    await conversationStore.renameConversation(conversationId, title);
+  }, []);
+
   const isHistoryLoading = loadingConversationId !== null;
   const isRehearsalMode = conversationDisplayMode === 'rehearsal';
   const isInitialListLoading =
@@ -479,6 +489,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           void loadConversation(conversationId);
         }}
         onDelete={(conversationId) => void deleteConversation(conversationId)}
+        onRename={renameConversation}
         onSelectView={(view) =>
           setActiveView((current) => (current === view ? 'chat' : view))
         }

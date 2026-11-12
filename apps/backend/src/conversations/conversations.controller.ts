@@ -9,6 +9,7 @@ import {
   Logger,
   Param,
   ParseUUIDPipe,
+  Patch,
   Put,
   Query,
 } from '@nestjs/common';
@@ -21,6 +22,7 @@ import type {
 } from './conversation-query.dto';
 import {
   ConversationMessagesQueryDto,
+  RenameConversationDto,
   SetKnowledgeScopeDto,
 } from './conversation-query.dto';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
@@ -70,6 +72,45 @@ export class ConversationsController {
     } catch (error) {
       writeStructuredEvent(this.logger, 'error', 'conversations.http.list.failed', {
         requestId,
+        elapsedMs: Date.now() - startedAt,
+        ...getSafeErrorLogFields(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Renames one conversation; the stored title outranks the derived first-prompt title.
+   *
+   * The sidebar exposes this as "重命名" in the row menu, with "取消" and "保存" under the input.
+   */
+  @Patch(':conversationId')
+  async renameConversation(
+    @Param('conversationId', new ParseUUIDPipe({ version: '4' })) conversationId: string,
+    @Body() input: RenameConversationDto,
+  ): Promise<{ id: string; title: string }> {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    writeStructuredEvent(this.logger, 'log', 'conversations.http.rename.accepted', {
+      requestId,
+      conversationId,
+    });
+    try {
+      const result = await this.conversations.renameConversation(
+        conversationId,
+        input.title,
+        { requestId, conversationId },
+      );
+      writeStructuredEvent(this.logger, 'log', 'conversations.http.rename.completed', {
+        requestId,
+        conversationId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      writeStructuredEvent(this.logger, 'error', 'conversations.http.rename.failed', {
+        requestId,
+        conversationId,
         elapsedMs: Date.now() - startedAt,
         ...getSafeErrorLogFields(error),
       });

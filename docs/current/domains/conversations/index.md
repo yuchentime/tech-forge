@@ -18,7 +18,7 @@ related:
   - docs/changes/2026-11-08-conversation-tool-activity-history/design.md
   - docs/changes/2026-11-08-conversation-tool-activity-history/verification.md
   - docs/changes/2026-11-08-conversation-tool-activity-history/worklog.md
-last_verified: 2026-11-08
+last_verified: 2026-11-12
 ---
 
 # Conversation 对话持久化
@@ -31,7 +31,8 @@ last_verified: 2026-11-08
 - Renderer 将活动 ID 保存在 localStorage，并在该 UI 活动对话的后续请求中复用。
 - Agent 页面启动时读取会话摘要并显示在左侧栏；若 localStorage 中的活动 ID 仍存在，则读取该会话最近 30 条可见消息。选中其他会话也只加载最近 30 条；存在更早消息时，用户可按需继续加载并前置到当前 LocalRuntime 线程。
 - 历史 DTO 的状态由 Renderer 按角色映射：只有 assistant 向 LocalRuntime 传递状态；user 保留文本、ID 和时间。该契约已通过真实 Electron 恢复/切换及实际 assistant-ui 转换回归验证。
-- `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要；标题使用实体标题、首条用户消息文本或“新对话”的显示回退，不写回实体。
+- `GET /api/conversations` 按 `updatedAt DESC, createdAt DESC` 返回摘要；标题优先使用实体标题（用户重命名写入），否则回退首条用户消息文本或“新对话”，读取不写回实体。
+- `PATCH /api/conversations/:conversationId` 重命名会话：折叠空白后限 1–20 个 Unicode 码点，空/超长返回 400，不存在的会话返回 404；写入后列表与页头以该标题显示。
 - `GET /api/conversations/:conversationId/messages` 默认返回最近 30 条可见终态 user/assistant 文本及 `hasMore`；使用同会话消息 ID 游标读取更早一页。单页按 `sequenceNo ASC` 返回；user 行可嵌套其轮次中的安全 `toolActivities` 摘要与附件引用 `{attachmentId, name}`，工具执行行不会作为顶层消息返回。
 - `DELETE /api/conversations/:conversationId` 物理删除会话：一个事务内按外键顺序清除演练/物料/资料关联、消息、Pi 快照与会话行，提交后再删除 `~/.tech-forge/sessions/<conversationId>/`；目录清理失败只返回 `sessionCleanup: "partial"`。
 - 每轮开始时，后端在短 SQLite 事务中保存 `user/completed` 行和 `assistantTurn/pending` 标记；模型调用不在数据库事务内。
@@ -44,7 +45,7 @@ last_verified: 2026-11-08
 ## 当前边界
 
 - 工具消息及执行状态保存在本地 SQLite。历史 API 可在对应 user 行下返回工具名、状态、耗时、可选路径和 `grep` 搜索词；不会暴露完整工具参数、部分/最终结果或 Pi `toolResult` 内容。
-- 没有重命名或删除 API；会话摘要列表不分页，消息历史固定为 30 条一页并支持按需读取更早内容。
+- 没有搜索或归档 API；会话摘要列表不分页，消息历史固定为 30 条一页并支持按需读取更早内容。重命名与删除通过会话行悬停菜单提供。
 - 异常退出后的恢复在该对话下一次请求开始时执行；不会续跑原来的 provider 调用。
 - 对账发现 assistant tool call 缺少 toolResult 时，会优先用已保存的工具最终结果重建；若最终结果还未产生，则补一条合成中断错误结果，避免重放可能已产生外部副作用的工具调用。
 - 每轮读取全部历史，没有持久化摘要或上下文裁剪；超长对话可能超过模型上下文窗口。
