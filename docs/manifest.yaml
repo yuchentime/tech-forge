@@ -641,6 +641,25 @@ routes:
       - docs/source/功能设计文档.md
       - docs/current/index.md
     history_on_demand: []
+  learning-fun-discussion:
+    description: "Discuss and prioritize engagement mechanics that make learning and rehearsal less dry without introducing scores, streaks, or fabricated feedback"
+    token_budget: 10000
+    code_globs:
+      - "apps/desktop/src/features/rehearsal/**"
+      - "apps/desktop/src/features/knowledge-profile/**"
+      - "apps/desktop/src/styles.css"
+      - "apps/backend/src/rehearsals/**"
+    required:
+      - docs/source/学习趣味性设计讨论.md
+      - docs/source/需求文档.md
+      - docs/source/知识画像产品讨论.md
+      - docs/current/platform/desktop-skin.md
+    optional:
+      - docs/source/功能设计文档.md
+      - docs/source/课堂模拟图像素材规格.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/current/domains/knowledge-profile/index.md
+    history_on_demand: []
   knowledge-session-cards:
     description: "Show compact conversation knowledge cards from the lightweight facts collection; fetch the large single-conversation detail only after opening its separate detail view, then return to the preserved list"
     token_budget: 26000
