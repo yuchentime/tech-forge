@@ -511,7 +511,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           }}
         />
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+        // Positioned so the artifact panel can float over the chat when the window is too narrow.
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <PageHeader className="justify-between">
               <h1

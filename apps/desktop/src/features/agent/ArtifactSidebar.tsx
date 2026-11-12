@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowsClockwise, ArrowsOut, X } from '@phosphor-icons/react';
+import { hasDesktopBridge } from '../../types/desktop-bridge';
 import { conversationStore } from './conversation-store';
 import {
   ALL_FILES_TAB_ID,
@@ -12,34 +13,38 @@ import {
   ArtifactTabs,
 } from './ArtifactSidebarParts';
 import { ArtifactPreview } from './ArtifactPreview';
+import {
+  PANEL_DEFAULT_WIDTH,
+  PANEL_MAX_WIDTH,
+  PANEL_MIN_WIDTH,
+  clampPanelWidth,
+  planArtifactLayout,
+} from './layout-budget';
 
-/** Narrowest usable preview width; the chat column keeps the rest. */
-const MIN_SIDEBAR_WIDTH = 320;
-
-/** Widest preview width before the chat column is squeezed past usefulness. */
-const MAX_SIDEBAR_WIDTH = 900;
-
-/** Remembers the dragged width across restarts. */
+/** Remembers the width the user chose, so a narrow window cannot rewrite it. */
 const SIDEBAR_WIDTH_STORAGE_KEY = 'teachforge.artifacts.sidebarWidth';
 
-/** Width reserved for the left sidebar and the chat column during a drag. */
-const RESERVED_LAYOUT_WIDTH = 560;
+/**
+ * Delay before the window shrinks back after the panel closes.
+ *
+ * Without it, a double click on the file entry (or a stray Escape) would grow and shrink the
+ * window twice for an action the user meant once.
+ */
+const RELEASE_DELAY_MS = 250;
 
-/** Reads the stored width, falling back to the default when storage is unavailable. */
-function readStoredSidebarWidth(): number {
+/** Reads the stored panel preference, falling back to the default when storage is unavailable. */
+function readStoredPanelWidth(): number {
   try {
     const parsed = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.min(Math.max(parsed, MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
-    }
+    if (Number.isFinite(parsed) && parsed > 0) return clampPanelWidth(parsed);
   } catch {
     // Private or unavailable storage keeps the default width.
   }
-  return 384;
+  return PANEL_DEFAULT_WIDTH;
 }
 
-/** Persists the dragged width, ignoring storage failures. */
-function storeSidebarWidth(value: number): void {
+/** Persists the panel preference, ignoring storage failures. */
+function storePanelWidth(value: number): void {
   try {
     localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(value));
   } catch {
@@ -75,8 +80,18 @@ export function ArtifactSidebar() {
   const files = listState.conversationId === conversationId ? listState.files : [];
   const error = listState.conversationId === conversationId ? listState.error : null;
   const isLoading = listState.status === 'loading';
-  const [width, setWidth] = useState(readStoredSidebarWidth);
-  const widthRef = useRef(width);
+  /** The user's width preference. The rendered width comes from the budget plan below. */
+  const [requestedWidth, setRequestedWidth] = useState(readStoredPanelWidth);
+  const requestedWidthRef = useRef(requestedWidth);
+  /** Content width of the window, tracked so the plan follows OS resizes without a reload. */
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  /**
+   * Widest content width the current display can give the window, reported by the main process.
+   * `null` until the first growth reply: the plan then assumes growth still works.
+   */
+  const [maxContentWidth, setMaxContentWidth] = useState<number | null>(null);
+  const maxContentWidthRef = useRef<number | null>(null);
+  const releaseTimerRef = useRef<number | null>(null);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   /** True while the active file is shown in the full-window overlay instead of the panel. */
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -89,21 +104,96 @@ export function ArtifactSidebar() {
   const fullscreenCloseRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    widthRef.current = width;
-  }, [width]);
+    requestedWidthRef.current = requestedWidth;
+  }, [requestedWidth]);
 
-  /** Applies one width, clamped to the range the layout can still show. */
+  useEffect(() => {
+    maxContentWidthRef.current = maxContentWidth;
+  }, [maxContentWidth]);
+
+  /** Keeps the plan in sync with OS-driven window resizes. */
+  useEffect(() => {
+    const handleResize = (): void => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  /**
+   * Asks the main process to widen the window until both the chat column and the panel fit.
+   *
+   * Growth is requested only when the layout actually needs more room, so opening the panel in a
+   * window that already fits changes nothing at all. A failure leaves the CSS budget in charge.
+   */
+  const requestPanelWidth = useCallback(async (): Promise<void> => {
+    if (!hasDesktopBridge()) return;
+    const plan = planArtifactLayout({
+      viewportContentWidth: window.innerWidth,
+      requestedPanelWidth: requestedWidthRef.current,
+      maxContentWidth: maxContentWidthRef.current,
+    });
+    if (!plan.needsGrowth && plan.mode !== 'overlay') return;
+    try {
+      const result = await window.teachforge.ensureContentWidth(plan.requiredContentWidth);
+      maxContentWidthRef.current = result.maxContentWidth;
+      setMaxContentWidth(result.maxContentWidth);
+      setViewportWidth(result.contentWidth);
+    } catch {
+      // No window capability (or a refused request): keep the panel inside the current width.
+    }
+  }, []);
+
+  /**
+   * Grows the window while the panel is open and restores the user's own size afterwards.
+   *
+   * The restore is delayed so toggling the panel twice does not resize the window twice, and the
+   * main process still refuses to shrink a window the user resized in the meantime.
+   */
+  useEffect(() => {
+    if (tabsState.visible) {
+      if (releaseTimerRef.current !== null) {
+        window.clearTimeout(releaseTimerRef.current);
+        releaseTimerRef.current = null;
+      }
+      void requestPanelWidth();
+      return;
+    }
+    if (releaseTimerRef.current !== null) window.clearTimeout(releaseTimerRef.current);
+    releaseTimerRef.current = window.setTimeout(() => {
+      releaseTimerRef.current = null;
+      if (hasDesktopBridge()) {
+        void window.teachforge.releaseContentWidth().catch(() => undefined);
+      }
+      maxContentWidthRef.current = null;
+      setMaxContentWidth(null);
+    }, RELEASE_DELAY_MS);
+  }, [requestPanelWidth, tabsState.visible]);
+
+  useEffect(
+    () => () => {
+      // Unmounting (settings, library, rehearsal) closes the panel without going through the
+      // visibility effect, so the growth is released here too.
+      if (releaseTimerRef.current !== null) window.clearTimeout(releaseTimerRef.current);
+      if (hasDesktopBridge()) {
+        void window.teachforge.releaseContentWidth().catch(() => undefined);
+      }
+    },
+    [],
+  );
+
+  /** Stores one width preference; the rendered width stays budget-driven. */
   const applyWidth = useCallback((next: number): number => {
-    const layoutLimit = Math.max(MIN_SIDEBAR_WIDTH, window.innerWidth - RESERVED_LAYOUT_WIDTH);
-    const clamped = Math.min(Math.max(next, MIN_SIDEBAR_WIDTH), Math.min(MAX_SIDEBAR_WIDTH, layoutLimit));
-    setWidth(clamped);
+    const clamped = clampPanelWidth(next);
+    setRequestedWidth(clamped);
     return clamped;
   }, []);
 
   /** Starts a drag; pointer capture keeps the move events on the handle. */
   const handleResizeStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      dragState.current = { startX: event.clientX, startWidth: widthRef.current };
+      dragState.current = {
+        startX: event.clientX,
+        startWidth: requestedWidthRef.current,
+      };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     [],
@@ -119,15 +209,20 @@ export function ArtifactSidebar() {
     [applyWidth],
   );
 
-  /** Ends the drag and stores the final width. */
+  /** Ends the drag: stores the preference and widens the window if the user asked for more room. */
   const handleResizeEnd = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragState.current) return;
+      const drag = dragState.current;
+      if (!drag) return;
       dragState.current = null;
       event.currentTarget.releasePointerCapture(event.pointerId);
-      storeSidebarWidth(widthRef.current);
+      // Only the preference is stored: the rendered width stays a function of the budget, so a
+      // narrow window can never overwrite what the user asked for.
+      storePanelWidth(requestedWidthRef.current);
+      if (requestedWidthRef.current <= drag.startWidth) return;
+      void requestPanelWidth();
     },
-    [],
+    [requestPanelWidth],
   );
 
   /** Resizes from the keyboard so the handle is reachable without a pointer. */
@@ -135,12 +230,12 @@ export function ArtifactSidebar() {
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
-      const next = applyWidth(
-        widthRef.current + (event.key === 'ArrowLeft' ? 24 : -24),
-      );
-      storeSidebarWidth(next);
+      const previous = requestedWidthRef.current;
+      const next = applyWidth(previous + (event.key === 'ArrowLeft' ? 24 : -24));
+      storePanelWidth(next);
+      if (next > previous) void requestPanelWidth();
     },
-    [applyWidth],
+    [applyWidth, requestPanelWidth],
   );
 
   const activeTab =
@@ -179,19 +274,44 @@ export function ArtifactSidebar() {
     if (activeTabId === null && isFullscreen) setIsFullscreen(false);
   }, [activeTabId, isFullscreen]);
 
+  /** How the panel and the chat share this window right now. */
+  const plan = planArtifactLayout({
+    viewportContentWidth: viewportWidth,
+    requestedPanelWidth: requestedWidth,
+    maxContentWidth,
+  });
+  const isOverlay = plan.mode === 'overlay';
+
+  // The floating panel covers part of the chat, so it gets the same Escape affordance as the
+  // full-screen preview instead of relying on the close button alone.
+  useEffect(() => {
+    if (!isOverlay || !tabsState.visible) return;
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') artifactTabsStore.hide();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOverlay, tabsState.visible]);
+
   if (!tabsState.visible) return null;
 
   return (
     <aside
-      className="flex w-full min-w-0 shrink-0 border-t border-stone-200 bg-white md:h-full md:w-[var(--artifact-sidebar-width)] md:border-l md:border-t-0"
-      style={{ '--artifact-sidebar-width': `${width}px` } as React.CSSProperties}
+      className={
+        // Row layout: the resize handle is the aside's first child and must sit beside the
+        // content, so the container must never become a column.
+        isOverlay
+          ? 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 border-l border-stone-200 bg-white shadow-2xl md:w-[var(--artifact-sidebar-width)]'
+          : 'flex w-full min-w-0 shrink-0 border-t border-stone-200 bg-white md:h-full md:w-[var(--artifact-sidebar-width)] md:border-l md:border-t-0'
+      }
+      style={{ '--artifact-sidebar-width': `${plan.panelWidth}px` } as React.CSSProperties}
     >
       <div
         aria-label="调整侧边栏宽度"
         aria-orientation="vertical"
-        aria-valuemax={MAX_SIDEBAR_WIDTH}
-        aria-valuemin={MIN_SIDEBAR_WIDTH}
-        aria-valuenow={width}
+        aria-valuemax={PANEL_MAX_WIDTH}
+        aria-valuemin={PANEL_MIN_WIDTH}
+        aria-valuenow={plan.panelWidth}
         className="hidden w-1.5 shrink-0 cursor-col-resize touch-none items-center justify-center border-r border-stone-200 transition hover:bg-emerald-800/20 focus-visible:bg-emerald-800/25 focus-visible:outline-none md:flex"
         onKeyDown={handleResizeKeyDown}
         onPointerDown={handleResizeStart}

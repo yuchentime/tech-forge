@@ -78,7 +78,7 @@ React renderer 不直接使用 Node API，也不直接访问本地 HTTP 服务�
 | `apps/desktop/src/api/backend-error.ts` | 后端错误信封的安全消息提取 | 多个 feature 复用同一实现，避免各自解析 `message` 字段 |
 | `apps/desktop/src/types/desktop-bridge.ts` 与 `chat-stream-event.ts` | IPC 请求、响应、conversation 元数据与安全 Pi-native Agent stream 事件和 `window.teachforge` 类型/运行时校验 | 只放桌面桥接契约；业务 API 类型放对应 feature/API 文件 |
 | `apps/desktop/electron/main/main.ts` | 启动/停止 backend 子进程、创建窗口、校验 IPC 请求、代理 JSON HTTP（`backend-request.ts`：每次请求关闭连接、socket 级失败重试一次、中文错误、记录方法/路径/错误码）和固定 Agent SSE 路径、提供只返回路径的系统文件选择器；Windows/Linux 上 `Menu.setApplicationMenu(null)` 去掉默认 File/Edit/View/Window 菜单栏（macOS 保留系统应用菜单以维持 Cmd+Q/Cmd+W）；dev 模式加载 Vite 页面后自动在独立窗口打开 DevTools | 可访问 Electron/Node 能力；不得在此实现会话、演练等业务用例 |
-| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request` 和类型化 `streamChat`/取消接口 | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
+| `apps/desktop/electron/preload/preload.ts` | 通过 `contextBridge` 暴露 `getBackendState`、`request`、类型化 `streamChat`/取消接口、文件选择与定位，以及窗口宽度能力 `ensureContentWidth`/`releaseContentWidth` | 保持最小授权面；只经专用 MessagePort 转发已校验事件，不暴露通用 Node 或 IPC 接口；窗口尺寸的边界是「渲染层只提交内容需要多宽」，坐标、边框补偿与显示器 `workArea` 上限全部由 main 决定（`window-layout.ts`），任何请求都不能把窗口推到屏幕外；Vite 页面须由 Electron 加载，普通浏览器直开不包含该 bridge |
 
 当前还没有独立 API client、query/cache 层或全局前端状态库。新增业务请求时建议先建立轻量 `src/api` 封装，再由领域页面或 hook 调用；只有实际复杂度出现后再引入缓存或状态框架。
 

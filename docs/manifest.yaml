@@ -555,6 +555,28 @@ routes:
       - docs/current/domains/conversations/api-contract.md
       - docs/changes/2026-11-09-artifact-sidebar/verification.md
     history_on_demand: []
+  artifact-panel-window-budget:
+    description: "Keep the chat column and the artifact panel readable when the panel opens in a small window without any manual dragging: the panel width is a stored preference only and a single allocation rule assigns width (main process grows the window content width toward left rail 256 + chat column 624 + preference, capped by the display work area, then the chat column drops to 496 and the panel narrows, and only below 1072 content width the panel floats over the chat); closing releases the growth after 250ms unless the user resized the window"
+    token_budget: 16000
+    code_globs:
+      - "apps/desktop/src/features/agent/layout-budget.ts"
+      - "apps/desktop/src/features/agent/ArtifactSidebar.tsx"
+      - "apps/desktop/src/types/desktop-bridge.ts"
+      - "apps/desktop/electron/**"
+      - "apps/desktop/test/layout-budget.test.cjs"
+      - "apps/desktop/test/window-layout.test.cjs"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/artifacts/index.md
+      - docs/changes/2026-11-12-artifact-panel-window-budget/brief.md
+      - docs/changes/2026-11-12-artifact-panel-window-budget/design.md
+    optional:
+      - docs/changes/2026-11-12-artifact-panel-window-budget/tasks.md
+      - docs/changes/2026-11-12-artifact-panel-window-budget/verification.md
+      - docs/changes/2026-11-12-artifact-panel-window-budget/worklog.md
+      - docs/changes/2026-11-09-artifact-sidebar/design.md
+    history_on_demand: []
   concurrent-conversations:
     description: "Run multiple conversations in parallel in the desktop Agent: one runtime per thread, background streaming after switching, per-thread running state, isolated composer/artifact state, and guarded deletion of running conversations"
     token_budget: 24000

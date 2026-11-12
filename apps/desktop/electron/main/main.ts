@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -11,6 +11,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  screen,
   shell,
   utilityProcess,
   type UtilityProcess,
@@ -22,11 +23,21 @@ import {
 import type {
   ChatStreamEvent,
   BackendRequest,
+  ContentWidthResult,
 } from '../../src/types/desktop-bridge';
 import {
   getNetworkErrorCode,
   requestBackend,
 } from './backend-request';
+import {
+  MIN_CONTENT_WIDTH,
+  clampContentWidthRequest,
+  isSnappedWidth,
+  planWindowGrowth,
+  resolveRestoredBounds,
+  sameHorizontalBounds,
+  type WindowRect,
+} from './window-layout';
 import { SseParser } from './sse-parser';
 import { decodeChatSseMessage } from './stream-protocol';
 import { routeChatStreamEvent } from './stream-routing';
@@ -35,6 +46,12 @@ const READY_PREFIX = 'TEACHFORGE_BACKEND_READY=';
 const STARTUP_TIMEOUT_MS = 20_000;
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_CHAT_PROMPT_LENGTH = 10_000;
+/** Window geometry restored on launch; clamped into the current display before use. */
+const DEFAULT_WINDOW_SIZE = { width: 1280, height: 820 };
+const MIN_WINDOW_SIZE = { width: 960, height: 640 };
+/** Debounce before persisting a moved or resized window, so dragging writes once. */
+const WINDOW_STATE_SAVE_DELAY_MS = 500;
+const WINDOW_STATE_FILE = 'window-state.json';
 const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const chatRequestIdPattern = /^chat-\d+-\d+$/;
 
@@ -266,6 +283,175 @@ function startBackend(): Promise<void> {
       });
       child.on('exit', onExit);
     }
+  });
+}
+
+/** Growth the artifact panel applied, kept so closing the panel can undo exactly that change. */
+/**
+ * What growth changed about one window.
+ *
+ * Every write is derived from `baseline`, the rect the user had before the panel widened the
+ * window. Re-reading the bounds after each write would feed DPI rounding back into the next
+ * write, which at 125% scaling drifts a pixel per open/close cycle; deriving both the grown and
+ * the restored rect from the same captured values keeps repeated cycles pixel-identical.
+ */
+type PendingGrowth = {
+  /** The user's own window rect, captured before the first growth of this panel session. */
+  baseline: WindowRect;
+  /** The rect growth wrote; a different horizontal bounds means the user resized since. */
+  applied: WindowRect;
+};
+
+const pendingGrowth = new WeakMap<BrowserWindow, PendingGrowth>();
+/**
+ * The rect each window had before the artifact panel first widened it.
+ *
+ * Kept for the whole window session, not per open: writing back a value read from the window and
+ * then writing it again compounds DPI rounding, so the same captured size is used until the user
+ * resizes the window themselves.
+ */
+const windowBaselines = new WeakMap<BrowserWindow, WindowRect>();
+let windowStateTimer: NodeJS.Timeout | undefined;
+
+/** Path of the persisted window geometry inside the Electron user data directory. */
+function windowStatePath(): string {
+  return path.join(app.getPath('userData'), WINDOW_STATE_FILE);
+}
+
+/** Reads the last window geometry, ignoring a missing or corrupted file. */
+function readStoredWindowState(): Partial<WindowRect> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(windowStatePath(), 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Partial<WindowRect>;
+  } catch {
+    return null;
+  }
+}
+
+/** Persists one window geometry; a failed write only costs the next launch's placement. */
+function storeWindowState(bounds: WindowRect): void {
+  try {
+    writeFileSync(windowStatePath(), JSON.stringify(bounds), 'utf8');
+  } catch {
+    // Read-only or full user data directories keep the default window size.
+  }
+}
+
+/**
+ * Saves the current geometry on a debounce, so dragging a window writes once instead of per frame.
+ */
+function scheduleWindowStateSave(win: BrowserWindow): void {
+  if (windowStateTimer !== undefined) clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(() => {
+    windowStateTimer = undefined;
+    saveWindowState(win);
+  }, WINDOW_STATE_SAVE_DELAY_MS);
+}
+
+/**
+ * Saves the geometry the next launch should restore.
+ *
+ * The width is the one the user chose, not the temporary width the artifact panel asked for, and
+ * maximized/full-screen states are skipped: restoring a maximized window would hide its own size.
+ */
+function saveWindowState(win: BrowserWindow): void {
+  if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
+  const bounds = win.getBounds();
+  const growth = pendingGrowth.get(win);
+  // While the panel holds a grown window, save the size the user will return to.
+  storeWindowState(
+    growth
+      ? { ...bounds, width: growth.baseline.width, height: growth.baseline.height }
+      : bounds,
+  );
+}
+
+/** Resolves one window geometry for creation, clamped into the current display. */
+function resolveInitialWindowBounds(): WindowRect | null {
+  return resolveRestoredBounds({
+    stored: readStoredWindowState(),
+    workArea: screen.getPrimaryDisplay().workArea,
+    minSize: MIN_WINDOW_SIZE,
+  });
+}
+
+/**
+ * Registers the artifact panel's width budget IPC.
+ *
+ * The Renderer only states how wide its content must be; the main process owns the geometry and
+ * never lets a request leave the display work area. Growth is remembered so releasing it restores
+ * the user's own window size, and only when the user has not resized the window since.
+ */
+function registerWindowIpc(): void {
+  ipcMain.handle(
+    'window:ensure-content-width',
+    (event, value: unknown): ContentWidthResult => {
+      const minContentWidth = clampContentWidthRequest(value);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || win.isDestroyed()) throw new Error('窗口不可用，请重试。');
+
+      const bounds = win.getBounds();
+      const contentBounds = win.getContentBounds();
+      const frame = Math.max(0, bounds.width - contentBounds.width);
+      const workArea = screen.getDisplayMatching(bounds).workArea;
+      const maxContentWidth = Math.max(MIN_CONTENT_WIDTH, workArea.width - frame);
+      // Growing would unmaximize, drop a Windows snap, or fight the user's own layout; the
+      // Renderer reads the returned cap and floats the panel over the chat instead.
+      if (
+        win.isMaximized() ||
+        win.isFullScreen() ||
+        isSnappedWidth(bounds.width, workArea.width)
+      ) {
+        return { contentWidth: contentBounds.width, maxContentWidth };
+      }
+
+      // The baseline is captured once per window and reused by every later open, so neither the
+      // grown nor the restored rect inherits a rounding error from a previous cycle.
+      let baseline = windowBaselines.get(win);
+      if (!baseline) {
+        baseline = bounds;
+        windowBaselines.set(win, baseline);
+      }
+      const target = planWindowGrowth({ bounds, contentBounds, workArea, minContentWidth });
+      if (!target) return { contentWidth: contentBounds.width, maxContentWidth };
+
+      const applied = {
+        x: target.x,
+        y: bounds.y,
+        width: target.width,
+        height: baseline.height,
+      };
+      win.setBounds(applied, false);
+      pendingGrowth.set(win, { baseline, applied });
+      return { contentWidth: target.width - frame, maxContentWidth };
+    },
+  );
+
+  ipcMain.handle('window:release-content-width', (event): void => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    const growth = pendingGrowth.get(win);
+    if (!growth) return;
+    // Keep the record while the window is maximized: the grown rect is still its normal rect, so
+    // the growth must be undone when the user later restores the window.
+    if (win.isMaximized() || win.isFullScreen()) return;
+    pendingGrowth.delete(win);
+
+    const bounds = win.getBounds();
+    // A different width or x means the user resized while the panel was open: their size wins.
+    if (!sameHorizontalBounds(bounds, growth.applied)) return;
+    // Restores the captured rect instead of a recomputed one, so the height the user had is
+    // written back verbatim even if Electron reported a rounded value in between.
+    win.setBounds(
+      {
+        x: bounds.x,
+        y: bounds.y,
+        width: growth.baseline.width,
+        height: growth.baseline.height,
+      },
+      false,
+    );
   });
 }
 
@@ -689,11 +875,11 @@ function configureApplicationMenu(): void {
 
 /** Creates the isolated Renderer window and opens DevTools in development. */
 function createWindow(): void {
+  const restoredBounds = resolveInitialWindowBounds();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 960,
-    minHeight: 640,
+    ...(restoredBounds ?? DEFAULT_WINDOW_SIZE),
+    minWidth: MIN_WINDOW_SIZE.width,
+    minHeight: MIN_WINDOW_SIZE.height,
     backgroundColor: '#f0f2ed',
     title: 'TeachForge',
     icon: path.join(__dirname, '../../../public', 'logo.ico'),
@@ -714,7 +900,25 @@ function createWindow(): void {
       : targetUrl === expectedFileUrl;
     if (!isAllowedNavigation) event.preventDefault();
   });
-  mainWindow.on('closed', () => {
+  const windowRef = mainWindow;
+  // A user resize invalidates the pending growth, so closing the panel never shrinks a window the
+  // user resized in the meantime.
+  windowRef.on('will-resize', () => {
+    pendingGrowth.delete(windowRef);
+    windowBaselines.delete(windowRef);
+  });
+  windowRef.on('resize', () => scheduleWindowStateSave(windowRef));
+  windowRef.on('move', () => scheduleWindowStateSave(windowRef));
+  windowRef.on('close', () => {
+    if (windowStateTimer !== undefined) {
+      clearTimeout(windowStateTimer);
+      windowStateTimer = undefined;
+    }
+    saveWindowState(windowRef);
+  });
+  windowRef.on('closed', () => {
+    pendingGrowth.delete(windowRef);
+    windowBaselines.delete(windowRef);
     cancelAllChatStreams();
     mainWindow = undefined;
   });
@@ -734,6 +938,7 @@ app.whenReady().then(async () => {
   configureDevelopmentDockIcon();
   configureApplicationMenu();
   registerBackendIpc();
+  registerWindowIpc();
   try {
     await startBackend();
     createWindow();

@@ -13,6 +13,12 @@ export type BackendResponse<T = unknown> = {
 
 export type { ChatStreamEvent } from './chat-stream-event';
 
+/** Outcome of a width request: the content width now in effect and this display's ceiling. */
+export type ContentWidthResult = {
+  contentWidth: number;
+  maxContentWidth: number;
+};
+
 export type DesktopBridge = {
   getBackendState(): Promise<{ ready: boolean; port: number | null }>;
   request<T = unknown>(input: BackendRequest): Promise<BackendResponse<T>>;
@@ -35,6 +41,18 @@ export type DesktopBridge = {
    * The Renderer only forwards a path the artifact API returned; it never builds one itself.
    */
   revealInFolder(itemPath: string): Promise<boolean>;
+  /**
+   * Asks the main process to widen the window until its content is at least `minContentWidth`.
+   *
+   * Only the requirement travels: the main process owns the geometry, clamps the request to the
+   * display work area, and reports the ceiling the renderer can plan against.
+   */
+  ensureContentWidth(minContentWidth: number): Promise<ContentWidthResult>;
+  /**
+   * Undoes a previous growth, and only while the window is still exactly where growth left it, so
+   * a window the user resized in the meantime is never shrunk.
+   */
+  releaseContentWidth(): Promise<void>;
 };
 
 /** Detects whether this renderer was launched with the restricted Electron preload bridge. */
@@ -49,7 +67,9 @@ export function hasDesktopBridge(): boolean {
       typeof bridge.pickChatAttachments === 'function' &&
       typeof bridge.streamChat === 'function' &&
       typeof bridge.cancelChatStream === 'function' &&
-      typeof bridge.revealInFolder === 'function',
+      typeof bridge.revealInFolder === 'function' &&
+      typeof bridge.ensureContentWidth === 'function' &&
+      typeof bridge.releaseContentWidth === 'function',
   );
 }
 

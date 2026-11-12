@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ChatStreamEvent } from '../../src/types/chat-stream-event';
-import type { BackendRequest, BackendResponse, DesktopBridge } from '../../src/types/desktop-bridge';
+import type {
+  BackendRequest,
+  BackendResponse,
+  ContentWidthResult,
+  DesktopBridge,
+} from '../../src/types/desktop-bridge';
 
 type ChatStreamHandler = {
   onEvent: (event: ChatStreamEvent) => void;
@@ -123,6 +128,13 @@ const bridge: DesktopBridge = {
   },
   revealInFolder: (itemPath: string) =>
     ipcRenderer.invoke('shell:reveal', itemPath) as Promise<boolean>,
+  ensureContentWidth: (minContentWidth: number) =>
+    ipcRenderer.invoke(
+      'window:ensure-content-width',
+      minContentWidth,
+    ) as Promise<ContentWidthResult>,
+  releaseContentWidth: () =>
+    ipcRenderer.invoke('window:release-content-width') as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('teachforge', bridge);
