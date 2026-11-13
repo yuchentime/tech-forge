@@ -185,6 +185,57 @@ test('only assistant messages from the requested conversation can be saved', asy
   }
 });
 
+test('an excerpt can be saved together with its optional note', async () => {
+  const ctx = await createContext();
+  try {
+    const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
+    const noted = await ctx.focus.create({
+      conversationId,
+      messageId: assistantId,
+      quote: 'CAS + 唯一键',
+      messageIndex: 2,
+      note: '  第一行\n第二行  ',
+    });
+    assert.equal(noted.note, '第一行\n第二行');
+
+    // Re-adding the same quote updates the note instead of silently discarding what was typed.
+    const updated = await ctx.focus.create({
+      conversationId,
+      messageId: assistantId,
+      quote: 'CAS + 唯一键',
+      messageIndex: 2,
+      note: '补充：唯一键要覆盖重试',
+    });
+    assert.equal(updated.id, noted.id);
+    assert.equal(updated.note, '补充：唯一键要覆盖重试');
+
+    // A blank note must not erase the existing one.
+    const kept = await ctx.focus.create({
+      conversationId,
+      messageId: assistantId,
+      quote: 'CAS + 唯一键',
+      messageIndex: 2,
+      note: '   ',
+    });
+    assert.equal(kept.note, '补充：唯一键要覆盖重试');
+    assert.equal((await ctx.focus.list()).length, 1);
+
+    await assert.rejects(
+      () =>
+        ctx.focus.create({
+          conversationId,
+          messageId: assistantId,
+          quote: '另一段',
+          messageIndex: 2,
+          note: '字'.repeat(2001),
+        }),
+      /过长/,
+    );
+  } finally {
+    await ctx.dataSource.destroy();
+  }
+});
+
 test('study notes can be saved, cleared and bounded', async () => {
   const ctx = await createContext();
   try {

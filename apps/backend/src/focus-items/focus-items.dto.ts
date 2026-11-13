@@ -1,4 +1,4 @@
-import { IsInt, IsString, IsUUID, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 /** One saved excerpt as the 重点关注 page renders it. */
 export interface FocusItemDto {
@@ -28,6 +28,11 @@ export class CreateFocusItemDto {
   @IsInt()
   @Min(1)
   messageIndex!: number;
+
+  /** Study note written in the same dialog; omitted or blank means "no note". */
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 /** Validates one note replacement; emptiness and length are enforced in the service. */

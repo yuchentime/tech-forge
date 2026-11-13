@@ -39,6 +39,10 @@ export class FocusItemsService {
     if (Array.from(quote).length > MAX_QUOTE_CHARACTERS) {
       throw new BadRequestException('选中的内容过长，请分次添加。');
     }
+    const note = normalizeNote(input.note ?? '');
+    if (note !== null && Array.from(note).length > MAX_NOTE_CHARACTERS) {
+      throw new BadRequestException('备注过长，请控制在 2000 字以内。');
+    }
 
     const message = await this.dataSource
       .getRepository(MessageEntity)
@@ -57,6 +61,12 @@ export class FocusItemsService {
       quoteKey,
     });
     if (existing) {
+      // Re-adding the same quote must not silently drop the note typed in the dialog, while a
+      // blank note never clears a note the user wrote earlier.
+      if (note !== null && existing.note !== note) {
+        existing.note = note;
+        await repository.save(existing);
+      }
       return (await this.toDtos([existing]))[0];
     }
 
@@ -68,7 +78,7 @@ export class FocusItemsService {
       messageIndex: input.messageIndex,
       quote,
       quoteKey,
-      note: null,
+      note,
     });
     try {
       await repository.save(item);
@@ -79,6 +89,10 @@ export class FocusItemsService {
         quoteKey,
       });
       if (duplicate) {
+        if (note !== null && duplicate.note !== note) {
+          duplicate.note = note;
+          await repository.save(duplicate);
+        }
         return (await this.toDtos([duplicate]))[0];
       }
       throw error;

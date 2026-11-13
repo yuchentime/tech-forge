@@ -45,6 +45,8 @@ export async function createFocusItem(input: {
   messageId: string;
   quote: string;
   messageIndex: number;
+  /** Optional study note typed in the add dialog; omitted means "no note". */
+  note?: string;
 }): Promise<FocusItemView> {
   const response = await request('/api/focus-items', 'POST', input);
   if (response.status !== 201 || !isFocusItemView(response.data)) {

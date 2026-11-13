@@ -67,6 +67,7 @@ import { ClassroomHome } from '../classroom/ClassroomHome';
 import { ClassroomMode } from '../classroom/ClassroomMode';
 import { generateLessonSummary } from '../classroom/classroom-api';
 import { FocusPointsPage } from '../focus/FocusPointsPage';
+import { AddFocusNoteDialog } from '../focus/AddFocusNoteDialog';
 import { createFocusItem } from '../focus/focus-api';
 import {
   REHEARSAL_REQUIRES_ROUND_HINT,
@@ -164,7 +165,16 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     top: number;
     left: number;
   } | null>(null);
-  const [isSavingFocus, setIsSavingFocus] = useState(false);
+  /**
+   * Excerpt waiting for its optional note. A snapshot, not `focusSelection`: clicking inside the
+   * dialog collapses the page selection, which would otherwise hide the action mid-edit.
+   */
+  const [pendingFocus, setPendingFocus] = useState<{
+    conversationId: string;
+    messageId: string;
+    messageIndex: number;
+    quote: string;
+  } | null>(null);
   const [hasLoadedInitialList, setHasLoadedInitialList] = useState(false);
   const requestVersion = useRef(0);
   const restoredInitialConversation = useRef(false);
@@ -532,26 +542,38 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     setFocusSelection(null);
   }, [activeView, conversationState.activeConversationId]);
 
-  /** Saves the selected excerpt and confirms it with a toast. */
-  const addFocusFromSelection = useCallback(async (): Promise<void> => {
-    if (!focusSelection || isSavingFocus) return;
-    setIsSavingFocus(true);
-    try {
+  /** Opens the note dialog for the current selection; nothing is saved until the dialog submits. */
+  const openFocusNoteDialog = useCallback((): void => {
+    if (!focusSelection) return;
+    setPendingFocus({
+      conversationId: focusSelection.conversationId,
+      messageId: focusSelection.messageId,
+      messageIndex: focusSelection.messageIndex,
+      quote: focusSelection.quote,
+    });
+    setFocusSelection(null);
+  }, [focusSelection]);
+
+  /** Drops the draft excerpt and the page selection without saving anything. */
+  const cancelFocusNote = useCallback((): void => {
+    setPendingFocus(null);
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  /** Saves the pending excerpt with the dialog's note (empty means "no note"). */
+  const saveFocusWithNote = useCallback(
+    async (note: string): Promise<void> => {
+      if (!pendingFocus) return;
       await createFocusItem({
-        conversationId: focusSelection.conversationId,
-        messageId: focusSelection.messageId,
-        quote: focusSelection.quote,
-        messageIndex: focusSelection.messageIndex,
+        ...pendingFocus,
+        ...(note ? { note } : {}),
       });
       showToast('已添加到重点关注');
       window.getSelection()?.removeAllRanges();
-      setFocusSelection(null);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '添加失败，请重试。');
-    } finally {
-      setIsSavingFocus(false);
-    }
-  }, [focusSelection, isSavingFocus]);
+      setPendingFocus(null);
+    },
+    [pendingFocus],
+  );
 
   const isHistoryLoading = loadingConversationId !== null;
   /** Drills need a completed round, so the toggle and the view both follow that gate. */
@@ -765,15 +787,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 </PageHeader>
 
-                {focusSelection && !isRehearsalMode && (
+                {focusSelection && !pendingFocus && !isRehearsalMode && (
                   <div
                     className="fixed z-50"
                     style={{ top: focusSelection.top, left: focusSelection.left }}
                   >
                     <button
-                      className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-float transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-                      disabled={isSavingFocus}
-                      onClick={() => void addFocusFromSelection()}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-float transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                      onClick={openFocusNoteDialog}
                       // Keep the text selected until the click handler reads it.
                       onMouseDown={(event) => event.preventDefault()}
                       type="button"
@@ -786,6 +807,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       添加到重点关注
                     </button>
                   </div>
+                )}
+
+                {pendingFocus && (
+                  <AddFocusNoteDialog
+                    onCancel={cancelFocusNote}
+                    onSave={saveFocusWithNote}
+                    quote={pendingFocus.quote}
+                  />
                 )}
 
                 <div className="relative min-h-0 flex-1 overflow-hidden">
