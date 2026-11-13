@@ -35,16 +35,22 @@ test('renders a non-empty catalog instead of reporting an empty one', async (t) 
   const directory = mkdtempSync(join(tmpdir(), 'teachforge-catalog-'));
   const catalogPath = join(directory, 'index.md');
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const service = new KnowledgeDirectoryService({ getKnowledgeCatalogPath: () => catalogPath });
+  const service = new KnowledgeDirectoryService({
+    getKnowledgeCatalogPath: () => catalogPath,
+    getKnowledgeDirectory: () => directory,
+  });
 
   writeFileSync(catalogPath, renderCatalogIndex([]), 'utf8');
   const empty = service.renderLoadedContext(await service.loadForAgent());
   assert.match(empty, /资料目录/);
+  assert.ok(empty.includes(`<root_path>${directory}</root_path>`));
   assert.doesNotMatch(empty, /目录为空/);
 
   writeFileSync(catalogPath, '## 资料目录\n\n- id: document-id\n', 'utf8');
   const loaded = service.renderLoadedContext(await service.loadForAgent());
   assert.match(loaded, /id: document-id/);
+  assert.ok(loaded.includes(`<root_path>${directory}</root_path>`));
+  assert.match(loaded, /相对 root_path/);
   assert.doesNotMatch(loaded, /目录为空/);
 
   writeFileSync(catalogPath, '   \n', 'utf8');

@@ -57,6 +57,7 @@ last_verified: 2026-11-12
 - 同一份资料的历史版本需显式传 `documentId`，`versionNo` 自增。
 - `document_chunks` / `chunk_search_terms` / `chunk_embeddings` 不再写入；`chunkCount` 字段保留在返回结构中并恒为 `0`，界面不再展示“N 段”。
 - 源文件复制到 `<configDir>/knowledge/documents/<documentId>/v<versionNo>/<originalName>`，`workspaceRelativePath` 相对知识库根保存；`<configDir>` 为 `TEACHFORGE_CONFIG_DIR`，未设置时默认 `~/.tech-forge`（SQLite 主库位于数据根的 `db/` 子目录）。
+- 注入模型的目录上下文由 `KnowledgeDirectoryService.renderLoadedContext()` 生成：`index.md` 正文前加 `<root_path><知识库根绝对路径></root_path>`，并声明条目里的 `path` 相对 `root_path`。会话工作目录（`<configDir>/sessions/<id>/workspace`）不是条目路径的基准，缺这一行时模型只能猜绝对路径（曾因此在真实会话里连续两次 `read`/`grep` ENOENT）；空目录同样输出 `root_path`。
 - 转换后的正文另存为同目录的 `<baseName>.md`：仅对需要转换的格式（PDF/DOCX）写入；`.md`/`.markdown`/`.txt` 本身就是可读文本，不写第二份。内容用 `joinParsedPages`，与摘要输入同一拼装规则；写入失败只产生 `CONVERTED_MARKDOWN_FAILED` 警告，不影响目录生成。
 - 界面文案不出现 `向量`、`索引`、`分片`、`embedding`、`OCR` 等内部术语：状态显示为“可以搜索 / 正在读取 / 正在生成摘要 / 摘要未生成 / 导入失败”；行内只显示版本号、字节数与导入时间。
 - 列表为空时显示共享空状态（`EmptyState`，图标 `Books`），说明支持的格式与用途，并把下一步指向页头「导入资料」；不在空状态里再放一个重复的导入按钮。
