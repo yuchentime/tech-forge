@@ -448,6 +448,27 @@ body {
   text-underline-offset: 0.15em;
 }
 
+/*
+ * Classroom summary card: the history page reads at body size, so headings drop to 0.95rem instead
+ * of the chat surface's 1.35rem `h2`. The flex `gap` handles paragraph rhythm, and the extra
+ * `margin-top` separates a heading from the paragraph above it while it stays close to its own body.
+ */
+.tf-classroom-summary h1,
+.tf-classroom-summary h2,
+.tf-classroom-summary h3,
+.tf-classroom-summary h4,
+.tf-classroom-summary h5,
+.tf-classroom-summary h6 {
+  margin: 0.45rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.tf-classroom-summary > :first-child {
+  margin-top: 0;
+}
+
 /* KaTeX display math is block-level and can be wider than the panel: scroll it instead of clipping. */
 .agent-markdown .katex-display {
   overflow-x: auto;

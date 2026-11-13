@@ -11,6 +11,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { DeleteLessonDialog } from './DeleteLessonDialog';
 import { clearClassroomDraft } from './classroom-drafts';
 import { PageHeader } from '../../components/PageHeader';
+import { MarkdownContent } from '../agent/MarkdownContent';
 import {
   deleteLesson,
   endLesson,
@@ -431,23 +432,25 @@ function LessonDetailView({
 
           {detail.status === 'ready' && (
             <>
-              <section
-                aria-label="课堂总结"
-                className="rounded-2xl border border-ink-200 bg-white p-5"
-              >
-                {isGenerating ? (
-                  <p className="py-6 text-center text-sm text-ink-500">
-                    正在整理课堂记录…
-                  </p>
-                ) : detail.summary?.summary ? (
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-ink-800">
-                    {detail.summary.summary}
-                  </pre>
-                ) : (
-                  <p className="py-6 text-center text-sm text-ink-500">
-                    {detail.summary?.error ?? SUMMARY_LABEL[detail.summary?.summaryStatus ?? 'none']}
-                  </p>
-                )}
+              <section aria-label="课堂总结">
+                <h2 className="mb-3 text-sm font-semibold text-ink-700">课堂总结</h2>
+                <div className="rounded-2xl border border-ink-200 bg-white p-5">
+                  {isGenerating ? (
+                    <p className="py-6 text-center text-sm text-ink-500">
+                      正在整理课堂记录…
+                    </p>
+                  ) : detail.summary?.summary ? (
+                    <MarkdownContent
+                      className="tf-classroom-summary text-sm leading-7 text-ink-800"
+                      content={detail.summary.summary}
+                    />
+                  ) : (
+                    <p className="py-6 text-center text-sm text-ink-500">
+                      {detail.summary?.error ??
+                        SUMMARY_LABEL[detail.summary?.summaryStatus ?? 'none']}
+                    </p>
+                  )}
+                </div>
               </section>
 
               <section aria-label="课堂记录">
