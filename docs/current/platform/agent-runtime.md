@@ -17,6 +17,7 @@ related:
   - docs/changes/2026-11-10-deep-research-command/design.md
   - docs/changes/2026-11-11-deepseek-web-tools/design.md
   - docs/changes/2026-11-13-classroom-simulation/design.md
+  - docs/decisions/2026-11-13-deepseek-output-budget.md
   - docs/source/agent-runtime-open-questions.md
 last_verified: 2026-11-13
 ---
@@ -53,7 +54,7 @@ Pi 自动压缩由 SDK 触发，`CommonAgent` 在 `generate()`、`LearnAgent` �
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
-常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`CommonAgent` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。`chat.tool.terminated` 在工具失败时升为 `error` 并附 `failureReason`：`output_limit_truncated`（响应触达输出上限，参数被截断）、`invalid_arguments`、`aborted`、`blocked`、`tool_not_found`、`file_policy_denied`、`tool_error`。前两类由 Pi 在工具代码执行前拒绝（`aborted`、`blocked` 同理），不会产生 `llm.file_tool.operation.failed`，失败原因只能从结果文案分类；文案本身（包含模型原始参数）不进入日志。`chat.message.terminated` 在消息落库为 `failed` 时同为 `error` 并附 `stopReason`（`length` 表示输出上限截断）。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`CommonAgent` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
 ## 请求与持久化时序
 
@@ -149,6 +150,7 @@ Session 初始化时，`CommonAgent` 从 `SettingsService` 单独读取工作空
 上下文压缩由 Pi SDK 自动执行，应用层不调用 `session.compact()`，也不自行裁剪或摘要历史：
 
 - 触发条件为 `contextTokens > contextWindow - reserveTokens`。SDK 在发送新 user prompt 前、工具结果追加后准备下一轮 assistant 时、运行结束后各检查一次；provider 报上下文溢出或出现可恢复的 `length` 结束时，会压缩并重试一次。
+- 模型描述符按 DeepSeek 文档声明 `contextWindow = 1_000_000`、`maxTokens = 65_536`（思考模式未设置 `max_tokens` 时的厂商默认值）。Pi 的 `buildBaseOptions()` 总会把 `options.maxTokens ?? model.maxTokens` 写进请求的 `max_tokens`，所以「不设置」在 SDK 中只会落到 16,384；描述符值就是实际上限。单次请求的输出预算还会被 `clampMaxTokensToContext()` 收缩为 `contextWindow - 估算输入 - 4096`。取舍见 [ADR](../../decisions/2026-11-13-deepseek-output-budget.md)。
 - 默认 `reserveTokens = 16384`、`keepRecentTokens = 20000`，可由 Pi 全局设置 `<agentDir>/settings.json` 或项目设置 `<cwd>/.pi/settings.json` 覆盖，并支持按 `provider/modelId` 设置 `modelOverrides`。
 - 本应用通过 `SettingsManager.applyOverrides()` 在内存中强制 `compaction.enabled = true`，不写用户全局 Pi 设置文件；即使 `<agentDir>/settings.json` 里设为 `false`，该 session 仍会压缩且原文件保持不变。压缩产生的 `CompactionEntry` 下次随快照恢复；SQLite `messages` 仍保留完整历史，不受压缩影响。
 - `billion-context-pi` 未被 `DefaultResourceLoader` 装载，只有遗留类型声明，不参与压缩。

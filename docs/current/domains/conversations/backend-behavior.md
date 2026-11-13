@@ -43,7 +43,7 @@ Pi 的 `getEntries()` 是模型侧会话状态（含 compaction、model/thinking
 | 首个 SSE 元数据 | `conversation`：仅包含 backend 确认的 `conversationId` |
 | 请求 ID 未找到 | 后端不隐式创建新对话；流发送通用 Agent error SSE 事件，请求不写入消息行 |
 | provider / 存储错误 | 通过安全错误 SSE 处理；provider 失败会结束 assistantTurn 为 failed；Pi 事件写入失败会触发 Pi abort 并作为流错误暴露 |
-| 输出上限截断 | 最后一条 assistant 的 `stopReason=length` 时，消息行按 failed 落库、assistantTurn 结束为 failed，SSE 错误明确提示“回答被截断”；reasoning token 与正文共用输出预算，不能把只有 thinking 的 completions 当作 provider 未返回文本 |
+| 输出上限截断 | 最后一条 assistant 的 `stopReason=length` 时，消息行按 failed 落库、assistantTurn 结束为 failed，SSE 错误明确提示“回答被截断”；reasoning token 与正文共用输出预算，不能把只有 thinking 的 completions 当作 provider 未返回文本。截断发生在运行中、Pi 拒绝该次工具调用后继续下一轮（模型重发）时，本轮以最终消息结算且不产生 SSE 错误：被拒工具的 `chat.tool.terminated`（`failureReason=output_limit_truncated`）与被截断消息的 `chat.message.terminated`（`stopReason=length`）是唯一可追踪记录，界面只显示该工具失败 |
 | Pi 内部取消 | 没有客户端断开信号、但最后一条 assistant 为 `aborted` 时，消息行与 assistantTurn 都结束为 cancelled；`getLastAssistantText()` 的空文本不再触发错误 |
 | 客户端断开 | 取消 Pi 请求并将 assistantTurn 设为 cancelled；中断工具行保留为 interrupted/failed 状态 |
 

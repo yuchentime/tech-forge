@@ -8,6 +8,9 @@ const {
 } = require('../dist/chat/chat.service.js');
 const { ChatPromptDto } = require('../dist/chat/dto/chat-prompt.dto.js');
 const { encodeChatSseEvent } = require('../dist/chat/chat-sse.js');
+const {
+  getToolFailureReason,
+} = require('../dist/conversations/conversation-transcript.js');
 const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
 const {
   CommonAgent,
@@ -875,6 +878,138 @@ test('truncated assistant rows are stored as failed', () => {
   assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'aborted' }), 'cancelled');
   assert.equal(getPiMessageStatus({ role: 'assistant', stopReason: 'stop' }), 'completed');
   assert.equal(getPiMessageStatus({ role: 'toolResult' }), 'completed');
+});
+
+test('a rejected tool call logs an error naming why it never ran', async () => {
+  const logged = [];
+  const rejectedResult = {
+    content: [
+      {
+        type: 'text',
+        text: 'Tool call "write" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.',
+      },
+    ],
+    details: {},
+  };
+  const llm = {
+    stream(_prompt, options) {
+      return (async function* () {
+        const steps = [
+          {
+            type: 'tool_execution_start',
+            toolCallId: 'tool-1',
+            toolName: 'write',
+            args: {},
+          },
+          {
+            type: 'tool_execution_end',
+            toolCallId: 'tool-1',
+            toolName: 'write',
+            isError: true,
+            result: rejectedResult,
+          },
+          {
+            type: 'message_end',
+            message: thinkingOnlyMessage('length'),
+          },
+        ];
+        for (const step of steps) {
+          await options.persistConversationEvent(step);
+          yield step;
+        }
+      })();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    startPiMessage: async () => 'message-1',
+    updatePiMessage: async () => undefined,
+    startToolExecution: async () => 'tool-row-1',
+    updateToolExecution: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({ text: '', refsJson: null, rehearsalIds: [] }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+    memoryStub,
+  );
+  service.logger = {
+    log: (message) => logged.push({ level: 'log', message }),
+    warn: (message) => logged.push({ level: 'warn', message }),
+    error: (message) => logged.push({ level: 'error', message }),
+    debug: () => undefined,
+  };
+
+  await collect(
+    service.stream(
+      '画一张图',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  const entries = logged.map((entry) => ({
+    level: entry.level,
+    event: JSON.parse(entry.message),
+  }));
+  const toolFailure = entries.find((entry) => entry.event.event === 'chat.tool.terminated');
+  assert.equal(toolFailure.level, 'error');
+  assert.equal(toolFailure.event.status, 'failed');
+  assert.equal(toolFailure.event.failureReason, 'output_limit_truncated');
+  // The rejection text repeats truncated arguments, so only the classification may be logged.
+  assert.equal(JSON.stringify(toolFailure.event).includes('output token limit'), false);
+
+  const messageFailure = entries.find(
+    (entry) => entry.event.event === 'chat.message.terminated',
+  );
+  assert.equal(messageFailure.level, 'error');
+  assert.equal(messageFailure.event.status, 'failed');
+  assert.equal(messageFailure.event.stopReason, 'length');
+});
+
+test('tool failure reasons stay distinguishable without reading file payloads', () => {
+  assert.equal(
+    getToolFailureReason({
+      content: [
+        {
+          type: 'text',
+          text: 'Validation failed for tool "write":\n  - path: Required\n\nReceived arguments:\n{"content":"private"}',
+        },
+      ],
+    }),
+    'invalid_arguments',
+  );
+  assert.equal(getToolFailureReason({ content: [{ type: 'text', text: 'Operation aborted' }] }), 'aborted');
+  assert.equal(
+    getToolFailureReason({ content: [{ type: 'text', text: 'Tool knowledge_search not found' }] }),
+    'tool_not_found',
+  );
+  assert.equal(
+    getToolFailureReason({
+      content: [{ type: 'text', text: 'Agent file access was denied by the local file policy.' }],
+    }),
+    'file_policy_denied',
+  );
+  assert.equal(
+    getToolFailureReason({ content: [{ type: 'text', text: 'EACCES: permission denied' }] }),
+    'tool_error',
+  );
+  assert.equal(getToolFailureReason(undefined), 'tool_error');
 });
 
 /** Builds the thinking-only assistant message that reasoning models emit on abort or truncation. */

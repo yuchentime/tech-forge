@@ -10,7 +10,8 @@ related:
   - docs/decisions/2026-11-08-local-knowledge-retrieval.md
   - docs/decisions/2026-11-11-long-term-memory.md
   - docs/decisions/2026-11-11-memory-injection-boundary.md
-last_verified: 2026-11-11
+  - docs/decisions/2026-11-13-deepseek-output-budget.md
+last_verified: 2026-11-13
 ---
 
 # 已接受决策
@@ -22,5 +23,6 @@ last_verified: 2026-11-11
 | 知识库检索平台 | 全本地实现（FTS5 + 本地 embedding + RRF），不引入托管检索服务或 LLM wiki | [ADR](2026-11-08-local-knowledge-retrieval.md) |
 | 长期记忆引擎 | `@db0-ai/core` + sql.js SQLite，注入本地 bge；不装 `@db0-ai/pi`；user 作用域、独占锁与每日备份 | [ADR](2026-11-11-long-term-memory.md) |
 | 记忆注入边界 | 保留每轮注入 + 快照剥离；阈值 0.72、2 条、150 字；捕获排在检索之后；注入头单一来源 | [ADR](2026-11-11-memory-injection-boundary.md) |
+| DeepSeek 模型上限 | 描述符按官方文档取 `contextWindow = 1M`、`maxTokens = 65_536`；Pi 总会发送 `max_tokens`，缺省值 16,384 不可接受 | [ADR](2026-11-13-deepseek-output-budget.md) |
 
 其他产品和数据模型取舍仍在[设计输入索引](../source/index.md)中，确认后再提升为 ADR。

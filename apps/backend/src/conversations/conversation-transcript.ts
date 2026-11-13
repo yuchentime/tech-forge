@@ -42,6 +42,59 @@ export function getToolDisplayFields(
   };
 }
 
+/** Names why one Pi tool execution ended as an error, without keeping its text. */
+type ToolFailureReason =
+  | 'output_limit_truncated'
+  | 'invalid_arguments'
+  | 'aborted'
+  | 'blocked'
+  | 'tool_not_found'
+  | 'file_policy_denied'
+  | 'tool_error';
+
+/**
+ * Classifies a failed Pi tool result into one stable reason.
+ *
+ * Pi rejects some calls before any tool code runs: a response that hit the output-token limit is
+ * never executed, and malformed arguments fail validation. Those failures produce no filesystem
+ * diagnostic, so their only signal is the result text; it is matched against the SDK's fixed
+ * rejection messages and never logged, because a validation message repeats the raw arguments.
+ * File-operation failures keep their own `llm.file_tool.operation.failed` details.
+ */
+export function getToolFailureReason(result: unknown): ToolFailureReason {
+  const text = getToolResultHead(result);
+  if (
+    text.startsWith('Tool call "') &&
+    text.includes('the response hit the output token limit')
+  ) {
+    return 'output_limit_truncated';
+  }
+  if (
+    text.startsWith('Validation failed for tool "') ||
+    text.startsWith('Invalid arguments for tool "')
+  ) {
+    return 'invalid_arguments';
+  }
+  if (text === 'Operation aborted') return 'aborted';
+  if (text.startsWith('Tool execution was blocked')) return 'blocked';
+  if (text.startsWith('Agent file access was denied by the local file policy')) {
+    return 'file_policy_denied';
+  }
+  if (/^Tool .+ not found$/u.test(text)) return 'tool_not_found';
+  return 'tool_error';
+}
+
+/** Reads only the leading text block of a tool result, capped so large payloads stay unscanned. */
+function getToolResultHead(result: unknown, maxChars = 240): string {
+  if (!isRecord(result) || !Array.isArray(result.content)) return '';
+  const block = result.content.find(
+    (item) => isRecord(item) && item.type === 'text' && typeof item.text === 'string',
+  );
+  return isRecord(block) && typeof block.text === 'string'
+    ? block.text.slice(0, maxChars)
+    : '';
+}
+
 /** Creates the row marker that groups one request's assistant lifecycle. */
 export function createAssistantTurnMarker(): string {
   return JSON.stringify({ format: 'teachforge-assistant-turn-v1' });

@@ -159,7 +159,7 @@ stack: LlmService.readAssistantText (llm.service.ts:1180)   # 修复前 dist 构
 
 1. `length` 映射为 `failed` 而不是新增 `truncated`：接受当前契约限制，还是允许前端契约一起扩展？
 2. `length` 即使已有部分文本也判为失败：是否应改成“保留文本 + 截断提示但不失败”？
-3. **根因未修**：`llm-adapter.ts` 仍是 `reasoning: false`、`maxTokens: 8192`。同一提示词仍可能耗尽预算；本次只把误报变成明确提示。是否本变更内调整 output 预算/关闭 thinking？
+3. **根因未修**：`llm-adapter.ts` 仍是 `reasoning: false`、`maxTokens: 8192`。同一提示词仍可能耗尽预算；本次只把误报变成明确提示。是否本变更内调整 output 预算/关闭 thinking？（输出预算已由 [ADR 2026-11-13](../../decisions/2026-11-13-deepseek-output-budget.md) 处理：`maxTokens = 65_536`、`contextWindow = 1M`；`reasoning: false` 仍保留待评估）
 4. `generate()` 现在对 `length` 抛 truncation；排练侧最终落到通用 `BadGatewayException`。这是否符合排练的错误映射预期？
 5. 实时卡片保留策略是“每线程最后一轮”。`lastTurnByThread` 不随历史加载删除；其规模受线程数约束，且 `snapshot` 本来就按轮次常驻。是否接受该内存取舍？
 6. `AgentChatPage` 用 `conversationId` 作为本地线程 id 清除实时卡片，依赖 `switchToThread(conversationId)` 的既有约定。请确认 draft → 已保存会话的切换路径。

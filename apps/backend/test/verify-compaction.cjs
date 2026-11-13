@@ -38,6 +38,7 @@ function startMockProvider() {
         stream: payload.stream === true,
         messageCount: messages.length,
         firstRole: messages[0]?.role,
+        maxTokens: payload.max_tokens,
         firstText:
           typeof messages[0]?.content === 'string'
             ? messages[0].content.slice(0, 200)
@@ -126,14 +127,22 @@ async function main() {
   const sessionWorkspace = path.join(root, 'sessions', conversationId, 'workspace');
   await mkdir(agentDir, { recursive: true });
   await mkdir(workspaceRoot, { recursive: true });
-  // Threshold = 128000 - 126000 = 2000 estimated tokens. The restored history is far above it.
+  const {
+    createOpenAiCompatibleModel,
+  } = require('../dist/llm/adapters/llm-adapter.js');
+  // Threshold is pinned at 2000 estimated tokens so a small restored history crosses it. The
+  // reserve is derived from the registered context window, so the check still passes when the
+  // documented window changes.
+  const modelDescriptor = createOpenAiCompatibleModel('mock-model', 'mock-model');
+  const expectedThresholdTokens = 2000;
+  const expectedReserveTokens = modelDescriptor.contextWindow - expectedThresholdTokens;
   // The global file disables compaction on purpose: the app must force it back on in memory only.
   await writeFile(
     path.join(agentDir, 'settings.json'),
     JSON.stringify({
       compaction: {
         enabled: false,
-        reserveTokens: 126000,
+        reserveTokens: expectedReserveTokens,
         keepRecentTokens: 500,
       },
     }),
@@ -154,9 +163,6 @@ async function main() {
   try {
     const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
     const { CommonAgent } = require('../dist/llm/agents/CommonAgent.js');
-    const {
-      createOpenAiCompatibleModel,
-    } = require('../dist/llm/adapters/llm-adapter.js');
 
     // The mock endpoint stands in for the fixed production base URL; the service still sees the
     // DeepSeek provider contract, only the transport target changes.
@@ -167,7 +173,7 @@ async function main() {
           baseUrl: provider.baseUrl,
           api: 'openai-completions',
           apiKey: 'test-key',
-          models: [createOpenAiCompatibleModel('mock-model', 'mock-model')],
+          models: [modelDescriptor],
         });
       },
     };
@@ -247,8 +253,8 @@ async function main() {
       (line) => line.event === 'llm.session.create.completed',
     );
     assert.equal(createCompleted?.compactionEnabled, true);
-    assert.equal(createCompleted?.compactionReserveTokens, 126000);
-    assert.equal(createCompleted?.compactionThresholdTokens, 2000);
+    assert.equal(createCompleted?.compactionReserveTokens, expectedReserveTokens);
+    assert.equal(createCompleted?.compactionThresholdTokens, expectedThresholdTokens);
     assert.ok(
       logEvents.some((line) => line.event === 'llm.compaction.started'),
       'The compaction start log line is missing',
@@ -262,6 +268,11 @@ async function main() {
       provider.requests.length >= 2,
       `Expected a summary request plus the chat request, saw ${provider.requests.length}`,
     );
+    // Pi always sends `max_tokens` derived from the model descriptor, so the documented DeepSeek
+    // output ceiling must reach both the summary and the chat request.
+    for (const request of provider.requests) {
+      assert.equal(request.maxTokens, modelDescriptor.maxTokens);
+    }
 
     // Compaction is enabled through an in-memory override; the app must not rewrite the user's
     // global Pi settings file (the previous setCompactionEnabled(true) call did).

@@ -5,7 +5,10 @@ import {
   ConversationsService,
   type ConversationAttachmentRef,
 } from '../conversations/conversations.service';
-import { getToolDisplayFields } from '../conversations/conversation-transcript';
+import {
+  getToolDisplayFields,
+  getToolFailureReason,
+} from '../conversations/conversation-transcript';
 import {
   AttachmentsService,
   type AttachmentFailure,
@@ -625,15 +628,19 @@ export class ChatService {
             status,
             state.logContext,
           );
+          const stopReason = 'stopReason' in event.message
+            ? event.message.stopReason
+            : undefined;
           writeStructuredEvent(
             this.logger,
-            status === 'completed' ? 'log' : 'warn',
+            status === 'completed' ? 'log' : status === 'failed' ? 'error' : 'warn',
             'chat.message.terminated',
             {
               ...state.logContext,
               messageId,
               role: event.message.role,
               status,
+              ...(stopReason ? { stopReason } : {}),
               updateCount,
               elapsedMs,
               ...getPiMessageMetrics(event.message),
@@ -750,16 +757,20 @@ export class ChatService {
           },
           state.logContext,
         );
+        const failed = event.isError;
         writeStructuredEvent(
           this.logger,
-          event.isError ? 'warn' : 'log',
+          failed ? 'error' : 'log',
           'chat.tool.terminated',
           {
             ...state.logContext,
             messageId,
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            status: event.isError ? 'failed' : 'completed',
+            status: failed ? 'failed' : 'completed',
+            // Pi rejects truncated or malformed calls before the tool runs, so the rejection
+            // reason is the only diagnostic for those failures; file operations log their own.
+            ...(failed ? { failureReason: getToolFailureReason(event.result) } : {}),
             durationMs: event.durationMs,
             updateCount: progress?.updateCount ?? 0,
             hasResult: event.result !== undefined,
