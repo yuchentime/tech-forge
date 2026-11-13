@@ -422,7 +422,7 @@ export class ChatService {
         });
       }
 
-      // 桌面端的流式气泡使用 assistant-ui 自己生成的 ID；重点关注按持久化消息定位，
+      // 桌面端的流式气泡使用 assistant-ui 自己生成的 ID；学习笔记按持久化消息定位，
       // 因此本轮写入的 assistant 行要在流结束前交给 UI。客户端断开时事件无法送达，
       // 但 Pi 内部中断的轮次仍会广播，让失败回复也能被关注。
       if (persistenceState.assistantMessageIds.length > 0) {

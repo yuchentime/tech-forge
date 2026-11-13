@@ -15,7 +15,7 @@ last_verified: 2026-11-13
 
 ## Scope
 
-- 覆盖本地个人工作台中 Agent 会话摘要列表、选中会话历史读取、会话重命名与删除，以及“重点关注”摘录的保存、列表和删除。
+- 覆盖本地个人工作台中 Agent 会话摘要列表、选中会话历史读取、会话重命名与删除，以及“学习笔记”摘录的保存、列表和删除。
 - 不包含摘要列表分页、工具活动或 Pi 原始消息格式；可见消息历史一次完整读取。
 - 所有端点通过现有 Electron JSON bridge 调用，并受本地随机 token 和 loopback origin 检查保护；当前产品为单人 Personal Agent，没有用户或租户参数。
 - 当前没有单独的跨领域 API conventions 页面；响应遵循本项目现有 JSON bridge 的 `{ status, data }` 包装。
@@ -25,7 +25,7 @@ last_verified: 2026-11-13
 - JSON 字段使用 camelCase。
 - 时间以 ISO 8601 字符串返回。
 - Conversation 与 Message ID 使用 UUIDv4。
-- 接口读写 SQLite；摘要列表与消息历史都完整返回，不再分页。消息历史完整加载是为了让“重点关注”能定位到较早的消息。
+- 接口读写 SQLite；摘要列表与消息历史都完整返回，不再分页。消息历史完整加载是为了让“学习笔记”能定位到较早的消息。
 
 ## Conversation Query API
 
@@ -108,7 +108,7 @@ HTTP 200 的响应体为 Conversation 摘要数组；无记录时为空数组。
 
 - **方法**：`GET`
 - **路径**：`/api/conversations/:conversationId/messages`
-- **功能职责**：用户选中侧栏会话时，一次加载该会话的全部可见文本，供阅读和“重点关注”定位旧消息。
+- **功能职责**：用户选中侧栏会话时，一次加载该会话的全部可见文本，供阅读和“学习笔记”定位旧消息。
 - **鉴权/归属**：经 Electron 本地认证桥接调用；只读取给定 ID 的本地 Conversation。
 
 #### Request Summary
@@ -213,7 +213,7 @@ HTTP 200 的响应体为完整历史对象。`messages` 按 `sequenceNo ASC` 排
 - `toolExecution` 不作为顶层消息返回；仅在 user 行下投影 `toolActivities`。不返回原始工具参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking、原始 `contentJson` 或非文本 Pi blocks。
 - `attachments` 只投影 `{attachmentId, name}`。附件内容保存在 `~/.tech-forge/sessions/<conversationId>/attachments/<attachmentId>/`：PDF/DOCX 为同名 `.md` 解析结果，Markdown/TXT 与图片为原文件；图片只作为本轮视觉输入发送，正文与字节从不写入消息行，因此不出现在历史接口；`characters` / `injectedCharacters` 只供服务端 prompt 使用。
 - 一次返回全部可见消息；Renderer 打开会话后不再显示“查看更早的消息”。加载时按持久 user message ID 恢复活动摘要；整轮耗时未持久化，历史 UI 不显示该计时。
-- “重点关注”进入会话时，Renderer 按保存的 `messageId` 在已加载消息中查找目标并滚动到视口中央，短暂闪烁后恢复；目标不存在时提示消息可能已删除。
+- “学习笔记”进入会话时，Renderer 按保存的 `messageId` 在已加载消息中查找目标并滚动到视口中央，短暂闪烁后恢复；目标不存在时提示消息可能已删除。
 - 若 Renderer 读取历史时收到 `404`，会刷新摘要列表；若该 ID 已不在列表中，则清除过期活动 ID并显示会话已不存在。其他失败保留当前线程并提供重试。
 
 ### Rename one conversation
@@ -337,7 +337,7 @@ HTTP 200 返回被删除的会话 ID 与本地文件清理结果。
 
 ## Focus Item API
 
-“重点关注”保存用户在**助手回复**中选中的一段文本。`messageId` 是进入会话时的定位锚点；`messageIndex` 是该消息在可见消息中的 1-based 序号，仅用于列表展示。
+“学习笔记”保存用户在**助手回复**中选中的一段文本。`messageId` 是进入会话时的定位锚点；`messageIndex` 是该消息在可见消息中的 1-based 序号，仅用于列表展示。
 
 ### List focus items
 
@@ -404,4 +404,4 @@ HTTP 200 返回 `{ "items": FocusItem[] }`。
 - 会话标题在读取时派生，不存快照；重命名后列表立即显示新名称。
 - `note` 属于摘录自身，不写回原消息；一条摘录可以有多行备注。清空备注只把 `note` 置为 `null`，摘录仍保留在列表中。
 - 删除会话时在同一事务内删除其 `focus_items`；摘录没有独立于会话的回收站。
-- 桌面端只在单条助手消息内显示“添加到重点关注”浮动按钮；跨消息选区、流式生成中的选区、超过 1000 码点的选区不触发保存。点击浮动按钮不会立即写库，而是先打开备注弹窗：备注可选，输入框初始单行、按 Enter 换行并随内容增高到上限后内部滚动；点「保存备注」或按 Ctrl/⌘+Enter 才提交（空备注也提交，保存为无备注），「取消」、Esc 或点击遮罩放弃且不写库。保存失败时弹窗保持打开、就地显示错误并保留已输入的备注；成功后提示「已添加到重点关注」。
+- 桌面端只在单条助手消息内显示“添加到学习笔记”浮动按钮；跨消息选区、流式生成中的选区、超过 1000 码点的选区不触发保存。点击浮动按钮不会立即写库，而是先打开备注弹窗：备注可选，输入框初始单行、按 Enter 换行并随内容增高到上限后内部滚动；点「保存备注」或按 Ctrl/⌘+Enter 才提交（空备注也提交，保存为无备注），「取消」、Esc 或点击遮罩放弃且不写库。保存失败时弹窗保持打开、就地显示错误并保留已输入的备注；成功后提示「已添加到学习笔记」。

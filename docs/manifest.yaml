@@ -816,3 +816,21 @@ routes:
       - docs/current/domains/documents/index.md
       - docs/current/domains/memory/index.md
     history_on_demand: []
+  marketing-website:
+    description: "Build or revise the public marketing site: scenario-driven selling points, single-page information architecture, the download section (version, size, SHA256, system requirements, unsigned-installer and manual-update disclosures), the fixed installer URL, and the claim boundary that forbids advertising unimplemented capabilities"
+    token_budget: 14000
+    code_globs:
+      - "apps/website/**"
+      - "scripts/release-*.mjs"
+      - "electron-builder.yml"
+    required:
+      - docs/source/官网规划.md
+      - docs/source/产品介绍.md
+      - docs/current/platform/packaging.md
+    optional:
+      - docs/current/platform/tech-stack.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/current/platform/classroom-mode.md
+      - docs/current/domains/knowledge-profile/index.md
+      - docs/source/学习趣味性设计讨论.md
+    history_on_demand: []

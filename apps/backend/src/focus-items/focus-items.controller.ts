@@ -18,7 +18,7 @@ import {
 import { FocusItemsService } from './focus-items.service';
 
 /**
- * Exposes the saved excerpts behind the 重点关注 view.
+ * Exposes the saved excerpts behind the 学习笔记 view.
  *
  * The global local-token hook in `main.ts` protects every route. The controller only validates and
  * delegates; ownership checks live in the service.

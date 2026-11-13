@@ -1,6 +1,6 @@
 import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
-/** One saved excerpt as the 重点关注 page renders it. */
+/** One saved excerpt as the 学习笔记 page renders it. */
 export interface FocusItemDto {
   id: string;
   conversationId: string;

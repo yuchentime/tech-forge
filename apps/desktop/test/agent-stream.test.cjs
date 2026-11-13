@@ -108,7 +108,7 @@ test('bridge event validator accepts only exact, safe Pi event projections', () 
     }),
     true,
   );
-  // 流式气泡的 assistant-ui ID 不是 UUID，混进来会让重点关注存下无法定位的锚点。
+  // 流式气泡的 assistant-ui ID 不是 UUID，混进来会让学习笔记存下无法定位的锚点。
   assert.equal(
     isChatStreamEvent({
       type: 'assistant_messages',
@@ -359,7 +359,7 @@ test('Assistant adapter anchors the streamed reply to the persisted assistant ro
     })) {
       // The rendered text is irrelevant here; only the anchor mapping is under test.
     }
-    // 一组行对应一轮回复，重点关注跳转到最后一行的最终回答。
+    // 一组行对应一轮回复，学习笔记跳转到最后一行的最终回答。
     assert.equal(
       assistantMessageAnchorStore.resolve('live-reply-1'),
       persistedIds.at(-1),

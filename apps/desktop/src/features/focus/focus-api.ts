@@ -2,7 +2,7 @@ import { readBackendErrorMessage } from '../../api/backend-error';
 import { isRecord } from '../../api/json';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
-/** One saved assistant-message excerpt as the 重点关注 page renders it. */
+/** One saved assistant-message excerpt as the 学习笔记 page renders it. */
 export interface FocusItemView {
   id: string;
   conversationId: string;
@@ -33,7 +33,7 @@ export async function listFocusItems(): Promise<FocusItemView[]> {
     !response.data.items.every(isFocusItemView)
   ) {
     throw new FocusApiError(
-      readBackendErrorMessage(response.data, '读取重点关注失败，请重试。'),
+      readBackendErrorMessage(response.data, '读取学习笔记失败，请重试。'),
     );
   }
   return response.data.items;
@@ -51,7 +51,7 @@ export async function createFocusItem(input: {
   const response = await request('/api/focus-items', 'POST', input);
   if (response.status !== 201 || !isFocusItemView(response.data)) {
     throw new FocusApiError(
-      readBackendErrorMessage(response.data, '添加重点关注失败，请重试。'),
+      readBackendErrorMessage(response.data, '添加学习笔记失败，请重试。'),
     );
   }
   return response.data;
@@ -83,7 +83,7 @@ export async function deleteFocusItem(id: string): Promise<void> {
   );
   if (response.status !== 200) {
     throw new FocusApiError(
-      readBackendErrorMessage(response.data, '删除重点关注失败，请重试。'),
+      readBackendErrorMessage(response.data, '删除学习笔记失败，请重试。'),
     );
   }
 }
@@ -95,7 +95,7 @@ async function request(
   body?: unknown,
 ) {
   if (!hasDesktopBridge()) {
-    throw new FocusApiError('请通过 TeachForge 桌面应用使用重点关注。');
+    throw new FocusApiError('请通过 TeachForge 桌面应用使用学习笔记。');
   }
   return window.teachforge.request<unknown>(
     body === undefined ? { method, path } : { method, path, body },

@@ -28,7 +28,7 @@ export type ChatStreamEvent =
       /**
        * 本轮写入数据库的助手消息 ID，按产生顺序排列。
        *
-       * UI 的流式气泡由 assistant-ui 自己生成本地 ID，重点关注与历史定位需要持久化 ID，
+       * UI 的流式气泡由 assistant-ui 自己生成本地 ID，学习笔记与历史定位需要持久化 ID，
        * 因此在流结束前把这批行公布出来。
        */
       type: 'assistant_messages';

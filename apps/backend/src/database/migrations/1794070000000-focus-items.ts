@@ -1,7 +1,7 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * Creates the saved-highlight table behind 重点关注.
+ * Creates the saved-highlight table behind 学习笔记.
  *
  * Rows reference the conversation (for title and cascade cleanup) and the stable message id (for
  * navigation). The quote is stored as plain text; message content itself stays in `messages`.

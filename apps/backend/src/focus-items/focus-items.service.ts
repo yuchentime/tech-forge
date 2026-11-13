@@ -118,7 +118,7 @@ export class FocusItemsService {
     const repository = this.dataSource.getRepository(FocusItemEntity);
     const item = await repository.findOneBy({ id });
     if (!item) {
-      throw new NotFoundException('这条重点关注不存在，可能已被删除。');
+      throw new NotFoundException('这条学习笔记不存在，可能已被删除。');
     }
     item.note = note;
     await repository.save(item);
@@ -131,7 +131,7 @@ export class FocusItemsService {
       .getRepository(FocusItemEntity)
       .delete({ id });
     if (!result.affected) {
-      throw new NotFoundException('这条重点关注不存在，可能已被删除。');
+      throw new NotFoundException('这条学习笔记不存在，可能已被删除。');
     }
     return { id };
   }

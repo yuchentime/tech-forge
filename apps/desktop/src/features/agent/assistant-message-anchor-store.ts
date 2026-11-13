@@ -1,7 +1,7 @@
 /**
  * Maps the reply ids assistant-ui generates to the persisted assistant rows behind them.
  *
- * assistant-ui renders every streamed turn under its own short message id, while 重点关注 and
+ * assistant-ui renders every streamed turn under its own short message id, while 学习笔记 and
  * history navigation address SQLite rows. The backend publishes the rows a turn wrote when the
  * run settles, so the page can translate the id it finds in the DOM before saving an excerpt.
  */

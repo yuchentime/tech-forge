@@ -52,7 +52,7 @@ export function FocusPointsPage({
     } catch (failure) {
       setStatus('error');
       setError(
-        failure instanceof Error ? failure.message : '读取重点关注失败，请重试。',
+        failure instanceof Error ? failure.message : '读取学习笔记失败，请重试。',
       );
     }
   }, []);
@@ -72,7 +72,7 @@ export function FocusPointsPage({
         setEditingNoteId(null);
         setNoteDraft('');
       }
-      showToast('已从重点关注移除');
+      showToast('已从学习笔记移除');
     } catch (failure) {
       showToast(
         failure instanceof Error ? failure.message : '删除失败，请重试。',
@@ -118,13 +118,13 @@ export function FocusPointsPage({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-ink-50/50">
       <PageHeader>
-        <h1 className="text-xl font-semibold tracking-tight text-ink-900">重点关注</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">学习笔记</h1>
       </PageHeader>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-6 md:px-8 md:py-8">
         <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-3 pb-8">
           {status === 'loading' && (
-            <p className="py-16 text-center text-sm text-ink-500">正在加载重点关注…</p>
+            <p className="py-16 text-center text-sm text-ink-500">正在加载学习笔记…</p>
           )}
 
           {status === 'error' && (
@@ -146,10 +146,10 @@ export function FocusPointsPage({
           {status === 'ready' && items.length === 0 && (
             <EmptyState
               className="my-10"
-              description="在对话模式里选中助手回复中的一段文字，点击「添加到重点关注」，它就会出现在这里。"
-              hint="重点关注只保存在本机。"
+              description="在对话模式里选中助手回复中的一段文字，点击「添加到学习笔记」，它就会出现在这里。"
+              hint="学习笔记只保存在本机。"
               icon={BookmarkSimple}
-              title="还没有重点关注"
+              title="还没有学习笔记"
             />
           )}
 
@@ -176,11 +176,11 @@ export function FocusPointsPage({
                         <ArrowRight aria-hidden="true" className="size-4" />
                       </button>
                       <button
-                        aria-label="删除这条重点关注"
+                        aria-label="删除这条学习笔记"
                         className="rounded-lg p-2 text-ink-400 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40"
                         disabled={deletingId === item.id}
                         onClick={() => void removeItem(item)}
-                        title="删除这条重点关注"
+                        title="删除这条学习笔记"
                         type="button"
                       >
                         <Trash aria-hidden="true" className="size-4" />

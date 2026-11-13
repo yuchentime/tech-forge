@@ -38,7 +38,7 @@ last_verified: 2026-11-13
 - 每轮开始时，后端在短 SQLite 事务中保存 `user/completed` 行和 `assistantTurn/pending` 标记；模型调用不在数据库事务内。
 - 若当前 conversation 有 completed 演练，`ChatService` 在 `beginTurn()` 后把最近 3 次的摘要注入 `promptContext`，并把 `{rehearsalIds, characters}` 合并到本轮 user 行的 `contextRefsJson.rehearsals`；演练题/答/报告本身不写入 `messages`。
 - Pi assistant 与 `toolResult` 消息按原生消息结构逐事件持久化；工具执行开始、进度、最终结果和终态另存 `toolExecution` 行。Pi 扩展钩子等待 SQLite 写入后才让事件继续派发或工具开始执行。
-- 每轮 run 结束后、传输层 `done` 之前，后端按产生顺序广播 SSE `assistant_messages`（`{ messageIds }`，仅 assistant 行）。流式气泡的 DOM ID 由 assistant-ui 生成，该事件让 Renderer 把气泡映射到持久化行，重点关注据此保存可定位的锚点；`toolResult`、`toolExecution` 行不参与映射。
+- 每轮 run 结束后、传输层 `done` 之前，后端按产生顺序广播 SSE `assistant_messages`（`{ messageIds }`，仅 assistant 行）。流式气泡的 DOM ID 由 assistant-ui 生成，该事件让 Renderer 把气泡映射到持久化行，学习笔记据此保存可定位的锚点；`toolResult`、`toolExecution` 行不参与映射。
 - 模型上下文优先从 `pi_session_snapshots` 恢复（含 Pi compaction 等条目）；仅当快照落后于 SQLite 最新历史或不存在时，才按 `sequenceNo` 用 UI 历史重建。UI 历史仍完整保存在 SQLite，与模型上下文不是同一集合。
 - Message `sequenceNo` 在 Conversation 内递增；ChatService 在单一 backend 进程内按 conversation 串行化同一对话请求。
 - 应用重启后，后端优先从快照恢复模型上下文；快照缺失或落后时再从 SQLite 重建。Renderer 在 Agent 页面启动后会加载上次选中对话的可见历史。

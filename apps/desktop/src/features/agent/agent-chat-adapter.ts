@@ -118,7 +118,7 @@ export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter 
         }
 
         if (event.type === 'assistant_messages') {
-          // 重点关注与会话定位都按持久化 ID 走；本轮气泡的 assistant-ui ID 只能在这里换回后端行。
+          // 学习笔记与会话定位都按持久化 ID 走；本轮气泡的 assistant-ui ID 只能在这里换回后端行。
           if (unstable_assistantMessageId) {
             assistantMessageAnchorStore.record(
               unstable_assistantMessageId,

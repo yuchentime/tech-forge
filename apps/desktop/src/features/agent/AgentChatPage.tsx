@@ -449,7 +449,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       const startMessage = findAssistantMessageNode(range.startContainer);
       const endMessage = findAssistantMessageNode(range.endContainer);
       const runtimeMessageId = startMessage?.dataset.messageId;
-      // 流式回复的 DOM ID 由 assistant-ui 生成；重点关注需要 SQLite 行 ID，历史消息本身就是持久化 ID。
+      // 流式回复的 DOM ID 由 assistant-ui 生成；学习笔记需要 SQLite 行 ID，历史消息本身就是持久化 ID。
       const messageId = runtimeMessageId
         ? assistantMessageAnchorStore.resolve(runtimeMessageId) ??
           (isUuidV4(runtimeMessageId) ? runtimeMessageId : null)
@@ -568,7 +568,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         ...pendingFocus,
         ...(note ? { note } : {}),
       });
-      showToast('已添加到重点关注');
+      showToast('已添加到学习笔记');
       window.getSelection()?.removeAllRanges();
       setPendingFocus(null);
     },
@@ -804,7 +804,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                         className="size-3.5 shrink-0 text-honey-500"
                         weight="fill"
                       />
-                      添加到重点关注
+                      添加到学习笔记
                     </button>
                   </div>
                 )}

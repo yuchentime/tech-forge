@@ -124,11 +124,11 @@ export function ConversationSidebar({
               : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
           }`}
           onClick={() => onSelectView('focus')}
-          title="重点关注"
+          title="学习笔记"
           type="button"
         >
           <BookmarkSimple aria-hidden="true" className="size-4 shrink-0" />
-          <span className="truncate">重点关注</span>
+          <span className="truncate">学习笔记</span>
         </button>
       </header>
 

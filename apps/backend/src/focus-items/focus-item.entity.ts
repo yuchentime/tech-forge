@@ -11,7 +11,7 @@ import {
 import { ConversationEntity } from '../conversations/conversation.entity';
 
 /**
- * Stores one excerpt of an assistant reply that the user saved to 重点关注.
+ * Stores one excerpt of an assistant reply that the user saved to 学习笔记.
  *
  * The message id is the navigation anchor. `messageSequenceNo` is copied from the message row so the
  * list can stay ordered without joining transcripts, and `messageIndex` is the visible 1-based

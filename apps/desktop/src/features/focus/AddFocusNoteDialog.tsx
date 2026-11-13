@@ -57,7 +57,7 @@ export function AddFocusNoteDialog({
       await onSave(note.trim());
     } catch (saveError) {
       setError(
-        saveError instanceof Error ? saveError.message : '添加重点关注失败，请重试。',
+        saveError instanceof Error ? saveError.message : '添加学习笔记失败，请重试。',
       );
       setIsSaving(false);
     }
@@ -83,7 +83,7 @@ export function AddFocusNoteDialog({
           </span>
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-ink-900" id={`${noteId}-title`}>
-              添加到重点关注
+              添加到学习笔记
             </h2>
             <p className="mt-1 text-xs leading-5 text-ink-500">
               备注可选，留着记录你的理解或复习要点。

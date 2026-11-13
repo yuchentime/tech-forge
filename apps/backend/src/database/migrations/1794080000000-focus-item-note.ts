@@ -1,7 +1,7 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * Adds the optional study note to saved 重点关注 excerpts.
+ * Adds the optional study note to saved 学习笔记 excerpts.
  *
  * Notes live on the focus row, not on the message: one excerpt can have its own note, and clearing
  * the note removes the text without deleting the saved excerpt.

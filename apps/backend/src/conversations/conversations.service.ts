@@ -239,7 +239,7 @@ export class ConversationsService {
   /**
    * Resolves the displayed sidebar title for a small set of conversations.
    *
-   * The 重点关注 list uses this to reflect renames and the first-prompt fallback without storing a
+   * The 学习笔记 list uses this to reflect renames and the first-prompt fallback without storing a
    * stale title snapshot on every focus row.
    */
   async getConversationDisplayTitles(
@@ -312,7 +312,7 @@ export class ConversationsService {
   /**
    * Returns every visible message of one conversation in order.
    *
-   * The local app loads the whole transcript so 重点关注 can scroll to an old message. Tool
+   * The local app loads the whole transcript so 学习笔记 can scroll to an old message. Tool
    * executions stay out of the visible list but are projected onto their user message.
    */
   async getConversationMessages(
@@ -972,7 +972,7 @@ export class ConversationsService {
         await manager.query('DELETE FROM "conversation_documents" WHERE "conversationId" = ?', [
           conversationId,
         ]);
-        // 重点关注引用会话与消息；会话删除后这些摘录没有可定位的目标。
+        // 学习笔记引用会话与消息；会话删除后这些摘录没有可定位的目标。
         await manager.query('DELETE FROM "focus_items" WHERE "conversationId" = ?', [
           conversationId,
         ]);

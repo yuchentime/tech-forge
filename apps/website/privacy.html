@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>隐私说明 · TeachForge</title>
+    <meta
+      name="description"
+      content="TeachForge 客户端与官网分别处理哪些数据：本地存储、模型调用边界、Key 与访问统计。"
+    />
+    <link rel="canonical" href="https://www.helloyuchen.com.cn/privacy.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="隐私说明 · TeachForge" />
+    <meta property="og:url" content="https://www.helloyuchen.com.cn/privacy.html" />
+    <meta property="og:image" content="https://www.helloyuchen.com.cn/assets/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/favicon.ico" sizes="any" />
+    <link rel="icon" href="assets/logo.png" type="image/png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="index.html" aria-label="TeachForge 首页">
+          <img src="assets/logo.png" alt="" width="28" height="28" />
+          <span>TeachForge</span>
+        </a>
+        <nav class="site-nav" aria-label="页面导航">
+          <a href="index.html#study">个人学习</a>
+          <a href="index.html#teach">授课</a>
+          <a href="index.html#download">下载</a>
+        </nav>
+        <a class="btn btn-primary btn-sm" href="index.html#download">下载</a>
+      </div>
+    </header>
+
+    <main class="wrap doc" id="main">
+      <p class="eyebrow">隐私说明</p>
+      <h1>数据在谁手里</h1>
+      <p class="doc-meta">更新于 2026-11-13</p>
+
+      <h2>一句话</h2>
+      <p>
+        TeachForge 没有账号体系，也没有我们的服务器。你的资料、会话、演练与课堂记录都存在你自己的电脑上；
+        只有调用模型时，当轮相关的上下文会发送给你配置的 DeepSeek API。
+      </p>
+
+      <h2>客户端</h2>
+      <ul>
+        <li>不要求注册、登录，不收集手机号、邮箱或身份信息。</li>
+        <li>
+          数据默认存放在 <code>~/.tech-forge</code>：SQLite 主库、资料副本、会话工作区、长期记忆、课堂记录。
+          该目录可用 <code>TEACHFORGE_DATA_DIR</code> 覆盖。
+        </li>
+        <li>后端只监听本机回环地址，所有请求需要本机令牌；界面层不接触令牌。</li>
+        <li>客户端不内置第三方统计或广告 SDK。</li>
+        <li>
+          DeepSeek API Key 以明文保存在本机 <code>config.toml</code>，界面默认遮蔽；它不会被发送到我们这里。
+        </li>
+      </ul>
+
+      <h2>模型调用</h2>
+      <p>
+        每次对话、演练、课堂回应与总结生成都会请求 DeepSeek API，发送内容包含当轮需要的上下文：
+        你的提问或讲解、选取的资料片段、会话内的必要历史。资料文件本身留在本机，但被选入上下文的内容会离开本机。
+        因此不把本产品描述为“完全离线”。
+      </p>
+
+      <h2>本网站</h2>
+      <p>
+        官网是静态页面，不使用广告或跨站追踪脚本。当前未启用访问统计；若后续启用，只使用不依赖 Cookie 的聚合统计，
+        并在本页更新说明。站内没有表单，下载按钮直接指向安装包地址。
+      </p>
+
+      <h2>联系</h2>
+      <p>数据相关的问题发到 <a href="mailto:hi@helloyuchen.com.cn">hi@helloyuchen.com.cn</a>。</p>
+
+      <p class="doc-back"><a href="index.html">← 返回首页</a></p>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <span class="brand brand-footer"
+            ><img src="assets/logo.png" alt="" width="22" height="22" />TeachForge</span
+          >
+          <p class="muted">用教别人的方式学习。单机、单用户、无账号。</p>
+        </div>
+        <nav class="footer-col" aria-label="产品">
+          <h4>产品</h4>
+          <a href="index.html#download">下载</a>
+          <a href="changelog.html">更新日志</a>
+          <a href="privacy.html">隐私说明</a>
+        </nav>
+        <nav class="footer-col" aria-label="联系">
+          <h4>联系</h4>
+          <a href="mailto:hi@helloyuchen.com.cn">hi@helloyuchen.com.cn</a>
+          <a href="index.html#faq">常见问题</a>
+        </nav>
+      </div>
+      <p class="wrap footer-legal">© 2026 TeachForge</p>
+    </footer>
+  </body>
+</html>
