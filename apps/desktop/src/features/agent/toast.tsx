@@ -74,7 +74,7 @@ export function ToastHost(): React.ReactElement | null {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex flex-col items-center gap-2 px-4"
+      className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 px-4"
       role="status"
     >
       {toasts.map((toast) => (

@@ -2,6 +2,7 @@ import { Eye, EyeClosed } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { readBackendErrorMessage } from "../../api/backend-error";
 import { PageHeader } from "../../components/PageHeader";
+import { showToast } from "../agent/toast";
 import { hasDesktopBridge } from "../../types/desktop-bridge";
 
 /** Describes the local settings projection, including the editable plaintext API Key. */
@@ -25,7 +26,6 @@ export function SettingsPage() {
   const [clearDeepseekApiKey, setClearDeepseekApiKey] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -73,12 +73,10 @@ export function SettingsPage() {
         Boolean(deepseekApiKey.trim()));
     if (!hasDeepseekKey) {
       setSaveError("请填写 DeepSeek API Key 后再保存。");
-      setStatusMessage(null);
       return;
     }
     setIsSaving(true);
     setSaveError(null);
-    setStatusMessage(null);
 
     try {
       const response = await window.teachforge.request<unknown>({
@@ -106,7 +104,7 @@ export function SettingsPage() {
       setSettings(response.data);
       setDeepseekApiKey(response.data.llm.deepseek.apiKey);
       setClearDeepseekApiKey(false);
-      setStatusMessage("设置已保存。");
+      showToast("设置已保存。");
     } catch (error) {
       setSaveError(
         error instanceof Error ? error.message : "保存设置失败，请重试。",
@@ -271,9 +269,6 @@ export function SettingsPage() {
 
               <div aria-live="polite" className="min-h-6 text-sm" role="status">
                 {saveError && <p className="text-rose-700">{saveError}</p>}
-                {statusMessage && (
-                  <p className="text-brand-600">{statusMessage}</p>
-                )}
               </div>
             </form>
           ) : null}
