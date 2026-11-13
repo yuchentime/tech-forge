@@ -1,3 +1,4 @@
+import { CLASSROOM_STUDENT_NAMES } from './classroom-students';
 import type { LessonMessage } from './lesson.types';
 
 /** Bounds one prompt-ready transcript: newest lines first, then a character budget. */
@@ -25,7 +26,14 @@ export function formatTranscript(
 
   for (let index = recent.length - 1; index >= 0; index -= 1) {
     const message = recent[index]!;
-    const prefix = `<speaker_name>${message.speaker}</speaker_name>`;
+    // Students are tagged with their classroom name (`苏小满`, not `su`) so the model reads the
+    // names its prompt describes. The teacher stays `老师`: `CLASSROOM_STUDENT_NAMES.teacher` is
+    // the second-person `你`, which only fits prompts where the model takes part in the dialogue.
+    const speaker =
+      message.speaker === 'teacher'
+        ? '老师'
+        : CLASSROOM_STUDENT_NAMES[message.speaker];
+    const prefix = `<speaker_name>${speaker}</speaker_name>`;
     const body = escapeSpeakerText(message.text);
     const room = budget - prefix.length;
     if (room <= 0) break;

@@ -1,6 +1,8 @@
 /** Students a classroom simulation can dispatch to speak. */
 export const CLASSROOM_STUDENT_IDS = ['su', 'lin', 'gu'] as const;
 
+export const CLASSROOM_STUDENT_NAMES = {'su': '苏小满', 'lin': '林澈', 'gu': '顾知夏', 'teacher': '你'}
+
 export type ClassroomStudentId = (typeof CLASSROOM_STUDENT_IDS)[number];
 
 /** One student's stable identity and classroom persona. */
@@ -87,7 +89,7 @@ export function createStudentSystemPrompt(
     '',
     '## 课堂记录格式',
     '- 对话按行给出，每行以 `<speaker_name>说话人</speaker_name>` 开头，后面是他说的话。',
-    '- 说话人可能是 teacher、su、lin、gu。',
+    '- 说话人为「老师」或同学姓名（苏小满、林澈、顾知夏）。',
     '',
     '## 说话方式',
     '- 只以学生身份说话：用一到两句话回应老师，可以提问、表示理解或提出疑问。',

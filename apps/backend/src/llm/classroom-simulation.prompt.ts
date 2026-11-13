@@ -14,7 +14,8 @@ const MAX_QUOTED_OUTPUT_CHARS = 200;
 
 const STUDENT_ROSTER = CLASSROOM_STUDENT_IDS.map((id) => {
   const student = CLASSROOM_STUDENTS[id];
-  return `- ${id}：${student.name}（${student.persona}）`;
+  // The transcript tags students by name, so the roster pairs each name with the id the answer uses.
+  return `- ${student.name}（${id}）：${student.persona}`;
 }).join('\n');
 
 /** Point status bar the director uses to decide whether the discussion is sufficient. */

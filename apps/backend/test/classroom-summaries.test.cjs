@@ -58,7 +58,8 @@ test('generates, stores and previews a summary for an ended lesson', async () =>
     const lessonId = await seedEndedLesson(lessons);
     const fakeLlm = {
       generate: async (prompt) => {
-        assert.match(prompt, /<speaker_name>lin<\/speaker_name>/);
+        assert.match(prompt, /<speaker_name>林澈<\/speaker_name>/);
+        assert.match(prompt, /<speaker_name>老师<\/speaker_name>/);
         return '## 本节讲了什么\n讲了缓存雪崩。\n\n## 学生关注点\n林澈问大量 key 同时过期。';
       },
     };
