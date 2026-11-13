@@ -18,7 +18,7 @@ related:
   - docs/changes/2026-11-08-conversation-tool-activity-history/design.md
   - docs/changes/2026-11-08-conversation-tool-activity-history/verification.md
   - docs/changes/2026-11-08-conversation-tool-activity-history/worklog.md
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Conversation 对话持久化
@@ -44,6 +44,7 @@ last_verified: 2026-11-12
 
 ## 当前边界
 
+- **界面内关键词搜索**：对话列顶栏右侧的放大镜按钮展开搜索框，`Ctrl+F` 打开并把焦点放进输入框，`Enter`/`Shift+Enter` 在命中间前后跳转（首尾循环），`Esc` 清空并关闭，搜索框为空时焦点离开（点到消息区、文件区或切到别的面板）即自动收起，不需要手动关闭，已有查询词时失焦则保留（便于滚动或复制后继续跳转，`×` 或输入框内 `Esc` 关闭）；计数显示 `当前/总数`。命中通过 CSS Custom Highlight API 着色（`::highlight(tf-find)` / `tf-find-current`），不向 React 管理的 Markdown 里插入 `<mark>`，因此流式输出的每一帧都只重建索引与 Range，不会与渲染器争抢 DOM。索引按块级元素切段，命中不跨段落；KaTeX 的隐藏 `katex-mathml` 副本、`查看更早的消息`/生成进度/产出文件卡片等界面文案用 `data-search-ignore` 排除。范围仅限当前已加载的消息（最多若干页 30 条），没有后端全文搜索。
 - 工具消息及执行状态保存在本地 SQLite。历史 API 可在对应 user 行下返回工具名、状态、耗时、可选路径和 `grep` 搜索词；不会暴露完整工具参数、部分/最终结果或 Pi `toolResult` 内容。
 - 没有搜索或归档 API；会话摘要列表不分页，消息历史固定为 30 条一页并支持按需读取更早内容。重命名与删除通过会话行悬停菜单提供。
 - 异常退出后的恢复在该对话下一次请求开始时执行；不会续跑原来的 provider 调用。

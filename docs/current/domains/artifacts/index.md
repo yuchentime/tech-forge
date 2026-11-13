@@ -11,7 +11,7 @@ related:
   - docs/changes/2026-11-09-artifact-sidebar/design.md
   - docs/changes/2026-11-09-artifact-sidebar/verification.md
   - docs/changes/2026-11-10-deep-research-command/design.md
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Artifact 会话产出文件
@@ -60,6 +60,7 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 - **手动重新读取**：预览头部右端、全屏按钮左侧有刷新按钮（`ArrowsClockwise`），点击后重新请求 `GET /api/artifacts/:id/content`。存在的原因是模型会原地改写同一路径的文件——`registerArtifact()` 复用同一行、id 不变，列表刷新只同步 `missing` 等元数据，预览拿不到任何 prop 变化，因此不会自动更新。刷新令牌由 `ArtifactSidebar` 持有并同时传给面板与全屏悬浮层两个 `ArtifactPreview`；两处都会重新取数（同一次点击触发两次 content 请求），保证全屏时看到的内容与面板一致。
 - 文件名右侧的 `会话文件` / `外部文件` 文本只在 `external` 时保留（"外部文件"是需要提醒的例外，会话内文件属于默认情况，不再占用头部空间）。
 - 侧边栏收起、切换会话或重新加载历史时清空标签，避免跨会话残留；`generatedFiles` 与实时事件两条来源互斥。
+- **预览内关键词搜索**：文件预览头部（刷新按钮左侧）的搜索按钮打开关键词搜索（与聊天同一套 `KeywordSearch`/`dom-search`/`search-text-index`），`Ctrl+F` 打开，`Enter`/`Shift+Enter` 跳转，`Esc` 关闭；搜索框为空时焦点离开即收起（点击预览正文、切标签或点回聊天都会关闭），已有查询词时失焦保留，命中用同一组 CSS Custom Highlight 着色。只索引当前预览的文本节点：markdown/纯文本/JSON/代码块可搜；Mermaid 图与 SVG 图（以 `<img>` 渲染）没有可高亮的文本节点，整棵 SVG 子树被跳过，计数里不会出现点不到的命中；`truncated` 的大文件只搜已加载的前一部分。面板与全屏悬浮层各自持有搜索框与滚动容器 ref，`Ctrl+F` 按焦点所在面板路由；进入/退出全屏、切到「本会话文件」列表时搜索关闭，避免对着已换掉的容器保留旧 Range。
 
 ## 未实现
 
