@@ -1,10 +1,17 @@
 import {
   ArrowRight,
   BookmarkSimple,
+  ChatCircle,
   NotePencil,
   Trash,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import { showToast } from '../agent/toast';
@@ -155,9 +162,7 @@ export function FocusPointsPage({
                 >
                   <div className="flex items-start gap-4">
                     <blockquote className="min-w-0 flex-1 border-l-2 border-brand-500 pl-3">
-                      <p className="line-clamp-4 whitespace-pre-wrap break-words text-sm leading-6 text-ink-800">
-                        {item.quote}
-                      </p>
+                      <FocusQuote quote={item.quote} />
                     </blockquote>
                     <div className="flex shrink-0 items-center gap-1">
                       <button
@@ -253,8 +258,15 @@ export function FocusPointsPage({
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-500">
-                    <span className="max-w-[24rem] truncate font-medium text-ink-600">
-                      {item.conversationTitle}
+                    <span
+                      className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink-800"
+                      title={item.conversationTitle}
+                    >
+                      <ChatCircle
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0 text-brand-600"
+                      />
+                      <span className="break-words">{item.conversationTitle}</span>
                     </span>
                     <span>第 {item.messageIndex} 条</span>
                     <time dateTime={item.createdAt}>
@@ -268,6 +280,53 @@ export function FocusPointsPage({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Clamped quote with an explicit expand control.
+ *
+ * `line-clamp-4` hides the overflow; measuring the clamped element tells us whether "查看" is
+ * needed. The control stays visible after expanding so the card can collapse again.
+ */
+function FocusQuote({ quote }: { quote: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const textRef = useRef<HTMLParagraphElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (expanded) return;
+    const element = textRef.current;
+    if (!element) return;
+    const measure = (): void => {
+      setIsOverflowing(element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded, quote]);
+
+  return (
+    <>
+      <p
+        className={`whitespace-pre-wrap break-words text-sm leading-6 text-ink-800 ${
+          expanded ? '' : 'line-clamp-4'
+        }`}
+        ref={textRef}
+      >
+        {quote}
+      </p>
+      {isOverflowing && (
+        <button
+          className="mt-1 rounded text-xs font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {expanded ? '收起' : '查看'}
+        </button>
+      )}
+    </>
   );
 }
 
