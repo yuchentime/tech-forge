@@ -26,7 +26,12 @@ export interface ConversationMessageDto {
   attachments?: ConversationAttachmentDto[];
   /** Files this turn produced or rewrote; empty for user rows. */
   generatedFiles?: ConversationGeneratedFileDto[];
+  /** Leading slash commands recorded for this user message, in canonical order. */
+  commands?: ConversationCommandDto[];
 }
+
+/** One leading slash command; the renderer maps it to its label and icon. */
+export type ConversationCommandDto = 'knowledge' | 'research';
 
 /** Describes one file a turn produced, as the response footer and sidebar need it. */
 export interface ConversationGeneratedFileDto {

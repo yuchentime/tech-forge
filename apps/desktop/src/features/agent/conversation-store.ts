@@ -1,6 +1,7 @@
 import { readBackendErrorMessage } from '../../api/backend-error';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import type { GeneratedFileRef } from './artifact-store';
+import type { SlashCommandId } from './slash-commands';
 
 /** Describes one lightweight Conversation row displayed in the sidebar. */
 export interface ConversationSummary {
@@ -23,6 +24,8 @@ export interface ConversationHistoryMessage {
   content: string;
   status: 'completed' | 'failed' | 'cancelled';
   createdAt: string;
+  /** Slash commands that preceded the question; user rows only. */
+  commands?: SlashCommandId[];
   toolActivities?: ConversationToolActivity[];
   /** Files attached to this message; only user rows carry them. */
   attachments?: ConversationAttachment[];

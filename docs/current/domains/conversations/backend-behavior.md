@@ -60,6 +60,7 @@ Conversation 查询接口由 `ConversationsController` 暴露，并经现有本�
 - 消息查询的顶层内容仅输出 user/assistant 文本；每个 user 行另附其 sequence 区间内已终态 `toolExecution` 的安全摘要，以及 `contextRefsJson.attachments` 投影出的 `{attachmentId, name}`（字数与会话文件路径不下发）。工具名、状态、耗时、可选 display path、`grep` 的可选搜索词及 `read` 的可选行窗口可见；完整参数、partial/final result、`toolResult`、`assistantTurn`、pending 行、thinking 和原始 `contentJson` 不进入 API 响应。无可显示文本的 assistant 行会被省略。
 - 每轮普通对话在 `beginTurn()` 后调用 `RehearsalsService.buildConversationDigest()`，只取尚未投递（`rehearsals.loadedContext = 0`）的最近 3 次 completed 演练摘要；摘要经 `LlmRequestOptions.contextMessage` 由 `LearnAgent` 作为独立 custom message entry 追加进 Pi session（`display: false`），随即 `markDigestDelivered()` 置位。`contextRefsJson.rehearsals` 通过 `mergeUserMessageContextRefs()` 合并写入 `{rehearsalIds, characters}`。digest 不进入 `messages`、SSE 或历史接口；它不被 `replaceInjectedUserText()` 清除，后续轮次从快照恢复即已携带。
 - 工具执行摘要按已返回 user 行的序列区间分组，并限制在最后一个已返回 user 与其后的下一个 user 之间；工具行不计入 30 条可见消息，也不改变 `hasMore` 或游标。
+- 每轮开头的 `/查询资料库`（含历史别名）与 `/探索主题` 在 `beginTurn()` 后以 `{commands:['knowledge','research']}` 合并进该 user 行的 `contextRefsJson`；命令仍从存储的 prompt 中剥离。历史接口只在有命令时返回 `commands`，Renderer 用同一个 sent-command store 在用户气泡内还原标签，重新打开会话不丢失。
 - 新的工具执行记录只持久化 UI 标签所需的参数白名单：字符串 `args.path` 作为可选 `displayPath`、`grep` 的字符串 `args.pattern` 作为可选 `displayPattern`、`read` 的安全整数 `args.offset`/`args.limit` 作为可选 `displayOffset`/`displayLimit`；其他参数即使存在也不落库。`offset` 要求整数且 ≥ 0，`limit` 要求整数且 ≥ 1，非法值按缺省处理。旧记录没有这些字段时仍返回工具名、终态和耗时。无法解析的工具行会被跳过并记录安全诊断，不影响文本历史。
 - 会话列表仍完整返回；消息历史固定分页。空列表返回 `[]`，无可见历史时返回 `messages: []` 且 `hasMore: false`。
 

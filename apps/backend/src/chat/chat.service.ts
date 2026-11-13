@@ -179,6 +179,18 @@ export class ChatService {
         assistantTurnId: turn.assistantTurnId,
         loadedChunkCount: turn.loadedChunkIds.length,
       });
+      // The command itself is stripped from the stored prompt, so it is recorded separately for the
+      // transcript chip. An empty array is not written: ordinary messages keep a null refs column.
+      const turnCommands: Array<'knowledge' | 'research'> = [];
+      if (turnCommand.knowledge) turnCommands.push('knowledge');
+      if (turnCommand.research) turnCommands.push('research');
+      if (turnCommands.length > 0) {
+        await this.conversations.mergeUserMessageContextRefs(
+          turn.userMessageId,
+          JSON.stringify({ commands: turnCommands }),
+          logContext,
+        );
+      }
       // Only explicit Chinese memory intent is captured; the write runs in the background and can
       // never delay or fail this turn.
       this.memory.captureUserMessage(userPrompt);

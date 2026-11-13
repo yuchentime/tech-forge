@@ -178,6 +178,7 @@ HTTP 200 的响应体为完整历史对象。`messages` 按 `sequenceNo ASC` 排
 | `createdAt` | `String` | 是 | `MessageEntity.createdAt` | 消息创建时间 | ISO 8601 | 不为空 |
 | `toolActivities` | `ConversationToolActivity[]` | user 行是；assistant 行否 | user turn 中的 `toolExecution` 行 | 安全工具执行摘要 | 字段见下表 | 没有工具时 user 行返回 `[]` |
 | `attachments` | `ConversationAttachment[]` | user 行是；assistant 行否 | user 行 `contextRefsJson.attachments` | 该消息附加的文件引用 | 字段见下表 | 没有附件时 user 行返回 `[]` |
+| `commands` | `String[]` | 仅当 user 行有命令时 | user 行 `contextRefsJson.commands` | 该消息携带的斜杠指令，供气泡标签还原 | `knowledge`、`research`，按 knowledge → research 顺序、去重 | 没有命令时省略该字段 |
 | `generatedFiles` | `ConversationGeneratedFile[]` | assistant 行是；user 行否 | `artifacts` 行（按该轮 `userMessageId`） | 本轮产出文件，用于响应底部文件列表 | `{id, fileName, contentFormat, missing, external}` | 没有产出时返回 `[]`；见 [Artifact 会话产出文件](../artifacts/index.md) |
 
 ##### `attachments[]` (`ConversationAttachment`)

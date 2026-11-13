@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { toThreadMessage } = require('../dist-electron/src/features/agent/conversation-history.js');
 const { AgentEventBus } = require('../dist-electron/src/features/agent/agent-event-bus.js');
+const { sentCommandStore } = require('../dist-electron/src/features/agent/composer-command-store.js');
+const { getSlashCommandById } = require('../dist-electron/src/features/agent/slash-commands.js');
 
 /** Creates a text-only API fixture without accessing a user's database or model. */
 function historyMessage(role, status, id) {
@@ -83,6 +85,21 @@ test('history restores a read window next to its target path', () => {
     bus.getTurnSnapshots()['persisted-user-message-id'].tools[0].args,
     { path: 'E:/knowledge/学生手册.docx', offset: 121, limit: 110 },
   );
+});
+
+test('history restores a persisted slash-command chip', () => {
+  sentCommandStore.reset();
+  sentCommandStore.restoreHistory('persisted-user-message-id', ['knowledge', 'research']);
+
+  assert.deepEqual(
+    sentCommandStore.getSnapshot()['persisted-user-message-id'],
+    ['knowledge', 'research'],
+  );
+  assert.equal(getSlashCommandById('knowledge')?.label, '查询资料库');
+  assert.equal(getSlashCommandById('research')?.label, '探索主题');
+
+  sentCommandStore.reset();
+  assert.deepEqual(sentCommandStore.getSnapshot(), {});
 });
 
 test('history tool activity restores an idle snapshot by persisted user message ID', () => {

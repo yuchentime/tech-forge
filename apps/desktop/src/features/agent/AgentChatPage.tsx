@@ -55,10 +55,13 @@ import {
 import { ConversationSidebar, type SidebarView } from './ConversationSidebar';
 import {
   SlashCommandMenu,
-  getSlashCommand,
   useSlashCommandMenu,
 } from './SlashCommandMenu';
-import { composerCommandStore } from './composer-command-store';
+import {
+  getSlashCommand,
+  getSlashCommandById,
+} from './slash-commands';
+import { composerCommandStore, sentCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
@@ -304,6 +307,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
+      restoreHistoryCommands(response.data.messages);
       artifactHistoryStore.setFromHistory(response.data.messages);
       artifactTabsStore.selectConversation(conversationId);
       // The history footer now owns this conversation's files.
@@ -375,6 +379,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     composerCommandStore.reset();
     composerAttachmentStore.reset();
     sentAttachmentStore.reset();
+    sentCommandStore.reset();
     artifactHistoryStore.clear();
     artifactTabsStore.reset();
     agentEventBus.clearArtifacts();
@@ -406,6 +411,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       composerCommandStore.reset();
       composerAttachmentStore.reset();
       sentAttachmentStore.reset();
+      sentCommandStore.reset();
     },
     [runtime],
   );
@@ -1019,7 +1025,12 @@ function isConversationHistoryMessage(
         message.toolActivities.every(isConversationToolActivity))) &&
     (message.attachments === undefined ||
       (Array.isArray(message.attachments) &&
-        message.attachments.every(isConversationAttachment)))
+        message.attachments.every(isConversationAttachment))) &&
+    (message.commands === undefined ||
+      (Array.isArray(message.commands) &&
+        message.commands.every(
+          (command) => command === 'knowledge' || command === 'research',
+        )))
   );
 }
 
@@ -1082,6 +1093,14 @@ function restoreHistoryAttachments(messages: ConversationHistoryMessage[]): void
   for (const message of messages) {
     if (message.role !== 'user' || !message.attachments?.length) continue;
     sentAttachmentStore.restoreHistory(message.id, message.attachments);
+  }
+}
+
+/** Rebuilds the slash-command chips persisted with each user message. */
+function restoreHistoryCommands(messages: ConversationHistoryMessage[]): void {
+  for (const message of messages) {
+    if (message.role !== 'user' || !message.commands?.length) continue;
+    sentCommandStore.restoreHistory(message.id, message.commands);
   }
 }
 
@@ -1308,13 +1327,52 @@ function getToolStatusLabel(
 }
 
 /**
+ * Shows the slash commands sent with one user message.
+ *
+ * Live turns record the chip when the adapter sends; reopened history fills the same map from
+ * `contextRefsJson.commands`, so the instruction stays visible after a restart.
+ */
+function UserCommandChips({ messageId }: { messageId: string }) {
+  const byMessageId = useSyncExternalStore(
+    sentCommandStore.subscribe,
+    sentCommandStore.getSnapshot,
+    sentCommandStore.getSnapshot,
+  );
+  const commands = byMessageId[messageId];
+  if (!commands || commands.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {commands.map((id) => {
+        const item = getSlashCommandById(id);
+        if (!item) return null;
+        return (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-800"
+            key={id}
+          >
+            {item.icon === 'research' ? (
+              <MagnifyingGlass aria-hidden className="h-3.5 w-3.5" />
+            ) : (
+              <Database aria-hidden className="h-3.5 w-3.5" />
+            )}
+            {item.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Displays the user's message with right-aligned emphasis, its attachment chips,
  * and a copy action that only appears while the message is hovered or focused.
  */
 function UserMessage({ messageId }: { messageId: string }) {
   return (
     <MessagePrimitive.Root className="flex justify-end">
-      <div className="group flex w-fit max-w-[82%] flex-col items-end gap-1.5">
+      <div className="group flex w-fit max-w-[82%] flex-col items-end gap-2">
+        <UserCommandChips messageId={messageId} />
         <div className="max-w-full rounded-2xl rounded-br-md bg-ink-100 px-4 py-3 text-sm leading-6 text-ink-900">
           <UserAttachmentChips messageId={messageId} />
           <MessagePrimitive.Parts />

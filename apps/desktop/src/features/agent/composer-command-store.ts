@@ -1,3 +1,5 @@
+import type { SlashCommandId } from './slash-commands';
+
 /**
  * The command chip currently attached to the composer, if any.
  *
@@ -52,3 +54,55 @@ class ComposerCommandStore {
 
 /** Shared composer command state, read by the page and by the chat adapter. */
 export const composerCommandStore = new ComposerCommandStore();
+
+/**
+ * Commands recorded on messages that have already been sent.
+ *
+ * The live turn records them when the adapter sends; a history reload rebuilds the same keys from the
+ * persisted API rows, so the chip above a user message survives a restart. Ids match the backend's
+ * `contextRefsJson.commands` values.
+ */
+class SentCommandStore {
+  private byMessageId: Record<string, SlashCommandId[]> = {};
+  private readonly listeners = new Set<() => void>();
+
+  /** Returns the message-id map for `useSyncExternalStore`; the object identity is stable. */
+  getSnapshot = (): Record<string, SlashCommandId[]> => this.byMessageId;
+
+  /** Subscribes one React listener; returns the unsubscribe function. */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /** Records the commands sent with one live user message. */
+  record(messageId: string, commands: SlashCommandId[]): void {
+    if (commands.length === 0) return;
+    this.byMessageId = { ...this.byMessageId, [messageId]: commands };
+    this.emit();
+  }
+
+  /** Restores the commands of one persisted message after a history page loads. */
+  restoreHistory(messageId: string, commands: SlashCommandId[]): void {
+    if (commands.length === 0) return;
+    this.byMessageId = { ...this.byMessageId, [messageId]: commands };
+    this.emit();
+  }
+
+  /** Drops every chip when the thread is reset or replaced. */
+  reset(): void {
+    if (Object.keys(this.byMessageId).length === 0) return;
+    this.byMessageId = {};
+    this.emit();
+  }
+
+  /** Notifies every listener after the snapshot was replaced. */
+  private emit(): void {
+    for (const listener of this.listeners) listener();
+  }
+}
+
+/** Shared sent-command state, read by the page and written by the chat adapter. */
+export const sentCommandStore = new SentCommandStore();

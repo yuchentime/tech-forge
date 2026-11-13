@@ -9,7 +9,8 @@ import {
   composerAttachmentStore,
   sentAttachmentStore,
 } from './attachment-store';
-import { composerCommandStore } from './composer-command-store';
+import { composerCommandStore, sentCommandStore } from './composer-command-store';
+import { getSlashCommand } from './slash-commands';
 
 /** Extracts the newest user message because the backend runs each turn alone. */
 function getLatestUserMessage(messages: readonly ThreadMessage[]): {
@@ -75,6 +76,7 @@ export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter 
     // The chip never enters the textarea, so the command is attached here. It is part of the stored
     // user message, which is what the backend parses and what dedupe reads back later.
     const command = composerCommandStore.getForThread(localThreadId);
+    const commandItem = getSlashCommand(command);
     const prompt = command ? `${command} ${userMessage.prompt}` : userMessage.prompt;
     // Attachments are copied and parsed when the turn runs, because the conversation id does not
     // exist before this request. The tag list is recorded against the message so the sent bubble
@@ -90,6 +92,7 @@ export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter 
         : undefined,
     );
     const messageKey = userMessage.id || requestId;
+    if (commandItem) sentCommandStore.record(messageKey, [commandItem.id]);
     if (attachments.length > 0) {
       sentAttachmentStore.record(
         messageKey,

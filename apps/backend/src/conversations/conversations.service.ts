@@ -29,6 +29,7 @@ import { MessageEntity } from './message.entity';
 import { ConversationRunRegistry } from './conversation-run-registry';
 import type {
   ConversationAttachmentDto,
+  ConversationCommandDto,
   ConversationGeneratedFileDto,
   ConversationMessagesDto,
   ConversationMessageDto,
@@ -375,21 +376,28 @@ export class ConversationsService {
 
       const result: ConversationMessagesDto = {
         messages: visibleRows.map(
-          ({ message, content }): ConversationMessageDto => ({
-            id: message.id,
-            role: message.role as 'user' | 'assistant',
-            content,
-            status: message.status as ConversationMessageDto['status'],
-            createdAt: message.createdAt.toISOString(),
-            ...(message.role === 'user'
-              ? {
-                  toolActivities: toolActivitiesByUserId.get(message.id) ?? [],
-                  attachments: readAttachmentRefs(message.contextRefsJson),
-                }
-              : {
-                  generatedFiles: generatedFilesByAssistantId.get(message.id) ?? [],
-                }),
-          }),
+          ({ message, content }): ConversationMessageDto => {
+            const commands =
+              message.role === 'user'
+                ? readCommandRefs(message.contextRefsJson)
+                : [];
+            return {
+              id: message.id,
+              role: message.role as 'user' | 'assistant',
+              content,
+              status: message.status as ConversationMessageDto['status'],
+              createdAt: message.createdAt.toISOString(),
+              ...(message.role === 'user'
+                ? {
+                    toolActivities: toolActivitiesByUserId.get(message.id) ?? [],
+                    attachments: readAttachmentRefs(message.contextRefsJson),
+                    ...(commands.length > 0 ? { commands } : {}),
+                  }
+                : {
+                    generatedFiles: generatedFilesByAssistantId.get(message.id) ?? [],
+                  }),
+            };
+          },
         ),
       };
       writeStructuredEvent(
@@ -1642,6 +1650,33 @@ function collectAttachedDocuments(
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * Reads the slash commands recorded for one user row.
+ *
+ * Unknown values are dropped and duplicates collapse, so a hand-edited refs column cannot inject an
+ * arbitrary label into the transcript.
+ */
+function readCommandRefs(
+  contextRefsJson: string | null,
+): ConversationCommandDto[] {
+  if (!contextRefsJson) return [];
+  try {
+    const parsed: unknown = JSON.parse(contextRefsJson);
+    if (!parsed || typeof parsed !== 'object' || !('commands' in parsed)) {
+      return [];
+    }
+    const commands = parsed.commands;
+    if (!Array.isArray(commands)) return [];
+    const seen = new Set<ConversationCommandDto>();
+    for (const command of commands) {
+      if (command === 'knowledge' || command === 'research') seen.add(command);
+    }
+    return [...seen];
+  } catch {
+    return [];
+  }
 }
 
 /**

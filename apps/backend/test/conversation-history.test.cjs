@@ -310,6 +310,28 @@ test('read history returns the requested window next to its display path only', 
   }
 });
 
+test('user history returns persisted slash commands and drops unknown values', async () => {
+  const dataSource = await createTestDatabase();
+  try {
+    const conversationId = randomUUID();
+    await dataSource.getRepository(ConversationEntity).save({ id: conversationId, title: null });
+    const service = new ConversationsService(dataSource, undefined, artifactsStub);
+    // Mirrors the chat turn: the user row is created first, then the parsed commands are merged in.
+    const turn = await service.beginTurn(conversationId, '光合作用', false);
+    await service.mergeUserMessageContextRefs(
+      turn.userMessageId,
+      JSON.stringify({ commands: ['knowledge', 'research', 'other'] }),
+    );
+
+    const page = await service.getConversationMessages(conversationId);
+    const user = page.messages.find(({ id }) => id === turn.userMessageId);
+
+    assert.deepEqual(user.commands, ['knowledge', 'research']);
+  } finally {
+    await dataSource.destroy();
+  }
+});
+
 test('tool argument extraction persists only the path, grep pattern and read window', () => {
   assert.deepEqual(
     getToolDisplayFields('grep', {
