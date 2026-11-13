@@ -69,6 +69,29 @@ test('a repeated reset surfaces a Chinese message instead of a raw fetch error',
   }
 });
 
+test('a reset on a non-idempotent POST is not retried', async () => {
+  let requests = 0;
+  const server = await startServer((request) => {
+    requests += 1;
+    request.socket.destroy();
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        requestBackend(
+          { port: server.port, token: 'local-token' },
+          { method: 'POST', path: '/api/lessons/l1/turns', body: { text: '讲课' } },
+          { delayImpl: async () => undefined },
+        ),
+      /本地服务连接中断/,
+    );
+    assert.equal(requests, 1);
+  } finally {
+    await server.close();
+  }
+});
+
 test('a non-network failure is not retried', async () => {
   let attempts = 0;
   const fetchImpl = async () => {

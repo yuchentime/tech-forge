@@ -87,8 +87,9 @@ async function sendBackendRequest(
 /**
  * Forwards one Renderer request to the local backend, retrying once after a connection reset.
  *
- * Repeating is safe because every endpoint is idempotent: the import is deduplicated by content
- * hash, settings are a full replacement, and a deleted document answers 404 on the second attempt.
+ * Only `GET` is retried. The bridge also carries non-idempotent writes (classroom turns, summary
+ * generation, imports); replaying those after a lost response can duplicate messages or model calls,
+ * and the caller cannot tell it happened. Mutations surface the connection error instead.
  */
 export async function requestBackend(
   context: BackendRequestContext,
@@ -97,12 +98,13 @@ export async function requestBackend(
 ): Promise<BackendResponse> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const delayImpl = options.delayImpl ?? delay;
+  const canRetry = input.method === 'GET';
 
   try {
     return await sendBackendRequest(context, input, fetchImpl);
   } catch (error) {
     const code = getNetworkErrorCode(error);
-    if (code === undefined || !RETRYABLE_NETWORK_CODES.has(code)) {
+    if (!canRetry || code === undefined || !RETRYABLE_NETWORK_CODES.has(code)) {
       throw new Error(describeBackendFailure(error));
     }
     // One short pause covers the socket the backend closed while the request was being written.

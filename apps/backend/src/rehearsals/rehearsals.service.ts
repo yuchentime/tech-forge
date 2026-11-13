@@ -55,12 +55,12 @@ import {
 } from './rehearsal-digest';
 import {
   parseDecisionResponse,
-  parseJsonObject,
   parsePlanResponse,
   parseReportResponse,
   parseSkipResponse,
   type ParsedPlan,
 } from './rehearsal-json';
+import { parseJsonObject } from '../llm/model-json';
 import {
   buildAnswerPrompt,
   buildDrillSystemPrompt,

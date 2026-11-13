@@ -1,3 +1,5 @@
+import { isRecord } from '../api/json';
+
 /** Defines the safe conversation metadata and Pi event fields that may cross the desktop bridge. */
 export type ChatStreamEvent =
   | { type: 'conversation'; conversationId: string }
@@ -162,6 +164,4 @@ function isJsonValue(value: unknown, depth = 0): boolean {
 }
 
 /** 将未知值收窄为普通对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+

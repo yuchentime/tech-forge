@@ -1,4 +1,5 @@
 import { readBackendErrorMessage } from '../../api/backend-error';
+import { isRecord } from '../../api/json';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 export type KnowledgeFactMasteryLevel =
@@ -457,9 +458,7 @@ function isIsoDateTime(value: unknown): value is string {
 }
 
 /** Narrows JSON objects and rejects arrays and null. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+
 
 /** Enforces the additionalProperties:false behavior from the API JSON Schema. */
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {

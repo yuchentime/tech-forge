@@ -1,44 +1,96 @@
-import { ArrowLeft, ChatsCircle, FlagPennant, X } from '@phosphor-icons/react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  ArrowLeft,
+  ChatsCircle,
+  CircleNotch,
+  FlagPennant,
+} from '@phosphor-icons/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import classroomBackground from '../../assets/classroom/bg-classroom.png';
 import { ClassroomComposer } from './ClassroomComposer';
+import { ClassroomMessageDrawer } from './ClassroomMessageDrawer';
+import { ClassroomRecoveryBanner } from './ClassroomRecoveryBanner';
 import { EndClassroomDialog } from './EndClassroomDialog';
 import {
-  CLASSROOM_STUDENT,
-  classroomSessionStore,
-} from './classroom-session-store';
+  clearClassroomDraft,
+  getClassroomDraft,
+  setClassroomDraft,
+} from './classroom-drafts';
+import {
+  createLesson,
+  endLesson,
+  loadLessonMessages,
+  sendLessonTurn,
+  type LessonMessageView,
+  type LessonMessagesView,
+  type LessonSpeaker,
+  type LessonStatus,
+} from './classroom-api';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 
-/** How long the sent lecture stays above the composer before it fades into the message sidebar. */
+/** How long the just-sent lecture stays above the composer before it fades into the sidebar. */
 const LECTURE_PEEK_MS = 3600;
+
+/** Horizontal anchor of each student's bubble, matching the artwork's three seats. */
+const BUBBLE_LEFT: Record<Exclude<LessonSpeaker, 'teacher'>, string> = {
+  // Left-to-right seats in the artwork: lin, su, gu.
+  lin: '22%',
+  su: '50%',
+  gu: '78%',
+};
 
 /**
  * Renders the immersive classroom stage and owns the window's 16:9 mode.
  *
- * The artwork is exactly 16:9, so the main process locks the OS window to that ratio while this
- * view is mounted and `.tf-classroom-stage` keeps the stage at 16:9 even where the window cannot be
- * locked (browser preview, a maximized window). The stage replaces the sidebar and header.
- *
- * Leaving the view (top-left button, `Esc`) is temporary: the session lives in
- * `classroomSessionStore`, so entering the classroom again restores the lecture, messages, drafts
- * and question bubble. The top-right "结束课堂" button is the only way to end the session, and it
- * asks for confirmation first.
+ * All content comes from the lesson API: entering loads the stored transcript, sending calls one
+ * turn endpoint, and ending marks the lesson ended before returning to the classroom home. Leaving
+ * the stage is temporary — the lesson and its messages stay on the backend.
  */
-export function ClassroomMode({ onExit }: { onExit: () => void }) {
-  const session = useSyncExternalStore(
-    classroomSessionStore.subscribe,
-    classroomSessionStore.getSnapshot,
-    classroomSessionStore.getSnapshot,
+export function ClassroomMode({
+  lessonId,
+  onExit,
+  onEnded,
+}: {
+  /** Null means a draft classroom: the backend row is created by the first message. */
+  lessonId: string | null;
+  /** Leaves the stage for the classroom home; an existing lesson keeps running. */
+  onExit: () => void;
+  /** Called after the lesson was ended, with its id for post-class summary generation. */
+  onEnded: (lessonId: string) => void;
+}) {
+  const [activeLessonId, setActiveLessonId] = useState<string | null>(lessonId);
+  const [status, setStatus] = useState<LessonStatus | null>(null);
+  const [messages, setMessages] = useState<LessonMessageView[]>([]);
+  const [integrity, setIntegrity] = useState<LessonMessagesView['integrity'] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [isStartingNew, setIsStartingNew] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
+  const draftKey = activeLessonId ?? 'new-lesson';
+  const [lectureDraft, setLectureDraft] = useState(
+    () => getClassroomDraft(draftKey).lecture,
+  );
+  const [replyDraft, setReplyDraft] = useState(
+    () => getClassroomDraft(draftKey).reply,
   );
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
   const [isLecturePeekVisible, setIsLecturePeekVisible] = useState(false);
   const [isEndDialogOpen, setIsEndDialogOpen] = useState(false);
-  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const [peekText, setPeekText] = useState('');
   const peekTimerRef = useRef<number | null>(null);
+  /** Invalidates an in-flight reload when the stage switches lessons or unmounts. */
+  const requestSeq = useRef(0);
+  /** Latest lesson id, readable inside async callbacks before React state catches up. */
+  const lessonIdRef = useRef<string | null>(lessonId);
+  /** Set when `activeLessonId` changes because the first send created it; skip one reload. */
+  const skipNextLoadRef = useRef(false);
   const endButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  // The ratio lock lives in the main process, not in this component's state: it must be released
-  // on unmount for every route out (the exit button, Esc, closing the window).
+  const phase = messages.length === 0 ? 'composing' : 'sent';
+  const isEnded = status === 'ended';
+  const busy = isSending || isEnding || isStartingNew;
+
+  // The ratio lock lives in the main process; release it on every route out (exit, Esc, window close).
   useEffect(() => {
     if (!hasDesktopBridge()) return;
     void window.teachforge.setClassroomMode(true).catch((error: unknown) => {
@@ -57,8 +109,48 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     };
   }, []);
 
-  // The peek is driven by a timer, not by the CSS animation: the fade still ends on time for
-  // reduced-motion users, where the animation is disabled.
+  /** Reloads the stored transcript; stale responses from a previous lesson are dropped. */
+  const reloadMessages = useCallback(async (): Promise<boolean> => {
+    const sequence = ++requestSeq.current;
+    if (!activeLessonId) {
+      // Draft classroom: nothing is stored yet, so there is nothing to load.
+      setMessages([]);
+      setStatus(null);
+      setIntegrity(null);
+      setTurnError(null);
+      return true;
+    }
+    try {
+      const view = await loadLessonMessages(activeLessonId);
+      if (sequence !== requestSeq.current) return false;
+      setMessages(view.messages);
+      setStatus(view.status);
+      setIntegrity(view.integrity);
+      setTurnError(null);
+      return true;
+    } catch (error: unknown) {
+      if (sequence !== requestSeq.current) return false;
+      setTurnError(
+        error instanceof Error ? error.message : '读取课堂记录失败。',
+      );
+      return false;
+    }
+  }, [activeLessonId]);
+
+  // Load the stored transcript before showing the stage; a failure must stay visible.
+  useEffect(() => {
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
+    setIsLoading(true);
+    void reloadMessages().finally(() => setIsLoading(false));
+    return () => {
+      // Invalidate any in-flight read once this lesson or the view goes away.
+      requestSeq.current += 1;
+    };
+  }, [reloadMessages]);
+
   useEffect(
     () => () => {
       if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
@@ -66,18 +158,7 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     [],
   );
 
-  /** Keeps the newest message in view whenever the sidebar opens or grows. */
-  useEffect(() => {
-    if (!isMessagesOpen) return;
-    const list = messageListRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [isMessagesOpen, session.messages]);
-
-  /**
-   * `Esc` closes what is on top first: the end dialog, then the sidebar. Inside the composer it
-   * does nothing, so a half-written message is never thrown away; only outside it leaves the view
-   * (which keeps the session for the next visit).
-   */
+  /** `Esc` closes what is on top first; inside the composer it never discards a draft. */
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -98,8 +179,9 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
   }, [isEndDialogOpen, isMessagesOpen, onExit]);
 
   /** Shows the just-sent lecture above the composer, then hands it over to the sidebar. */
-  const showLecturePeek = (): void => {
+  const showLecturePeek = (text: string): void => {
     if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
+    setPeekText(text);
     setIsLecturePeekVisible(true);
     peekTimerRef.current = window.setTimeout(() => {
       peekTimerRef.current = null;
@@ -107,34 +189,163 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     }, LECTURE_PEEK_MS);
   };
 
-  /** Moves the written lecture onto the stage and turns the composer into the reply box. */
-  const sendLecture = (): void => {
-    if (!classroomSessionStore.sendLecture()) return;
-    closeTransientPanels();
-    showLecturePeek();
+  /** Persists one draft outside component state so leaving the stage does not drop it. */
+  const keepDraft = (patch: { lecture?: string; reply?: string }): void => {
+    setClassroomDraft(lessonIdRef.current ?? 'new-lesson', patch);
   };
 
-  /** Sending a lecture starts a new round, so any open sidebar or end dialog is stale. */
-  const closeTransientPanels = (): void => {
-    setIsMessagesOpen(false);
-    setIsEndDialogOpen(false);
-  };
+  /** Sends one teacher message and adopts the transcript the backend returns. */
+  const send = async (variant: 'lecture' | 'reply'): Promise<void> => {
+    const text = (variant === 'lecture' ? lectureDraft : replyDraft).trim();
+    if (!text || busy || isEnded) return;
+    setIsSending(true);
+    setTurnError(null);
 
-  /** MVP: the answer joins the sidebar and marks the question as handled; no model call yet. */
-  const sendReply = (): void => {
-    classroomSessionStore.sendReply();
-  };
-
-  /** Clears the round so the layout can be rehearsed again without ending the classroom. */
-  const restartLecture = (): void => {
-    if (peekTimerRef.current !== null) {
-      window.clearTimeout(peekTimerRef.current);
-      peekTimerRef.current = null;
+    // Show the teacher's line immediately, before any request: clear the composer, move the text
+    // above it, and add an optimistic row. The backend list replaces it on success.
+    const optimisticId = `pending-${Date.now()}`;
+    setMessages((current) => [
+      ...current,
+      {
+        id: optimisticId,
+        speaker: 'teacher',
+        role: 'teacher',
+        name: '老师',
+        text,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    if (variant === 'lecture') {
+      setLectureDraft('');
+      keepDraft({ lecture: '' });
+      showLecturePeek(text);
+    } else {
+      setReplyDraft('');
+      keepDraft({ reply: '' });
     }
-    classroomSessionStore.reset();
-    setIsLecturePeekVisible(false);
-    setIsMessagesOpen(false);
-    setIsEndDialogOpen(false);
+
+    let lessonIdForTurn = lessonIdRef.current;
+    try {
+      if (!lessonIdForTurn) {
+        // The first message creates the classroom; only then can it be ended.
+        const created = await createLesson();
+        lessonIdForTurn = created.id;
+        lessonIdRef.current = created.id;
+        // The turn itself returns the transcript; reloading now would flash an empty list.
+        skipNextLoadRef.current = true;
+        setActiveLessonId(created.id);
+        setStatus('active');
+        clearClassroomDraft('new-lesson');
+      }
+
+      const view = await sendLessonTurn(lessonIdForTurn, text);
+      setMessages(view.messages);
+      setStatus(view.status);
+      setIntegrity(view.integrity);
+      setIsMessagesOpen(false);
+    } catch (error) {
+      if (!lessonIdForTurn) {
+        // Creation failed: withdraw the optimistic row and put the text back in the composer.
+        setMessages((current) =>
+          current.filter((message) => message.id !== optimisticId),
+        );
+        if (variant === 'lecture') {
+          setLectureDraft(text);
+          keepDraft({ lecture: text });
+          if (peekTimerRef.current !== null) {
+            window.clearTimeout(peekTimerRef.current);
+            peekTimerRef.current = null;
+          }
+          setIsLecturePeekVisible(false);
+        } else {
+          setReplyDraft(text);
+          keepDraft({ reply: text });
+        }
+        setTurnError(
+          error instanceof Error ? error.message : '创建课堂失败，请重试。',
+        );
+        return;
+      }
+
+      // The teacher message may already be persisted before the model failed; reload so the list
+      // matches the backend instead of inviting a duplicate retry.
+      let reloaded = false;
+      let persisted = false;
+      try {
+        const view = await loadLessonMessages(lessonIdForTurn);
+        setMessages(view.messages);
+        setStatus(view.status);
+        setIntegrity(view.integrity);
+        reloaded = true;
+        const last = view.messages[view.messages.length - 1];
+        persisted = last?.role === 'teacher' && last.text === text;
+      } catch {
+        // Keep the optimistic row; the turn error below already explains the failure.
+      }
+      if (reloaded && !persisted) {
+        // Nothing was stored, so put the text back where the user can send it again.
+        if (variant === 'lecture') {
+          setLectureDraft(text);
+          keepDraft({ lecture: text });
+          // The draft is back in the composer; drop the peek so the text is not shown twice.
+          if (peekTimerRef.current !== null) {
+            window.clearTimeout(peekTimerRef.current);
+            peekTimerRef.current = null;
+          }
+          setIsLecturePeekVisible(false);
+        } else {
+          setReplyDraft(text);
+          keepDraft({ reply: text });
+        }
+      }
+      setTurnError(
+        error instanceof Error ? error.message : '这一轮没有完成，请重试。',
+      );
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  /** Ends the lesson, then lets the parent return to the home and start the summary. */
+  const endClassroom = async (): Promise<void> => {
+    if (isEnding || !activeLessonId) return;
+    setIsEnding(true);
+    setTurnError(null);
+    try {
+      await endLesson(activeLessonId);
+      clearClassroomDraft(activeLessonId);
+      setIsEndDialogOpen(false);
+      onEnded(activeLessonId);
+    } catch (error) {
+      setIsEndDialogOpen(false);
+      setTurnError(
+        error instanceof Error ? error.message : '结束课堂失败，请重试。',
+      );
+    } finally {
+      setIsEnding(false);
+    }
+  };
+
+  /** Creates a fresh lesson and switches the stage to it; used by the degraded-record banner. */
+  const startNewLesson = async (): Promise<void> => {
+    if (isStartingNew) return;
+    setIsStartingNew(true);
+    try {
+      const lesson = await createLesson();
+      // The previous lesson was closed by the backend; its draft no longer applies.
+      if (activeLessonId) clearClassroomDraft(activeLessonId);
+      lessonIdRef.current = lesson.id;
+      setActiveLessonId(lesson.id);
+      setStatus('active');
+      setMessages([]);
+      setIntegrity(null);
+    } catch (error) {
+      setTurnError(
+        error instanceof Error ? error.message : '创建课堂失败，请重试。',
+      );
+    } finally {
+      setIsStartingNew(false);
+    }
   };
 
   /** Opening the sidebar cancels the peek; the lecture is already waiting there in full. */
@@ -153,22 +364,16 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
     endButtonRef.current?.focus();
   };
 
-  /** Ends the whole classroom, clears the session, and returns to the conversation. */
-  const endClassroom = (): void => {
-    if (peekTimerRef.current !== null) {
-      window.clearTimeout(peekTimerRef.current);
-      peekTimerRef.current = null;
-    }
-    classroomSessionStore.reset();
-    setIsEndDialogOpen(false);
-    setIsMessagesOpen(false);
-    setIsLecturePeekVisible(false);
-    onExit();
-  };
-
-  const lectureCharacterCount = Array.from(session.lecture).length;
+  const latestStudentMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === 'student');
+  const isQuestionVisible = Boolean(
+    latestStudentMessage &&
+      messages[messages.length - 1]?.role === 'student' &&
+      !isEnded,
+  );
   const draftInProgress =
-    session.phase === 'composing' ? session.lectureDraft.trim().length > 0 : session.reply.trim().length > 0;
+    phase === 'composing' ? lectureDraft.trim().length > 0 : replyDraft.trim().length > 0;
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-ink-900">
@@ -184,9 +389,7 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             className="tf-classroom-art"
             style={{ backgroundImage: `url(${classroomBackground})` }}
           />
-          {/* Session lifecycle lives in one top-right segmented control: leaving and ending are
-              the same category, so they share a container instead of occupying opposite corners.
-              The end segment stays neutral until hover/focus; the dialog carries the danger. */}
+
           <div className="tf-classroom-overlay absolute inset-x-0 top-0 flex items-start justify-start py-4 pl-[2.5%] pr-4 md:py-5">
             <div
               aria-label="课堂操作"
@@ -197,33 +400,95 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
                 autoFocus
                 className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-ink-800 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
                 onClick={onExit}
-                title="保留本节课进度，返回对话"
+                title="保留本节课进度，返回课堂首页"
                 type="button"
               >
                 <ArrowLeft aria-hidden="true" className="size-4" />
-                退出课堂模式
+                退出课堂
               </button>
-              <button
-                aria-haspopup="dialog"
-                className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-ink-800 transition-colors hover:bg-rose-50/90 hover:text-rose-700 focus-visible:bg-rose-50/90 focus-visible:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-                onClick={() => setIsEndDialogOpen(true)}
-                ref={endButtonRef}
-                title="结束本节课，清空本轮内容"
-                type="button"
-              >
-                <FlagPennant aria-hidden="true" className="size-4" />
-                结束课堂
-              </button>
+              {/* Only a loaded, active lesson can be ended: while the record is still loading (or
+                  failed to load) there is nothing valid to end yet. */}
+              {status === 'active' && activeLessonId && (
+                <button
+                  aria-haspopup="dialog"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-ink-800 transition-colors hover:bg-rose-50/90 hover:text-rose-700 focus-visible:bg-rose-50/90 focus-visible:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={isEnding}
+                  onClick={() => setIsEndDialogOpen(true)}
+                  ref={endButtonRef}
+                  title="结束本节课并整理课堂记录"
+                  type="button"
+                >
+                  <FlagPennant aria-hidden="true" className="size-4" />
+                  结束课堂
+                </button>
+              )}
             </div>
           </div>
 
-          {session.isQuestionVisible && (
+          {turnError ? (
+            <ClassroomRecoveryBanner
+              busy={busy}
+              message={turnError}
+              onRetry={() => void reloadMessages()}
+              onStartNew={() => void startNewLesson()}
+              variant="error"
+            />
+          ) : (
+            integrity?.status === 'degraded' && (
+              <ClassroomRecoveryBanner
+                busy={busy}
+                corruptLineCount={integrity.corruptLineCount}
+                onRetry={() => void reloadMessages()}
+                onStartNew={() => void startNewLesson()}
+                variant="degraded"
+              />
+            )
+          )}
+
+          {isLoading && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/40 text-sm text-ink-700 backdrop-blur-sm">
+              正在加载课堂记录…
+            </div>
+          )}
+
+          {isSending && !isEnded && (
+            <>
+              <span className="sr-only" role="status">
+                学生正在思考中
+              </span>
+              {(['su', 'lin', 'gu'] as const).map((speaker) => (
+                <div
+                  aria-hidden="true"
+                  className="tf-classroom-bubble absolute bottom-[66%] flex -translate-x-1/2 items-center gap-1.5 rounded-2xl border border-white/70 bg-white/90 px-3 py-1.5 text-xs text-ink-600 shadow-card backdrop-blur-md"
+                  key={speaker}
+                  style={{ left: BUBBLE_LEFT[speaker] }}
+                >
+                  <CircleNotch
+                    aria-hidden="true"
+                    className="size-3 animate-spin motion-reduce:animate-none"
+                  />
+                  正在思考中…
+                  <span className="absolute -bottom-1 left-1/2 size-2 -translate-x-1/2 rotate-45 border-b border-r border-white/70 bg-white/90" />
+                </div>
+              ))}
+            </>
+          )}
+
+          {isQuestionVisible && latestStudentMessage && (
             <div
               aria-live="polite"
-              className="tf-classroom-bubble absolute bottom-[64%] left-1/2 flex w-[38%] max-w-[30rem] -translate-x-1/2 flex-col gap-1 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 text-left shadow-card backdrop-blur-md"
+              className="tf-classroom-bubble absolute bottom-[64%] flex w-[30%] max-w-[24rem] -translate-x-1/2 flex-col gap-1 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 text-left shadow-card backdrop-blur-md"
+              style={{
+                left:
+                  BUBBLE_LEFT[
+                    latestStudentMessage.speaker as Exclude<LessonSpeaker, 'teacher'>
+                  ] ?? '50%',
+              }}
             >
-              <span className="text-xs font-semibold text-brand-700">{CLASSROOM_STUDENT.name}</span>
-              <p className="text-sm leading-6 text-ink-900">{CLASSROOM_STUDENT.question}</p>
+              <span className="text-xs font-semibold text-brand-700">
+                {latestStudentMessage.name}
+              </span>
+              <p className="text-sm leading-6 text-ink-900">{latestStudentMessage.text}</p>
               <span
                 aria-hidden="true"
                 className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 border-b border-r border-white/70 bg-white/90"
@@ -231,8 +496,6 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             </div>
           )}
 
-          {/* The lecture and the composer share one dock; the peek floats above the box so it
-              can fade away without moving the composer. */}
           <div className="tf-classroom-composer absolute inset-x-0 bottom-[3%] flex justify-center">
             <div className="relative w-[46%] min-w-[20rem] max-w-[42rem]">
               {isLecturePeekVisible && (
@@ -242,7 +505,7 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-3 py-1.5">
                     <span className="text-xs font-semibold text-ink-700">
-                      讲稿 · {lectureCharacterCount} 字
+                      讲稿 · {Array.from(peekText).length} 字
                     </span>
                     <button
                       className="text-[11px] font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
@@ -253,21 +516,33 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
                     </button>
                   </div>
                   <p className="tf-scrollbar max-h-24 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-sm leading-6 text-ink-800">
-                    {session.lecture}
+                    {peekText}
                   </p>
                 </section>
               )}
-              <ClassroomComposer
-                autoFocus={session.phase === 'sent'}
-                className="shadow-card"
-                onChange={(value) => {
-                  if (session.phase === 'sent') classroomSessionStore.setReply(value);
-                  else classroomSessionStore.setLectureDraft(value);
-                }}
-                onSend={session.phase === 'sent' ? sendReply : sendLecture}
-                value={session.phase === 'sent' ? session.reply : session.lectureDraft}
-                variant={session.phase === 'sent' ? 'reply' : 'lecture'}
-              />
+              {isEnded ? (
+                <div className="rounded-3xl border border-ink-200 bg-white/90 px-5 py-4 text-center text-sm text-ink-600 shadow-card">
+                  本节课已结束。课堂记录与总结可在课堂首页查看。
+                </div>
+              ) : (
+                <ClassroomComposer
+                  autoFocus={phase === 'sent'}
+                  className="shadow-card"
+                  disabled={busy}
+                  onChange={(value) => {
+                    if (phase === 'sent') {
+                      setReplyDraft(value);
+                      keepDraft({ reply: value });
+                    } else {
+                      setLectureDraft(value);
+                      keepDraft({ lecture: value });
+                    }
+                  }}
+                  onSend={() => void send(phase === 'sent' ? 'reply' : 'lecture')}
+                  value={phase === 'sent' ? replyDraft : lectureDraft}
+                  variant={phase === 'sent' ? 'reply' : 'lecture'}
+                />
+              )}
             </div>
           </div>
 
@@ -275,83 +550,31 @@ export function ClassroomMode({ onExit }: { onExit: () => void }) {
             <button
               aria-controls="classroom-messages"
               aria-expanded={false}
-              aria-label={`展开课堂消息（${session.messages.length} 条）`}
+              aria-label={`展开课堂消息（${messages.length} 条）`}
               className="absolute bottom-[3%] right-[2.5%] z-20 inline-flex size-11 items-center justify-center rounded-full border border-white/70 bg-white/80 text-ink-800 opacity-90 shadow-card backdrop-blur-md transition hover:bg-white hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
               onClick={openMessages}
               type="button"
             >
               <ChatsCircle aria-hidden="true" className="size-5" />
-              {session.messages.length > 0 && (
+              {messages.length > 0 && (
                 <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full bg-brand-700 px-1 text-[11px] font-semibold leading-5 text-white">
-                  {session.messages.length}
+                  {messages.length}
                 </span>
               )}
             </button>
           )}
 
-          <aside
-            aria-label="课堂消息"
-            className={`absolute bottom-[3%] right-[2.5%] top-[12%] z-20 flex w-[23%] min-w-[16rem] max-w-[22rem] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/85 shadow-float backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
-              isMessagesOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-3 opacity-0'
-            }`}
-            id="classroom-messages"
-            inert={!isMessagesOpen}
-          >
-            <header className="flex shrink-0 items-center gap-2 border-b border-ink-200/70 px-3 py-2">
-              <span className="text-xs font-semibold text-ink-700">
-                课堂消息 · {session.messages.length}
-              </span>
-              {session.phase === 'sent' && (
-                <button
-                  className="ml-auto text-[11px] font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-                  onClick={restartLecture}
-                  type="button"
-                >
-                  重新讲解
-                </button>
-              )}
-              <button
-                aria-label="收起课堂消息"
-                className={`${session.phase === 'sent' ? '' : 'ml-auto'} rounded-full p-1 text-ink-500 transition hover:bg-ink-100 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40`}
-                onClick={() => setIsMessagesOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" className="size-4" />
-              </button>
-            </header>
-            <div
-              className="tf-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2"
-              ref={messageListRef}
-            >
-              {session.messages.length === 0 ? (
-                <p className="px-1 py-6 text-center text-xs leading-5 text-ink-500">
-                  发送讲解后，讲稿与学生的提问会出现在这里。
-                </p>
-              ) : (
-                session.messages.map((message) => (
-                  <article
-                    className={
-                      message.role === 'teacher'
-                        ? 'rounded-xl border-l-2 border-brand-500 bg-white/90 px-3 py-2'
-                        : 'rounded-xl bg-ink-100/80 px-3 py-2'
-                    }
-                    key={message.id}
-                  >
-                    <span className="text-[11px] font-semibold text-ink-600">{message.label}</span>
-                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-ink-900">
-                      {message.text}
-                    </p>
-                  </article>
-                ))
-              )}
-            </div>
-          </aside>
+          <ClassroomMessageDrawer
+            messages={messages}
+            onClose={() => setIsMessagesOpen(false)}
+            open={isMessagesOpen}
+          />
 
           {isEndDialogOpen && (
             <EndClassroomDialog
               hasUnsavedDraft={draftInProgress}
               onCancel={closeEndDialog}
-              onConfirm={endClassroom}
+              onConfirm={() => void endClassroom()}
             />
           )}
         </div>

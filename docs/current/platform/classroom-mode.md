@@ -3,138 +3,108 @@ status: current
 layer: platform
 domain: classroom-mode
 canonical_for:
+  - classroom-mode-home
+  - classroom-mode-stage
   - classroom-mode-window-aspect
 related:
   - docs/current/platform/index.md
-  - docs/current/platform/desktop-skin.md
   - docs/current/platform/architecture-and-code-placement.md
+  - docs/current/platform/agent-runtime.md
+  - docs/changes/2026-11-13-classroom-simulation/design.md
   - docs/source/课堂模拟图像素材规格.md
-  - docs/source/学习趣味性设计讨论.md
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # 课堂模式
 
-本页描述 `apps/desktop` 当前实际生效的课堂模式：侧栏入口、沉浸式舞台，以及进入后强制的 16:9 窗口比例。课堂状态机、学生立绘、气泡与报告仍是设计草案（见[学习趣味性设计讨论](../../source/学习趣味性设计讨论.md) 3.7 节），不在当前实现内。
+本页描述 `apps/desktop` 与 classroom API 当前实际生效的课堂模式：侧栏入口先打开课堂首页（进行中课堂、历史总结、开始新课堂），进入课堂后是占用整窗的 16:9 舞台；一轮对话由老师消息和一名学生回应组成，消息写入本地 JSONL，结束课堂后按需生成模型总结。
 
-## 入口与布局
-
-| 项 | 当前事实 |
-|---|---|
-| 入口 | 侧栏「知识掌握」下方的「课堂模式」（`Chalkboard` 图标），对应 `SidebarView = 'classroom'` |
-| 布局 | 进入后不渲染侧栏与聊天头，舞台占满整个窗口内容区；因此窗口内容区的比例就是舞台比例 |
-| 临时退出 | 舞台左上分段控件的「退出课堂模式」，或按 `Esc`（焦点在输入框内时除外）：回到对话视图，课堂会话保留在 `classroomSessionStore` 中，再次进入恢复讲稿、消息、草稿与气泡 |
-| 结束课堂 | 舞台左上分段控件的「结束课堂」（`FlagPennant`）：常驻中性，hover/focus 才转为 `rose-700` 文字与浅红底；点击弹确认框，确认后清空会话并返回对话；不可撤销 |
-| 组件 | [ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx) 负责舞台、窗口模式开关、侧栏与确认框；会话状态在 [classroom-session-store.ts](../../../apps/desktop/src/features/classroom/classroom-session-store.ts) |
-
-舞台由两层 CSS 决定（[styles.css](../../../apps/desktop/src/styles.css)）：
-
-- `.tf-classroom-viewport`：`container-type: size`，让子元素能用 `100cqw`/`100cqh` 互相换算。
-- `.tf-classroom-stage`：`width: min(100cqw, 100cqh * 16 / 9)`、`height: min(100cqh, 100cqw * 9 / 16)`，即视口内最大的 16:9 矩形并居中。只用 `max-width`/`max-height` 会夹住单轴、破坏比例并把学生图拉变形。
-- 背景 [bg-classroom.png](../../../apps/desktop/src/assets/classroom/bg-classroom.png)（1568×882，恰好 16:9）按 `cover` 铺满舞台；窗口被锁成 16:9 时舞台与内容区同尺寸，不裁剪、不出现留边。
-- 舞台外的 `ink-900` 底色只在窗口比例无法被约束时露出（普通浏览器预览、最大化窗口）。
-
-### 消息输入框
-
-舞台底部、前景课桌上的输入框是 [ClassroomComposer.tsx](../../../apps/desktop/src/features/classroom/ClassroomComposer.tsx)：**只有样式**与对话视图的输入框一致，功能是课堂专用的子集，目前是课堂流程的交互原型（MVP）。
+## 入口与课堂首页
 
 | 项 | 当前事实 |
 |---|---|
-| 定位 | 舞台内绝对定位，`left/right: 0` + `bottom: 3%` 居中；宽度 `46%`（`min-w-[20rem]`、`max-w-[42rem]`），与插图上前景课桌区域（约 29%–75% 宽、76%–97% 高）对齐 |
-| 卡片 | 与对话输入框同款：白卡、`rounded-3xl`、1px `ink-200` 描边、聚焦只换 `brand-500` 边框；因压在暖色课桌上，额外加 `shadow-card` 做分离 |
-| 移除 | **附件选择与标签**、**斜杠命令菜单与命令胶囊**（`/查询资料库`、`/探索主题` 只属于备课对话） |
-| `Esc` | 焦点在输入框内时不退出课堂模式，避免丢掉半写的草稿；点击画面后再按 `Esc` 才退出 |
+| 入口 | 侧栏「知识掌握」下方的「课堂模式」（`SidebarView = 'classroom'`） |
+| 首页布局 | 与「知识掌握」同构：保留侧栏，右上「开始新课堂」，主体分「进行中的课堂」与「历史课堂」 |
+| 进行中 | 最近一条 `active` 课堂：开始时间 +「结束课堂」/「继续上课」 |
+| 历史 | `ended` 按结束时间倒序：日期、总结状态、摘要预览（已去掉 Markdown 符号）；点击进入只读详情（完整总结 + 消息记录，可重新生成总结）；行尾垃圾桶确认后删除课堂行、总结与记录目录 |
+| 空态 | 无进行中课堂时显示说明文案；「开始新课堂」进入草稿舞台，不发消息不创建课堂 |
+| 数据 | `GET /api/lessons?status=active|ended`、`POST /api/lessons`（草稿首次发送时）、`POST /api/lessons/:id/end`、`GET /api/lessons/:id/summary`、`DELETE /api/lessons/:id` |
+| 组件 | [ClassroomHome.tsx](../../../apps/desktop/src/features/classroom/ClassroomHome.tsx) 负责首页与详情；[classroom-api.ts](../../../apps/desktop/src/features/classroom/classroom-api.ts) 封装请求与运行时校验 |
 
-两种状态（`composing → sent`，状态在 [classroom-session-store.ts](../../../apps/desktop/src/features/classroom/classroom-session-store.ts) 内，因此离开视图不丢进度）：
+只有进入舞台时窗口才锁 16:9；首页保持普通窗口与侧栏。
 
-| 状态 | 输入区 | 讲稿 | 学生气泡 |
-|---|---|---|---|
-| `composing`（默认） | 四行文本框，固定 96px（`h-24`）+ 底栏；占位符「写下你准备讲给学生的内容…」 | 无 | 无 |
-| `sent`（按 `Ctrl + Enter` 或「发送」后） | 单行回复框，40px（`h-10`），右侧内联「发送」；占位符「回答学生…Ctrl + Enter 发送」，自动获得焦点 | 先浮在输入框上方约 3 秒（`.tf-classroom-peek`，3s 保持 + 0.6s 淡出），随后只存在于消息侧栏 | 中间学生「小满」头顶出现问题气泡 |
+## 课堂舞台
 
-- 发送按钮在草稿为空时禁用；`Ctrl/Cmd + Enter` 与点击按钮等价，普通 Enter 只换行。
-- 淡出期间讲稿卡绝对定位在输入框上方，不占停靠区高度；`sent` 时停靠区仅 88.6%–97%，学生完全露出。
-- 回复发送后：清空回复框、收起问题气泡（表示已作答），回答追加到消息侧栏。
-- **原型边界**：讲稿与回复都只是本地状态，不写入会话、不调用模型；问题气泡的文案写死。会话在视图卸载后保留（内存），应用重启即丢失；接入课堂状态机后再改为真实提问/回答与持久化。
+- 进入方式：首页「继续上课」进入已有课堂，或「开始新课堂」进入草稿舞台。
+- 草稿舞台第一次发送时才创建课堂（同时结束旧 active）；课堂存在且为 `active` 时才显示「结束课堂」，空草稿退出不会留下任何记录。
+- 舞台独占窗口内容区，渲染同一张 16:9 背景图；顶部左侧是「退出课堂」与「结束课堂」分段控件。
+- 「退出课堂」回到首页，课堂保持 `active`，草稿在本次应用会话内保留；再次进入重新拉取记录。
+- 结束课堂弹确认框，确认后调用 `POST /api/lessons/:id/end` 返回首页，并在后台生成总结。
+- 已结束的课堂进入时显示只读提示，输入区不可用。
+- 组件：[ClassroomMode.tsx](../../../apps/desktop/src/features/classroom/ClassroomMode.tsx)。
+
+### 一轮对话
+
+| 状态 | 输入区 | 行为 |
+|---|---|---|
+| 首次讲解 | 四行文本框（固定 96px） | `Ctrl/Cmd + Enter` 或「发送」→ `POST /api/lessons/:id/turns` |
+| 已有记录 | 单行回答框 + 内联「发送」 | 每次提交同样进入 `/turns`，返回全量消息 |
+| 发送中 | 讲解立刻浮在输入框上方，输入框清空并切为单行回答框；三名学生头顶各显示「正在思考中…」 | 同课堂并发的第二轮由后端返回 409；失败时恢复未落盘的草稿 |
+| 失败 | 保留草稿并显示稳定文案 | 先重新拉取记录再提示，避免重复发送 |
+
+- 学生气泡只显示最新一条学生消息，按 `speaker` 定位：`lin` 左（22%）、`su` 中（50%）、`gu` 右（78%）；老师发送回答后气泡消失。
+- 等待模型时三个座位各有一个小气泡「正在思考中…」（左侧带旋转加载图标），响应到达后一起替换为真实学生气泡。
+- 讲稿发送后浮在输入框上方约 3.6 秒，然后只存在于消息侧栏。
+- 输入框不带附件、不带斜杠命令。
 
 ### 消息侧栏
 
-| 项 | 当前事实 |
+- 默认折叠；右下角圆形按钮显示消息总数，展开为右侧覆盖抽屉。
+- 每条记录显示说话人名（老师 / 苏小满 / 林澈 / 顾知夏）与正文，按时间正序，打开或新增时滚到最新。
+- 记录损坏时顶部显示「记录有 N 行损坏，已跳过」，舞台仍可用已解析内容；追加会被后端拒绝。
+
+## 结束课堂与总结
+
+1. 确认结束 → `ended`，回到首页。
+2. 首页在后台调用 `POST /api/lessons/:id/summary`，期间每 3 秒轮询列表；完成显示摘要预览，失败可「重新生成」。
+3. 总结存于 SQLite `lessons`（`summaryStatus/summaryMarkdown/summaryError/summaryGeneratedAt`），由一次 `LlmService.generate()` 生成四节 Markdown；消息仍在 JSONL。
+4. 只有 `ended` 课堂能生成总结；`active` 请求返回 409。
+
+## 记录与恢复
+
+| 场景 | 行为 |
 |---|---|
-| 默认 | 折叠；右下角圆形 `ChatsCircle` 按钮，有消息时右上角显示条数角标 |
-| 展开 | 右侧覆盖式抽屉：`right 2.5% / top 12% / bottom 3%`、宽 `23%`（`min 16rem`、`max 22rem`）、`bg-white/85` + `backdrop-blur-xl` + `shadow-float`；折叠时 `opacity-0` + `translate-x-3` + `inert`，不参与 Tab |
-| 内容 | 按时间顺序：`老师 · 讲稿`、`小满` 的问题、`老师` 的逐次回答；列表固定高度、内部滚动，打开或有新消息时自动滚到底 |
-| 关闭 | 抽屉头部 `X`；`Esc` 先收抽屉，再按一次才临时退出课堂模式；输入框内按 `Esc` 仍不退出 |
-| 重新讲解 | 抽屉头部，清空本轮讲稿、气泡与消息，回到 `composing` |
-| 尺寸影响 | 抽屉只覆盖、不挤压舞台：窗口仍是 16:9，画面不缩放、不留边；展开时遮住右侧第三名学生与书架，默认折叠因此不影响画面 |
-| 滚动条 | 抽屉列表使用 `.tf-scrollbar`（同输入框），显示应用自己的 10px 条 |
-
-### 结束课堂
-
-左上角是一个分段玻璃控件，把临时退出与结束放在同一容器里；右上顶部不再放按钮，右下保留消息入口：
-
-| 项 | 事实 |
-|---|---|
-| 容器 | `inline-flex h-10 rounded-full border-white/70 bg-white/80 p-1 shadow-card backdrop-blur-md`，`role="group"`、`aria-label="课堂操作"` |
-| 退出段 | 返回箭头 + 「退出课堂模式」，`text-ink-800`，hover `bg-white`；`autoFocus` |
-| 结束段 | `FlagPennant` + 「结束课堂」，常驻 `text-ink-800`；hover/focus 时文字与图标转 `rose-700`、底色 `rose-50/90`，移开恢复中性；焦点环 `brand-500/40`；`aria-haspopup="dialog"` |
-| 确认框 | 遮罩 `bg-ink-900/30`；白卡 `role="dialog"` + `aria-modal`，标题「结束本节课？」，正文说明会整理为课堂记录并返回对话；有未发送草稿时追加一行「正在编辑的内容不会保存。」 |
-| 焦点 | 打开时聚焦「继续上课」；Tab 在「继续上课 / 结束课堂」之间循环；`Esc` 或点击遮罩取消，焦点回到「结束课堂」 |
-| 确认 | 清空 `classroomSessionStore`、关闭侧栏与浮层、解除 16:9、回到对话视图；再次进入是全新的 `composing` |
-| `Esc` 优先级 | 确认框 → 消息侧栏 → 输入框（忽略）→ 临时退出 |
-
-### 进入动效
-
-图片不是直接切进来：`.tf-classroom-art`（只承载背景图的那一层）用软边圆形遮罩从中心向外展开，同时从 1.06 倍轻微回落，控制胶囊延后淡入。遮罩只作用于图片层，所以控件不会被圆形边界裁切。
-
-| 参数 | 值 |
-|---|---|
-| 遮罩 | `radial-gradient(circle farthest-corner, #000 var(--tf-stage-reveal), transparent calc(var(--tf-stage-reveal) + 12%))`；半径是注册过的 `--tf-stage-reveal`（`@property`），从 `0%` 到 `100%`，即从中心扩到最远角 |
-| 展开时长 | 640ms，`cubic-bezier(0.45, 0, 0.55, 1)`（先慢后匀），波前是 12% 的柔化过渡而不是硬圆边 |
-| 画面回落 | `tf-stage-settle` 1300ms，`scale(1.06) → 1`，让教室"稳住"而不是定格 |
-| 控件 | `tf-classroom-overlay` 复用 `tf-rise`，延迟 280ms（展开过半后）淡入上浮 |
-| 输入框 | `tf-classroom-composer` 复用 `tf-rise`，延迟 340ms，最后落位 |
-| 降级 | `prefers-reduced-motion: reduce` 时三处动画与遮罩全部关闭，图片直接以 `--tf-stage-reveal: 100%` 的完整状态显示 |
-
-遮罩半径必须用注册属性：未注册的自定义属性无法插值，关键帧会跳变；`farthest-corner` 让 `100%` 的语义就是"最远角"，动画结束即完全覆盖，不留暗角。
+| 正常一轮 | 老师消息先写入 `<configDir>/lessons/<lessonId>/messages.jsonl`，学生回复成功后追加 |
+| 损坏记录 | 读接口 `200 + integrity.degraded`；追加被拒绝 |
+| 恢复 | 首页或舞台「开始新课堂」结束当前 active 并新建 UUID 课堂；旧记录保留不修复 |
+| 重启 | 首页与舞台都从 API 读取，无进程内消息状态 |
 
 ## 窗口 16:9
 
-渲染层只声明「课堂模式是否在屏幕上」，几何全部由 main 决定：
+渲染层只声明「舞台是否在屏幕上」，几何由 main 决定：
 
 | 层 | 事实 |
 |---|---|
-| `window.teachforge.setClassroomMode(enabled)` | [desktop-bridge.ts](../../../apps/desktop/src/types/desktop-bridge.ts) 的唯一新能力；[preload](../../../apps/desktop/electron/preload/preload.ts) 转 `ipcRenderer.invoke('window:set-classroom-mode', enabled)` |
-| IPC 校验 | 参数必须是布尔值；窗口不可用时报错，不静默降级 |
-| 进入 | `applyClassroomMode(win, true)`：先退出全屏/最大化（比例只约束普通窗口），用 `planAspectLock` 由当前窗口尺寸算出**内容区 16:9** 的 bounds，记下 baseline 后写入 |
-| 拖动 | 在 `will-resize` 里按实测边框补偿修正为内容区 16:9：保留位移更大的那条轴（拖右边缘改宽度、拖下边缘改高度），另一轴按比例推导，并阻止系统原本的这次尺寸 |
-| 离开 | 删除锁；用户没在模式内改过尺寸时写回 baseline，改过或窗口已最大化/全屏时保留用户当前尺寸 |
+| `window.teachforge.setClassroomMode(enabled)` | 舞台挂载时开启、卸载时关闭；首页不调用 |
+| 进入 | 先退出全屏/最大化，`planAspectLock` 由当前尺寸算出内容区 16:9 |
+| 拖动 | `will-resize` 内按实测边框补偿，保留位移更大的轴，另一轴按比例推导 |
+| 离开 | 删除锁；用户没在模式内改过尺寸时写回 baseline |
 
-`planAspectLock`（[window-layout.ts](../../../apps/desktop/electron/main/window-layout.ts)）是纯函数：保留当前内容宽度、按 16:9 推导高度；显示器装不下时两轴一起缩小；结果夹进 `workArea`，避免窗口跑到屏幕外。
-
-### 为什么没用 `win.setAspectRatio`
-
-在 125% 缩放、边框 16×39 的 Windows 实测：`win.setAspectRatio(16 / 9)` 约束的是**窗口外框**，内容区变成 1.84（应为 1.7778），舞台两侧出现 26px 留边；把实测边框作为 `extraSize` 传入没有改变结果。因此改为在 `will-resize` 内按内容区自行修正，比例与舞台完全对齐。macOS/Linux 未实测，代码路径与平台无关。
-
-### 与既有窗口能力的关系
-
-- 进入课堂模式会卸载聊天视图，`ArtifactSidebar` 的卸载回调会立即 `releaseContentWidth()`；这与进入模式的写尺寸是同一条 IPC 序列，先释放再锁比例，不会互相覆盖。
-- 模式进行中不写入 `userData/window-state.json` 的临时尺寸，保存的是进入前的 baseline，下次启动仍是用户自己的窗口大小。
-- 退出后窗口与聊天视图的可拉伸行为完全恢复（不受 16:9 约束）。
+CSS 上 `.tf-classroom-viewport` 提供容器尺寸，`.tf-classroom-stage` 取视口内最大的 16:9 矩形并居中；窗口无法锁比例时舞台留边而不变形。`win.setAspectRatio` 因约束外框已在实测中否决，详见[课堂模式与 16:9 窗口设计](../../changes/2026-11-12-classroom-mode/design.md)。
 
 ## 与设计稿的差异
 
-[课堂模拟图像素材规格](../../source/课堂模拟图像素材规格.md) 规划的是 16:10 舞台、独立学生立绘与前景课桌条；本轮按用户提供的一张 16:9 背景图实现，因此：
-
 | 项 | 草案 | 当前实现 |
 |---|---|---|
-| 舞台比例 | 16:10 | 16:9（与图片和用户要求一致） |
-| 素材 | BG-01 + FG-01 + 3 张立绘 | 仅背景图 `bg-classroom.png` |
-| 内容 | 讲解→轮转提问→报告 | 只有沉浸式舞台与退出入口 |
-
-立绘与背景替换时保持 16:9 即可；若改成 16:10 素材，需要同时改 `CLASSROOM_ASPECT_RATIO` 与 `.tf-classroom-stage` 的两处比例。
+| 课堂流程 | 讲解→轮转提问→报告 | 讲解/回答与一名学生回应；报告与评估仍未实现 |
+| 学生立绘 | 3 张独立立绘 + 前景条 | 单张 16:9 背景图内绘三名学生；气泡按 `speaker` 定位 |
+| 消息持久化 | 结束时写入会话历史 | 独立 `lessons` + JSONL，不与 conversation 绑定 |
+| 课堂总结 | 未定义 | P2 模型总结（四节，无评分/掌握度） |
 
 ## 验证方式
 
-- `npm run test:layout-budget --workspace @teachforge/desktop`：`planAspectLock` 的保留宽度、短屏缩放、屏幕边界回夹。
-- 实机（`npm run dev:desktop` 后进入课堂模式）：内容区 `innerWidth/innerHeight` 应为 16:9；拖右边缘与下边缘都等比变化；退出后窗口尺寸恢复，且随后可自由拉伸；从最大化状态进入会先还原为普通窗口并锁成 16:9。
+- `npm run test:classroom-lessons --workspace @teachforge/backend`：消息列表、创建/幂等结束、损坏降级、列表与预览、总结读写、发言端点的状态校验。
+- `npm run test:classroom-turns --workspace @teachforge/backend`：每课堂运行锁。
+- `npm run test:classroom-summaries --workspace @teachforge/backend`：总结生成、失败、损坏、并发、启动重置。
+- `npm run build:renderer --workspace @teachforge/desktop`：首页与舞台类型检查与打包。
+- 实机（Win11，Chrome 1568×880 + 桌面桥 mock）：首页显示进行中课堂与历史总结；进入舞台发送讲解后气泡落在 `su` 头顶、侧栏计数与单行回答框正确。

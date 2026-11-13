@@ -40,7 +40,7 @@ import {
 import { ConversationKnowledgeFactEntity } from './conversation-knowledge-fact.entity';
 import { GENERATE_TIMEOUT_MS, MAX_GENERATE_ATTEMPTS } from './rehearsal.constants';
 import { readPlan, readReport } from './rehearsal-digest';
-import { parseJsonObject } from './rehearsal-json';
+import { parseJsonObject } from '../llm/model-json';
 import { RehearsalEntity } from './rehearsal.entity';
 import type { MasteryStatus } from './rehearsal.types';
 

@@ -16,8 +16,9 @@ related:
   - docs/changes/2026-11-07-conversation-session-persistence/verification.md
   - docs/changes/2026-11-10-deep-research-command/design.md
   - docs/changes/2026-11-11-deepseek-web-tools/design.md
+  - docs/changes/2026-11-13-classroom-simulation/design.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Agent Runtime 运行链路
@@ -211,6 +212,21 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 
 详细状态机与 API 见[演练模式](../domains/rehearsals/index.md)。
 
+## 课堂模拟
+
+课堂模拟是独立 Agent，不经过 `ChatService`，也不写 `messages` 或 `pi_session_snapshots`：
+
+- `ClassroomSimulationAgent.run()` 每轮先建/取 `lessons` 行，把老师消息追加到 `<configDir>/lessons/<lessonId>/messages.jsonl`，再从文件重建最近 12 条 / 4000 字符的 transcript。
+- 导演会话由 `llm/pi-agent-runtime.ts` 创建：`systemPrompt` 整体替换默认编码提示词、关闭 extensions/skills/prompt templates/context files、`tools: []`、`compaction: false`、`thinkingLevel: 'off'`；只输出 `{"student":"su|lin|gu"}`，非 JSON 或非法 id 直接抛错，不随机兜底。
+- 学生会话由 `StudentAgent.createAgent(systemPrompt)` 创建，同样是工具关闭、无思考的一次性 Pi session；导演与学生的系统提示词都不加载 IDENTIFY/PREFERENCE/skill。
+- SQLite 只存课堂生命周期（`lessons.id/status/endedAt/时间戳`）；消息一行一条 JSON 追加，Agent 不保留消息成员变量，重启后从文件恢复。
+- `lessons/` 根加入 `SettingsService.getManagedFilePaths()`，普通对话的文件工具不能读写课堂记录。
+- 课堂 HTTP 目前有列表、消息、建/发言/结束与总结读写（`GET /api/lessons`、`POST /api/lessons/:lessonId/turns`、`GET/POST /api/lessons/:lessonId/summary` 等）；每课堂用 `ClassroomTurnsService` 拒绝并发轮次；详情端点、SSE 与 `random_dispatcher`/`dispatch_to_student` 工具仍未实现。
+- 桌面端 `ClassroomHome` 负责进行中/历史/总结详情与新建；`ClassroomMode` 进入时加载记录、发送走 `/turns`、结束时后台生成总结，只有舞台挂载时才锁 16:9。
+- 课堂总结由 `ClassroomSummariesService` 通过 `LlmService.generate()` 生成：固定 `systemPromptAppend`、`tools: []`、无记忆、120 秒超时；结果存 `lessons` 表，不在 JSONL；失败/损坏/并发都落在 `summaryStatus`，启动时重置遗留的 `generating`。
+- 记录损坏时读接口返回 `integrity: degraded` 与行号，`appendMessage()` 拒绝写入坏文件；恢复手段是新建课堂，旧文件保留不修复。
+- 每课堂只串行化“追加”，尚未串行化整轮。
+
 ## 压缩职责结论
 
 Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 工程层不触发、不实现压缩，也不会丢弃或改写 SQLite 历史。触发、配置和持久化方式见上文“持久化与恢复约定”。
@@ -265,6 +281,7 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 - 会话侧栏与 Renderer 查询状态：`apps/desktop/src/features/agent/AgentChatPage.tsx`、`ConversationSidebar.tsx`、`conversation-store.ts`
 - 会话附件：`apps/backend/src/attachments/`、`apps/desktop/src/features/agent/ComposerAttachments.tsx`、`attachment-store.ts`
 - 演练状态机、digest、transcript：`apps/backend/src/rehearsals/`
+- 课堂模拟 Agent 与本地记录：`apps/backend/src/llm/ClassroomSimulationAgent.ts`、`StudentAgent.ts`、`apps/backend/src/lessons/`
 - 演练桌面视图：`apps/desktop/src/features/rehearsal/`
 - 本机设置 UI 和 backend 文件配置：`apps/desktop/src/features/settings/SettingsPage.tsx`、`apps/backend/src/settings/`
 

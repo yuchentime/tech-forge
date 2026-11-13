@@ -60,7 +60,9 @@ import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage';
+import { ClassroomHome } from '../classroom/ClassroomHome';
 import { ClassroomMode } from '../classroom/ClassroomMode';
+import { generateLessonSummary } from '../classroom/classroom-api';
 import {
   REHEARSAL_REQUIRES_ROUND_HINT,
   hasCompletedConversationRound,
@@ -122,6 +124,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     artifactListStore.getSnapshot,
   );
   const [activeView, setActiveView] = useState<SidebarView>('chat');
+  /** Non-null only while the 16:9 stage is open; `lessonId: null` is a draft classroom. */
+  const [classroomStage, setClassroomStage] = useState<{ lessonId: string | null } | null>(null);
+  /** Lesson whose post-class summary is still generating after the stage closed. */
+  const [classroomSummaryLessonId, setClassroomSummaryLessonId] = useState<string | null>(null);
   const [conversationDisplayMode, setConversationDisplayMode] =
     useState<'conversation' | 'rehearsal'>('conversation');
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
@@ -459,9 +465,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     await conversationStore.renameConversation(conversationId, title);
   }, []);
 
-  /** Leaves the immersive classroom view; the stage's Esc handler depends on a stable identity. */
-  const exitClassroomMode = useCallback(() => setActiveView('chat'), []);
-
   const isHistoryLoading = loadingConversationId !== null;
   /** Drills need a completed round, so the toggle and the view both follow that gate. */
   const canEnterRehearsal = hasCompletedRound;
@@ -486,10 +489,21 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
-      {activeView === 'classroom' ? (
+      {activeView === 'classroom' && classroomStage ? (
         // The stage owns the whole window so its 16:9 artwork matches the locked window ratio;
         // leaving goes through the stage's own exit control instead of the hidden sidebar.
-        <ClassroomMode onExit={exitClassroomMode} />
+        <ClassroomMode
+          lessonId={classroomStage.lessonId}
+          onEnded={(lessonId) => {
+            setClassroomStage(null);
+            // The summary is post-class work; the home page polls while this runs.
+            setClassroomSummaryLessonId(lessonId);
+            void generateLessonSummary(lessonId)
+              .catch(() => undefined)
+              .finally(() => setClassroomSummaryLessonId(null));
+          }}
+          onExit={() => setClassroomStage(null)}
+        />
       ) : (
         <>
           <ConversationSidebar
@@ -528,6 +542,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 setConversationDisplayMode('conversation');
                 void loadConversation(conversationId);
               }}
+            />
+          ) : activeView === 'classroom' ? (
+            <ClassroomHome
+              onEnterStage={(lessonId) =>
+                setClassroomStage({ lessonId: lessonId ?? null })
+              }
+              summaryRunning={classroomSummaryLessonId !== null}
             />
           ) : (
             // Positioned so the artifact panel can float over the chat when the window is too narrow.

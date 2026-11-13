@@ -55,7 +55,7 @@ const KNOWLEDGE_AGENT_POLICY = `# 资料库规则
 `;
 
 /** Conversation ids are UUIDv4; the session directory path is built from one. */
-const CONVERSATION_ID_PATTERN =
+const UUID_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LLM_SETTING_KEYS: Record<string, true> = {
   'llm.deepseek.model_id': true,
@@ -88,6 +88,13 @@ export class SettingsService implements OnModuleInit {
   private readonly knowledgeDirectory = join(this.configDirectory, 'knowledge');
   /** Per-conversation local files (attachments and future run data), beside config and knowledge. */
   private readonly sessionsDirectory = join(this.configDirectory, 'sessions');
+  /**
+   * Per-lesson classroom transcripts (`<configDir>/lessons/<lessonId>/messages.jsonl`).
+   *
+   * Message content stays out of SQLite; the directory is app-owned runtime state and is added to
+   * the managed paths so a normal chat session's file tools can never read a lesson transcript.
+   */
+  private readonly lessonsDirectory = join(this.configDirectory, 'lessons');
   /**
    * Long-term memory owned by MemoryService.
    *
@@ -198,10 +205,28 @@ export class SettingsService implements OnModuleInit {
    * directory must never be able to point outside `<configDir>/sessions`.
    */
   getSessionDirectory(conversationId: string): string {
-    if (!CONVERSATION_ID_PATTERN.test(conversationId)) {
+    if (!UUID_ID_PATTERN.test(conversationId)) {
       throw new Error('conversation id must be a UUID before building a session path.');
     }
     return join(this.sessionsDirectory, conversationId);
+  }
+
+  /** Returns the root that owns per-lesson classroom transcripts. */
+  getLessonsDirectory(): string {
+    return this.lessonsDirectory;
+  }
+
+  /**
+   * Returns one lesson's transcript directory.
+   *
+   * The id is validated before it becomes a path segment, same as session directories: a lesson
+   * transcript must never be able to point outside `<configDir>/lessons`.
+   */
+  getLessonDirectory(lessonId: string): string {
+    if (!UUID_ID_PATTERN.test(lessonId)) {
+      throw new Error('lesson id must be a UUID before building a lesson path.');
+    }
+    return join(this.lessonsDirectory, lessonId);
   }
 
   /** Returns the saved Agent output root without exposing it through LLM settings. */
@@ -234,6 +259,7 @@ export class SettingsService implements OnModuleInit {
       this.identifyPath,
       this.agentsPath,
       this.memoryDirectory,
+      this.lessonsDirectory,
     ];
   }
 

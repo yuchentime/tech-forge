@@ -22,6 +22,37 @@ routes:
       - docs/changes/2026-11-12-classroom-mode/verification.md
       - docs/current/domains/artifacts/index.md
     history_on_demand: []
+  classroom-simulation:
+    description: "Run one classroom simulation turn end to end: append the teacher message to a per-lesson JSONL transcript, let a tool-less, thinking-off director session pick the next student with JSON, let that student agent reply, and append the reply; SQLite stores only the lesson lifecycle row, message content never enters it; the full desktop flow is implemented: classroom home with active/history/summaries, turn endpoint with a per-lesson lock, message read with degraded corruption handling, lesson creation and idempotent ending, and the SQLite-backed model summary; lesson detail, streaming and the two classroom tools are not"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/lessons/**"
+      - "apps/backend/src/llm/ClassroomSimulationAgent.ts"
+      - "apps/backend/src/llm/StudentAgent.ts"
+      - "apps/backend/src/llm/pi-agent-runtime.ts"
+      - "apps/backend/src/llm/model-json.ts"
+      - "apps/backend/src/settings/settings.service.ts"
+      - "apps/backend/src/database/migrations/**"
+      - "apps/backend/src/database/database.options.ts"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/platform/classroom-mode.md
+      - docs/changes/2026-11-13-classroom-simulation/brief.md
+      - docs/changes/2026-11-13-classroom-simulation/design.md
+      - docs/changes/2026-11-13-classroom-simulation/api-contract.md
+    optional:
+      - docs/changes/2026-11-13-classroom-simulation/tasks.md
+      - docs/changes/2026-11-13-classroom-simulation/verification.md
+      - docs/changes/2026-11-13-classroom-simulation/acceptance.md
+      - docs/changes/2026-11-13-classroom-simulation/worklog.md
+      - docs/changes/2026-11-13-classroom-simulation/reviews/R001-response.md
+      - docs/changes/2026-11-13-classroom-simulation/reviews/R002-response.md
+      - docs/changes/2026-11-13-classroom-simulation/reviews/R001.md
+      - docs/changes/2026-11-13-classroom-simulation/reviews/R002.md
+      - docs/source/课堂模式功能设计.md
+    history_on_demand: []
   conversation-knowledge-facts:
     description: "One current knowledge fact per conversation: report completion writes pending in the same transaction, a single-process worker synthesizes chronological evidence with a model-bound prompt budget and durable reruns, and read-only single/collection APIs return the last published fact; the collection omits knowledge-point details"
     token_budget: 44000

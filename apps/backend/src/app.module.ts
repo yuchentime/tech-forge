@@ -4,11 +4,13 @@ import { buildDatabaseOptions } from './database/database.options';
 import { ChatModule } from './chat/chat.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { ClassroomModule } from './classroom/classroom.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { DocumentsModule } from './documents/documents.module';
 import { EmbeddingModule } from './embedding/embedding.module';
 import { JobsModule } from './jobs/jobs.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { LessonsModule } from './lessons/lessons.module';
 import { LlmModule } from './llm/llm.module';
 import { MemoryModule } from './memory/memory.module';
 import { PlatformModule } from './platform/platform.module';
@@ -29,6 +31,8 @@ import { TeachingModule } from './teaching/teaching.module';
     EmbeddingModule,
     ConversationsModule,
     RehearsalsModule,
+    LessonsModule,
+    ClassroomModule,
     SettingsModule,
     AssessmentsModule,
     ArtifactsModule,

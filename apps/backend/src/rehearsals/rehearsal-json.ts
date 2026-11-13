@@ -38,16 +38,6 @@ export interface ParsedPlan {
   firstQuestion: string;
 }
 
-/** Extracts the first JSON object from model text that may include fences or prose. */
-export function parseJsonObject(text: string): unknown {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) {
-    throw new Error('Model output did not contain a JSON object.');
-  }
-  return JSON.parse(text.slice(start, end + 1));
-}
-
 /** Validates the opening plan and first question. */
 export function parsePlanResponse(value: unknown): ParsedPlan {
   const record = asRecord(value);
