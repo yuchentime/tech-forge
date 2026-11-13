@@ -33,6 +33,21 @@ export class LessonEntity {
   @Column({ type: 'datetime', nullable: true })
   summaryGeneratedAt!: Date | null;
 
+  /** First teacher message of the knowledge point currently being discussed. */
+  @Column({ type: 'varchar', nullable: true })
+  pointStartMessageId!: string | null;
+
+  /** Short label of the active knowledge point, produced by the director. */
+  @Column({ type: 'varchar', nullable: true })
+  pointLabel!: string | null;
+
+  /** True once the point reached its student-turn cap; later turns only acknowledge. */
+  @Column({ type: 'boolean', default: false })
+  pointClosed!: boolean;
+
+  @Column({ type: 'datetime', nullable: true })
+  pointUpdatedAt!: Date | null;
+
   @CreateDateColumn({ type: 'datetime' })
   createdAt!: Date;
 

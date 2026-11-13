@@ -9,6 +9,13 @@ import {
   isClassroomStudentId,
   type ClassroomStudentId,
 } from '../lessons/classroom-students';
+import {
+  MAX_POINT_STUDENT_TURNS,
+  countPointTurns,
+  resolvePointTurn,
+  type LessonPointState,
+  type ResolvedPointTurn,
+} from '../lessons/lesson-point';
 import type { ClassroomTurnResult } from '../lessons/lesson.types';
 import {
   formatSpeakerSequence,
@@ -28,7 +35,10 @@ import {
   CLASSROOM_TRANSCRIPT_MESSAGE_LIMIT,
   buildDirectorPrompt,
   buildStudentPrompt,
-  parseDirectorSelection,
+  parseDirectorDecision,
+  type DirectorDecision,
+  type DirectorPointContext,
+  type StudentPointContext,
 } from './classroom-simulation.prompt';
 import { ClassroomTurnError, isLessonError } from './turn-errors';
 
@@ -101,16 +111,30 @@ export class ClassroomSimulationAgent {
         : await this.lessons.startNewLesson();
       lessonId = lesson.id;
 
-      await this.lessons.appendMessage(lesson.id, 'teacher', prompt);
+      const teacherMessage = await this.lessons.appendMessage(
+        lesson.id,
+        'teacher',
+        prompt,
+      );
       const lessonMessages = await this.lessons.readMessages(lesson.id);
       const transcript = formatTranscript(lessonMessages, {
         limit: CLASSROOM_TRANSCRIPT_MESSAGE_LIMIT,
         charLimit: CLASSROOM_TRANSCRIPT_CHAR_LIMIT,
       });
       const speakerSequence = formatSpeakerSequence(lessonMessages);
+      const pointState: LessonPointState = {
+        startMessageId: lesson.pointStartMessageId,
+        label: lesson.pointLabel,
+        closed: lesson.pointClosed,
+      };
+      const currentTurns = countPointTurns(
+        lessonMessages,
+        pointState.startMessageId,
+      );
 
       let studentId: ClassroomStudentId;
       let reply: string;
+      let pointTurn: ResolvedPointTurn | undefined;
       try {
         const environment = await resolvePiAgentEnvironment(
           this.deepseekAdapter,
@@ -122,19 +146,44 @@ export class ClassroomSimulationAgent {
           'off',
         );
         const directorSession = session;
-        studentId = await this.selectNextStudent(
+        const decision = await this.selectNextStudent(
           directorSession,
           transcript,
           speakerSequence,
+          {
+            label: pointState.label,
+            turns: currentTurns,
+            closed: pointState.closed,
+            maxTurns: MAX_POINT_STUDENT_TURNS,
+          },
           {
             ...options,
             timeoutMs: options.timeoutMs ?? DIRECTOR_TIMEOUT_MS,
           },
         );
-        reply = await this.studentReply(studentId, transcript, requestId, {
-          ...options,
-          timeoutMs: options.timeoutMs ?? STUDENT_TIMEOUT_MS,
+        studentId = decision.student as ClassroomStudentId;
+        pointTurn = resolvePointTurn({
+          state: pointState,
+          messages: lessonMessages,
+          teacherMessage,
+          decision,
+          maxTurns: MAX_POINT_STUDENT_TURNS,
         });
+        reply = await this.studentReply(
+          studentId,
+          transcript,
+          requestId,
+          {
+            label: pointTurn.state.label,
+            turns: pointTurn.turns,
+            forceClose: pointTurn.forceClose,
+            maxTurns: MAX_POINT_STUDENT_TURNS,
+          },
+          {
+            ...options,
+            timeoutMs: options.timeoutMs ?? STUDENT_TIMEOUT_MS,
+          },
+        );
       } catch (error) {
         throw isLessonError(error) ? error : new ClassroomTurnError(error);
       }
@@ -144,6 +193,30 @@ export class ClassroomSimulationAgent {
         studentId,
         reply,
       );
+      // Persist the point state only after the student's line exists, so a failed turn cannot
+      // mark a point closed (or started) without the reply it describes.
+      if (pointTurn?.started) {
+        await this.lessons.savePointState(lesson.id, pointTurn.state);
+        this.logger.log({
+          event: 'classroom.point.started',
+          requestId,
+          lessonId: lesson.id,
+          pointLabelChars: pointTurn.state.label
+            ? Array.from(pointTurn.state.label).length
+            : 0,
+        });
+      } else if (pointTurn?.forceClose) {
+        await this.lessons.savePointState(lesson.id, {
+          ...pointTurn.state,
+          closed: true,
+        });
+        this.logger.log({
+          event: 'classroom.point.closed',
+          requestId,
+          lessonId: lesson.id,
+          pointTurns: pointTurn.turns,
+        });
+      }
       const messages = [...lessonMessages, studentMessage];
 
       outcome = 'completed';
@@ -178,25 +251,26 @@ export class ClassroomSimulationAgent {
     }
   }
 
-  /** Asks the director which student answers next and validates its JSON selection. */
+  /** Asks the director which student answers next and whether the point continues. */
   private async selectNextStudent(
     session: PiAgentSession,
     transcript: string,
     speakerSequence: string,
+    point: DirectorPointContext,
     options: ClassroomSimulationOptions,
-  ): Promise<ClassroomStudentId> {
+  ): Promise<DirectorDecision> {
     const text = await runPiTurn(
       session,
-      buildDirectorPrompt(transcript, speakerSequence),
+      buildDirectorPrompt(transcript, speakerSequence, point),
       options,
     );
-    const value = parseDirectorSelection(text);
-    if (!isClassroomStudentId(value)) {
+    const decision = parseDirectorDecision(text);
+    if (!isClassroomStudentId(decision.student)) {
       throw new Error(
-        `Classroom director chose an unknown student: ${String(value) || '(missing)'}.`,
+        `Classroom director chose an unknown student: ${String(decision.student) || '(missing)'}.`,
       );
     }
-    return value;
+    return decision;
   }
 
   /** Generates one student's reply from the same transcript the director saw. */
@@ -204,13 +278,14 @@ export class ClassroomSimulationAgent {
     studentId: ClassroomStudentId,
     transcript: string,
     requestId: string,
+    point: StudentPointContext,
     options: ClassroomSimulationOptions,
   ): Promise<string> {
     const student = CLASSROOM_STUDENTS[studentId];
     const agent = this.studentAgent.createAgent(
       createStudentSystemPrompt(student),
     );
-    return agent.run(buildStudentPrompt(transcript, student.name), {
+    return agent.run(buildStudentPrompt(transcript, student.name, point), {
       requestId,
       signal: options.signal,
       timeoutMs: options.timeoutMs,

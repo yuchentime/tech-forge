@@ -46,6 +46,7 @@ routes:
       - docs/changes/2026-11-13-classroom-simulation/tasks.md
       - docs/changes/2026-11-13-classroom-simulation/verification.md
       - docs/changes/2026-11-13-classroom-simulation/acceptance.md
+      - docs/changes/2026-11-13-classroom-simulation/point-state.md
       - docs/changes/2026-11-13-classroom-simulation/worklog.md
       - docs/changes/2026-11-13-classroom-simulation/reviews/R001-response.md
       - docs/changes/2026-11-13-classroom-simulation/reviews/R002-response.md

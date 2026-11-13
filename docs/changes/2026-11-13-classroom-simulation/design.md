@@ -102,19 +102,19 @@ sequenceDiagram
 **导演**
 
 - 名册由 `CLASSROOM_STUDENTS` 生成，避免提示词与代码漂移。
-- 选人规则：优先最近没发言的学生；上一位学生的问题还没被老师回应时可以继续选他；三人轮完后重新轮转。
-- 输出：只有 `{"student":"su"}`；`student` 仅接受 `su` / `lin` / `gu`。
-- 失败：非 JSON、缺字段、非法 id 一律抛错，不做二次修复调用与随机兜底。
+- 选人规则：优先最近没发言的学生；上一位学生的问题还没被老师回应时可以继续选他；三人轮完后重新轮转；需要收束时优先最近提问的学生。
+- 知识点：同时判断 `mode=new|continue`，`new` 时给出 ≤20 字 `pointLabel`；状态机与上限见 [point-state.md](point-state.md)。
+- 输出 `{"student":"su","mode":"continue","pointLabel":null}`；`student` 仅接受三名学生，`mode` 非法按 `continue`；非 JSON、缺字段、非法 id 一律抛错，不做修复或随机兜底。
 
 **学生**
 
 - system prompt 说明课堂记录格式（`<speaker_name>说话人</speaker_name>` 行）、人设与“只输出一到两句话”。
-- user 消息 = transcript + “现在轮到你（林澈）回应老师最后一条讲解”。
+- user 消息 = transcript + 本轮知识点（标签/已发言轮次/是否收束）+ “现在轮到你（林澈）回应”。
 
 **记录渲染**
 
-- 最近 12 条、4000 字符，从最新往回填，保证老师刚说的话一定在。
-- 正文转义 `& < >`，防止用户伪造 `</speaker_name>`；标签只存在于 prompt，存储/返回/前端都用结构化字段。
+- 最近 12 条、4000 字符，从最新往回填，保证老师刚说的话一定在；正文转义 `& < >`，防止伪造 `</speaker_name>`。
+- 标签只存在于 prompt，存储/返回/前端都用结构化字段。
 
 ## 6. 错误语义
 

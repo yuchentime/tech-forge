@@ -9,6 +9,7 @@ import {
   LessonNotFoundError,
   LessonStillActiveError,
 } from './lesson.errors';
+import type { LessonPointState } from './lesson-point';
 import { LessonEntity } from './lesson.entity';
 import {
   LessonTranscriptStore,
@@ -183,6 +184,22 @@ export class LessonsService {
       throw new LessonEndedError(lessonId);
     }
     return lesson;
+  }
+
+  /** Persists the active knowledge-point state after one turn. */
+  async savePointState(
+    lessonId: string,
+    state: LessonPointState,
+  ): Promise<void> {
+    await this.repository.update(
+      { id: lessonId },
+      {
+        pointStartMessageId: state.startMessageId,
+        pointLabel: state.label,
+        pointClosed: state.closed,
+        pointUpdatedAt: new Date(),
+      },
+    );
   }
 
   /**
