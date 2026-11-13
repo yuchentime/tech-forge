@@ -8,10 +8,11 @@ const {
 } = require('../dist/chat/chat.service.js');
 const { ChatPromptDto } = require('../dist/chat/dto/chat-prompt.dto.js');
 const { encodeChatSseEvent } = require('../dist/chat/chat-sse.js');
+const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
 const {
-  LlmService,
+  CommonAgent,
   LlmResponseTruncatedError,
-} = require('../dist/llm/llm.service.js');
+} = require('../dist/llm/agents/CommonAgent.js');
 
 /** Minimal long-term memory double; the chat suite does not exercise storage. */
 const memoryStub = {
@@ -312,7 +313,7 @@ test('SSE encoder preserves Pi event names and JSON-escapes text deltas', () => 
   );
 });
 
-test('LlmService queues Pi session events in subscription order', async () => {
+test('LearnAgent queues Pi session events in subscription order', async () => {
   const received = [];
   const session = {
     subscribe(callback) {
@@ -340,7 +341,7 @@ test('LlmService queues Pi session events in subscription order', async () => {
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const service = new LlmService(
+  const commonAgent = new CommonAgent(
     {},
     {
       getLlmSettings: async () => ({
@@ -349,7 +350,8 @@ test('LlmService queues Pi session events in subscription order', async () => {
     },
     {},
   );
-  service.createSession = async () => session;
+  commonAgent.createSession = async () => session;
+  const service = new LearnAgent(commonAgent);
 
   assert.deepEqual(await collect(service.stream('prompt')), [
     { type: 'turn_start' },
@@ -362,7 +364,7 @@ test('LlmService queues Pi session events in subscription order', async () => {
   ]);
 });
 
-test('LlmService aborts the Pi session and removes its listener on cancellation', async () => {
+test('LearnAgent aborts the Pi session and removes its listener on cancellation', async () => {
   let listener;
   let finishRun;
   let abortCalled = false;
@@ -396,7 +398,7 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const service = new LlmService(
+  const commonAgent = new CommonAgent(
     {},
     {
       getLlmSettings: async () => ({
@@ -405,7 +407,8 @@ test('LlmService aborts the Pi session and removes its listener on cancellation'
     },
     {},
   );
-  service.createSession = async () => session;
+  commonAgent.createSession = async () => session;
+  const service = new LearnAgent(commonAgent);
   const controller = new AbortController();
   const iterator = service.stream('prompt', { signal: controller.signal });
 
@@ -447,7 +450,7 @@ test('durable context is appended as its own Pi message entry before prompting',
       },
     },
   };
-  const service = new LlmService(
+  const commonAgent = new CommonAgent(
     {},
     {
       getLlmSettings: async () => ({
@@ -456,7 +459,8 @@ test('durable context is appended as its own Pi message entry before prompting',
     },
     {},
   );
-  service.createSession = async () => session;
+  commonAgent.createSession = async () => session;
+  const service = new LearnAgent(commonAgent);
 
   await collect(service.stream('问题'));
   await collect(
@@ -496,7 +500,7 @@ test('a requested skill becomes the first token of the model prompt', async () =
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const service = new LlmService(
+  const commonAgent = new CommonAgent(
     {},
     {
       getLlmSettings: async () => ({
@@ -505,7 +509,8 @@ test('a requested skill becomes the first token of the model prompt', async () =
     },
     {},
   );
-  service.createSession = async () => session;
+  commonAgent.createSession = async () => session;
+  const service = new LearnAgent(commonAgent);
 
   await collect(
     service.stream('光合作用', {
@@ -612,8 +617,8 @@ test('an output-limit stop is reported as truncation, not as an empty completion
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const service = createLlmService();
-  service.createSession = async () => session;
+  const { service, commonAgent } = createLearnAgent();
+  commonAgent.createSession = async () => session;
 
   await assert.rejects(collect(service.stream('画一张逻辑思考知识地图')), (error) => {
     assert.ok(error instanceof LlmResponseTruncatedError);
@@ -662,8 +667,8 @@ test('an aborted thinking-only turn does not break the next turn', async () => {
     sessionManager: { getEntries: () => [] },
   };
   const sessions = [abortedSession, answeredSession];
-  const service = createLlmService();
-  service.createSession = async () => sessions.shift();
+  const { service, commonAgent } = createLearnAgent();
+  commonAgent.createSession = async () => sessions.shift();
 
   assert.deepEqual(await collect(service.stream('确认')), [
     { type: 'message_end', message: thinkingOnlyMessage('aborted') },
@@ -796,9 +801,9 @@ function thinkingOnlyMessage(stopReason) {
   };
 }
 
-/** Builds an LlmService whose Pi session creation is replaced per test. */
-function createLlmService() {
-  return new LlmService(
+/** Builds a LearnAgent plus its session double; each test replaces `createSession`. */
+function createLearnAgent() {
+  const commonAgent = new CommonAgent(
     {},
     {
       getLlmSettings: async () => ({
@@ -807,4 +812,5 @@ function createLlmService() {
     },
     {},
   );
+  return { service: new LearnAgent(commonAgent), commonAgent };
 }

@@ -1,14 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession as PiAgentSession } from '@earendil-works/pi-coding-agent';
-import { DeepseekLLMAdapter } from './adapters/deepseek-llm.adapter';
-import { SettingsService } from '../settings/settings.service';
+import { DeepseekLLMAdapter } from '../adapters/deepseek-llm.adapter';
+import { SettingsService } from '../../settings/settings.service';
 import {
   CLASSROOM_STUDENTS,
   createStudentSystemPrompt,
   isClassroomStudentId,
   type ClassroomStudentId,
-} from '../lessons/classroom-students';
+} from '../../lessons/classroom-students';
 import {
   MAX_POINT_TURNS,
   countPointTurns,
@@ -18,23 +18,23 @@ import {
   selectNextQuestioner,
   type LessonPointState,
   type ResolvedPointTurn,
-} from '../lessons/lesson-point';
+} from '../../lessons/lesson-point';
 import type {
   ClassroomTurnResult,
   LessonMessage,
-} from '../lessons/lesson.types';
+} from '../../lessons/lesson.types';
 import {
   formatSpeakerSequence,
   formatTranscript,
-} from '../lessons/transcript-format';
-import { LessonsService } from '../lessons/lessons.service';
+} from '../../lessons/transcript-format';
+import { LessonsService } from '../../lessons/lessons.service';
 import { StudentAgent } from './StudentAgent';
 import {
   createCleanPiSession,
   resolvePiAgentEnvironment,
   runPiTurn,
   type PiTurnOptions,
-} from './pi-agent-runtime';
+} from '../pi-agent-runtime';
 import {
   CLASSROOM_SYSTEM_PROMPT,
   CLASSROOM_TRANSCRIPT_CHAR_LIMIT,
@@ -46,8 +46,8 @@ import {
   type DirectorDecision,
   type DirectorPointContext,
   type StudentPointContext,
-} from './classroom-simulation.prompt';
-import { ClassroomTurnError, isLessonError } from './turn-errors';
+} from '../classroom-simulation.prompt';
+import { ClassroomTurnError, isLessonError } from '../turn-errors';
 
 /** Director picks one student; it must never hang the turn (and the lesson lock) forever. */
 const DIRECTOR_TIMEOUT_MS = 60_000;

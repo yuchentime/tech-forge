@@ -3,7 +3,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { DocumentsModule } from '../documents/documents.module';
-import { LlmModule } from '../llm/llm.module';
+import { AgentModule } from '../llm/agents/AgentModule';
 import { MemoryModule } from '../memory/memory.module';
 import { RehearsalsModule } from '../rehearsals/rehearsals.module';
 import { ChatController } from './chat.controller';
@@ -15,7 +15,7 @@ import { ChatService } from './chat.service';
     ArtifactsModule,
     ConversationsModule,
     DocumentsModule,
-    LlmModule,
+    AgentModule,
     MemoryModule,
     RehearsalsModule,
   ],

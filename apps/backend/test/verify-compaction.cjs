@@ -5,7 +5,7 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 
 /**
- * Verifies that Pi's automatic threshold compaction runs inside one LlmService.stream() call.
+ * Verifies that Pi's automatic threshold compaction runs inside one LearnAgent.stream() call.
  *
  * The check is offline: a local OpenAI-compatible endpoint serves both the summary request and the
  * chat response, and the temp Pi agent directory lowers the threshold to 2000 tokens so a small
@@ -90,7 +90,7 @@ function startMockProvider() {
   });
 }
 
-/** Builds stored history rows in the text-block JSON shape LlmService restores. */
+/** Builds stored history rows in the text-block JSON shape CommonAgent restores. */
 function createHistory(messageCount, text) {
   const startedAt = Date.now() - messageCount * 1000;
   return Array.from({ length: messageCount }, (_, index) => ({
@@ -139,6 +139,12 @@ async function main() {
     }),
     'utf8',
   );
+  // Session creation loads this protected policy file; the check only needs a readable body.
+  await writeFile(
+    path.join(agentDir, 'AGENTS.md'),
+    '# Compaction check policy\n',
+    'utf8',
+  );
   // The SDK resolves its agent directory at process start, before any session is created.
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -146,7 +152,8 @@ async function main() {
   const logs = captureLogs();
   const snapshots = [];
   try {
-    const { LlmService } = require('../dist/llm/llm.service.js');
+    const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
+    const { CommonAgent } = require('../dist/llm/agents/CommonAgent.js');
     const {
       createOpenAiCompatibleModel,
     } = require('../dist/llm/adapters/llm-adapter.js');
@@ -173,6 +180,10 @@ async function main() {
       getSessionWorkspaceDirectory: () => sessionWorkspace,
       getManagedFilePaths: async () => [],
       getKnowledgeDirectory: () => path.join(workspaceRoot, 'knowledge'),
+      getKnowledgeCatalogPath: () =>
+        path.join(workspaceRoot, 'knowledge', 'index.md'),
+      getSkillsDirectory: () => path.join(agentDir, 'skills'),
+      getAgentsFilePath: () => path.join(agentDir, 'AGENTS.md'),
       getStylePreference: async () => '',
       getIdentitySetting: async () => '',
     };
@@ -183,7 +194,9 @@ async function main() {
       },
     };
 
-    const service = new LlmService(mockAdapter, settings, snapshotStore);
+    const service = new LearnAgent(
+      new CommonAgent(mockAdapter, settings, snapshotStore),
+    );
 
     const history = createHistory(40, '上下文压缩验证文本。'.repeat(120));
     const events = [];

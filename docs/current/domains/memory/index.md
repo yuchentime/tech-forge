@@ -32,7 +32,7 @@ last_verified: 2026-11-12
 
 ## 2. 会话装载与工具
 
-`LlmService.createSession()` 在 `loadMemory` 为真时调用 `MemoryService.createToolExtension()`，把工厂加入 `DefaultResourceLoader.extensionFactories`；工具名加入 allowlist 的 `memory_*` 模式。
+`CommonAgent.createSession()` 在 `loadMemory` 为真时调用 `MemoryService.createToolExtension()`，把工厂加入 `DefaultResourceLoader.extensionFactories`；工具名加入 allowlist 的 `memory_*` 模式。
 
 | 调用 | 是否装载记忆 |
 |---|---|
@@ -97,7 +97,7 @@ last_verified: 2026-11-12
 - 工具扩展：`apps/backend/src/memory/memory-extension.ts`
 - 服务与写入/注入：`apps/backend/src/memory/memory.service.ts`
 - 管理 API：`apps/backend/src/memory/memory.controller.ts`
-- 会话装载：`apps/backend/src/llm/llm.service.ts`
+- 会话装载：`apps/backend/src/llm/agents/CommonAgent.ts`
 - 注入与捕获入口：`apps/backend/src/chat/chat.service.ts`
 - 快照清洗：`apps/backend/src/llm/session-entries.ts`
 - 设置页：`apps/desktop/src/features/settings/SettingsPage.tsx`

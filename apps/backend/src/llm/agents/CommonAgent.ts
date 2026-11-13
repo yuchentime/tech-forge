@@ -1,7 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import type * as PiSdkModule from "@earendil-works/pi-coding-agent";
 import type {
   AgentSession as PiAgentSession,
   AgentSessionEvent as PiAgentSessionEvent,
@@ -10,43 +7,43 @@ import type {
   SessionMessageEntry as PiSessionMessageEntry,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { DeepseekLLMAdapter } from "./adapters/deepseek-llm.adapter";
-import { DEEPSEEK_PROVIDER_ID } from "./adapters/llm-adapter";
-import {
-  SettingsService,
-  type StoredLlmSettings,
-} from "../settings/settings.service";
-import {
-  createWorkspaceFileTools,
-  prepareWorkspaceDirectory,
-} from "./tools/workspace-file-tools";
-import {
-  areWebToolsEnabled,
-  createWebTools,
-  WEB_TOOL_NAMES,
-} from "./tools/web-tools";
-import {
-  BUNDLED_SKILLS_ASSET_PATH,
-  installBundledSkills,
-} from "./skills";
-import { parsePersistedPiMessage } from "../conversations/conversation-transcript";
-import { PiSessionSnapshotsService } from "../conversations/pi-session-snapshots.service";
-import { MemoryService } from "../memory/memory.service";
-import {
-  checkSessionEntries,
-  replaceInjectedUserText,
-} from "./session-entries";
+import { Injectable, Logger } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { parsePersistedPiMessage } from "../../conversations/conversation-transcript";
+import { PiSessionSnapshotsService } from "../../conversations/pi-session-snapshots.service";
 import {
   clipLogText,
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
-} from "../logging/structured-logger";
-import { of } from "rxjs";
+} from "../../logging/structured-logger";
+import {
+  SettingsService,
+  type StoredLlmSettings,
+} from "../../settings/settings.service";
+import { DeepseekLLMAdapter } from "../adapters/deepseek-llm.adapter";
+import { DEEPSEEK_PROVIDER_ID } from "../adapters/llm-adapter";
+import {
+  checkSessionEntries,
+  replaceInjectedUserText,
+} from "../session-entries";
+import {
+  BUNDLED_SKILLS_ASSET_PATH,
+  installBundledSkills,
+} from "../skills";
+import {
+  areWebToolsEnabled,
+  createWebTools,
+  WEB_TOOL_NAMES,
+} from "../tools/web-tools";
+import {
+  createWorkspaceFileTools,
+  prepareWorkspaceDirectory,
+} from "../tools/workspace-file-tools";
 
-type PiSdk = typeof import("@earendil-works/pi-coding-agent");
-type BillionContextPi = typeof import("billion-context-pi");
-type PiSubagents = typeof import("pi-subagents");
+type PiSdk = typeof PiSdkModule;
 type PiThinkingLevel = "off" | "low" | "medium" | "high";
 type PiModel = NonNullable<ReturnType<PiModelRuntime["getModel"]>>;
 
@@ -163,7 +160,7 @@ export class LlmProviderRejectedError extends Error {
 }
 
 /** Classifies the latest assistant message once a Pi run has settled. */
-type AssistantCompletion =
+export type AssistantCompletion =
   | { kind: "text"; text: string }
   | { kind: "truncated" }
   | { kind: "cancelled" }
@@ -209,7 +206,7 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
 }
 
 /** Controls how one Pi session is assembled without changing business-level request options. */
-interface PiSessionBuildOptions {
+export interface PiSessionBuildOptions {
   systemPromptAppend?: string;
   tools?: readonly string[];
   /** Whether to register long-term memory tools; JSON-only calls pass `false`. */
@@ -272,10 +269,17 @@ function createConversationPersistenceExtension(
   };
 }
 
+/**
+ * Builds app-owned Pi sessions and runs the non-streamed model call.
+ *
+ * This is the shared base for every Pi call in the app: it owns provider/model resolution,
+ * workspace-scoped tools, skills, memory and snapshot restore. `LearnAgent` adds the streaming
+ * loop on top; JSON callers (rehearsal, catalog, classroom summary) call `generate()` directly
+ * and never persist a snapshot or a visible conversation message.
+ */
 @Injectable()
-/** Provides shared model generation and streaming with request-scoped Pi sessions. */
-export class LlmService {
-  private readonly logger = new Logger(LlmService.name);
+export class CommonAgent {
+  private readonly logger = new Logger(CommonAgent.name);
   private piSdkPromise?: Promise<PiSdk>;
   /** One-shot seeding of bundled skills into `<configDir>/skills`; retried after a failure. */
   private installedSkillsPromise?: Promise<void>;
@@ -285,405 +289,22 @@ export class LlmService {
     private readonly deepseekAdapter: DeepseekLLMAdapter,
     private readonly settings: SettingsService,
     private readonly piSessionSnapshots: PiSessionSnapshotsService,
-    private readonly memory: MemoryService,
   ) {}
 
   /**
-   * 按序产出 Pi session 事件，并在请求取消时中止底层 Pi run。
-   * async generator 被调用时先返回生成器对象；只有消费者调用 next() 后，函数体才开始执行。
-   * 每次 yield 会把一个事件交给消费者，并暂停在当前位置，等下一次 next() 再继续。
+   * Reads the current model settings and stamps the selected provider/model on one request.
+   *
+   * Both entry points need the same snapshot: `stream()` logs the resolved ids and the session
+   * builder needs the API key and model id. Resolving here keeps the settings read single.
    */
-  async *stream(
-    prompt: string,
-    options: LlmStreamOptions = {},
-  ): AsyncGenerator<PiAgentSessionEvent> {
-    const requestId = options.requestId ?? randomUUID();
-    const logContext = getRequestLogContext(options, requestId);
-    const startedAt = Date.now();
-    const eventCounts = new Map<string, number>();
-    let outcome: "completed" | "failed" | "cancelled" = "failed";
-    let phase = "session_create";
-    if (options.signal?.aborted) {
-      writeStructuredEvent(this.logger, "warn", "llm.stream.cancelled", {
-        ...logContext,
-        phase: "before_session_create",
-        reason: "signal_already_aborted",
-      });
-      return;
-    }
-    writeStructuredEvent(this.logger, "log", "llm.stream.started", {
-      ...logContext,
-      promptLength: Array.from(prompt).length,
-      historyMessageCount: options.conversation?.history.length ?? 0,
-    });
-
-    let activeSession: PiAgentSession | undefined;
-    let hasPersistenceError = false;
-    let persistenceError: unknown;
-    let persistenceAbortPromise: Promise<void> | undefined;
-    const persistConversationEvent = options.persistConversationEvent
-      ? async (event: PiAgentSessionEvent): Promise<void> => {
-          try {
-            await options.persistConversationEvent!(event);
-          } catch (error) {
-            hasPersistenceError = true;
-            persistenceError = error;
-            writeStructuredEvent(
-              this.logger,
-              "error",
-              "llm.persistence_event.failed",
-              {
-                ...logContext,
-                eventType: event.type,
-                ...getSafeErrorLogFields(error),
-              },
-            );
-            if (!persistenceAbortPromise && activeSession) {
-              try {
-                persistenceAbortPromise = activeSession
-                  .abort()
-                  .catch((abortError: unknown) => {
-                    writeStructuredEvent(
-                      this.logger,
-                      "error",
-                      "llm.persistence_abort.failed",
-                      {
-                        ...logContext,
-                        ...getSafeErrorLogFields(abortError),
-                      },
-                    );
-                  });
-              } catch (abortError) {
-                writeStructuredEvent(
-                  this.logger,
-                  "error",
-                  "llm.persistence_abort.failed",
-                  {
-                    ...logContext,
-                    ...getSafeErrorLogFields(abortError),
-                  },
-                );
-                persistenceAbortPromise = Promise.resolve();
-              }
-            }
-            throw error;
-          }
-        }
-      : undefined;
-    let session: PiAgentSession;
-    try {
-      const modelSettings = await this.settings.getLlmSettings();
-      options = {
-        ...options,
-        ...getSelectedModelIds(modelSettings),
-      };
-      session = await this.createSession(
-        {
-          ...options,
-          requestId,
-          persistConversationEvent,
-        },
-        modelSettings,
-        prompt,
-      );
-    } catch (error) {
-      writeStructuredEvent(this.logger, "error", "llm.stream.failed", {
-        ...logContext,
-        phase,
-        elapsedMs: Date.now() - startedAt,
-        ...getSafeErrorLogFields(error),
-      });
-      writeStructuredEvent(this.logger, "error", "llm.stream.terminated", {
-        ...logContext,
-        outcome: "failed",
-        phase,
-        elapsedMs: Date.now() - startedAt,
-        eventCounts: Object.fromEntries(eventCounts),
-      });
-      throw error;
-    }
-    activeSession = session;
-    // events 是 Pi 事件生产者与异步生成器消费者之间的本轮缓冲队列。
-    const events: PiAgentSessionEvent[] = [];
-    // 只表示 session.prompt() 整次运行已结束或失败；结束后仍要把队列里的事件交完。
-    let runSettled = false;
-    let runError: unknown;
-    let hasRunError = false;
-    // 暂存当前 await 所对应的 Promise resolve；有新片段或运行结束时由 wake() 调用。
-    let wakeConsumer: (() => void) | undefined;
-    let unsubscribe = (): void => undefined;
-    let abortPromise: Promise<void> | undefined;
-
-    const wake = (): void => {
-      // wake 不传递事件，只负责解除消费者的等待；事件仍保存在 events 队列中。
-      const resume = wakeConsumer;
-      wakeConsumer = undefined;
-      resume?.();
+  async resolveRequest<T extends LlmRequestOptions>(
+    options: T,
+  ): Promise<{ resolved: T; modelSettings: StoredLlmSettings }> {
+    const modelSettings = await this.settings.getLlmSettings();
+    return {
+      resolved: { ...options, ...getSelectedModelIds(modelSettings) },
+      modelSettings,
     };
-
-    /** 只中止一次 Pi run，并唤醒正在等待下一事件的生成器消费者。 */
-    const abortSession = (): void => {
-      if (!abortPromise) {
-        try {
-          abortPromise = session.abort().catch((error: unknown) => {
-            writeStructuredEvent(this.logger, "error", "llm.abort.failed", {
-              ...logContext,
-              ...getSafeErrorLogFields(error),
-            });
-          });
-        } catch (error) {
-          writeStructuredEvent(this.logger, "error", "llm.abort.failed", {
-            ...logContext,
-            ...getSafeErrorLogFields(error),
-          });
-          abortPromise = Promise.resolve();
-        }
-      }
-      wake();
-    };
-
-    try {
-      phase = "subscribe";
-      options.signal?.addEventListener("abort", abortSession, { once: true });
-      if (options.signal?.aborted) {
-        abortSession();
-        return;
-      }
-
-      unsubscribe = session.subscribe((event) => {
-        // Pi owns the compaction trigger (threshold, overflow recovery, or manual `/compact`).
-        // Log it here because the summary is an extra provider request that changes model context.
-        logPiCompactionEvent(this.logger, logContext, session, event);
-        // 所有 Pi 事件按回调顺序入队；ChatService 随后决定哪些字段可以出站。
-        if (hasPersistenceError) {
-          wake();
-          return;
-        }
-        eventCounts.set(event.type, (eventCounts.get(event.type) ?? 0) + 1);
-        events.push(event);
-        wake();
-      });
-
-      // 先启动底层模型请求，它与下方消费队列的循环并行推进。
-      // 请求成功或失败时都设置结束状态并唤醒循环，避免最后没有新片段时一直等待。
-      phase = "provider_run";
-      // Durable context goes in as a message entry, never into the system prompt or the user text:
-      // Pi stores it in the session, so the snapshot restores it on later turns instead of the
-      // caller re-sending it every time. Appended before the usage read so logs include its tokens.
-      const contextEntries: Array<{ type: string; text: string; details?: unknown }> = [
-        ...(options.contextMessage ? [{ ...options.contextMessage, details: undefined }] : []),
-        ...(options.contextMessages ?? []),
-      ];
-      for (const contextEntry of contextEntries) {
-        if (!contextEntry.text.trim()) continue;
-        session.sessionManager.appendCustomMessageEntry(
-          contextEntry.type,
-          contextEntry.text.trim(),
-          false,
-          contextEntry.details,
-        );
-      }
-      const startingContextUsage = session.getContextUsage();
-      writeStructuredEvent(this.logger, "log", "llm.provider_run.started", {
-        ...logContext,
-        providerId: options.providerId,
-        modelId: options.modelId,
-        historyMessageCount: options.conversation?.history.length ?? 0,
-        contextTokens: startingContextUsage?.tokens ?? null,
-        contextWindow: startingContextUsage?.contextWindow ?? null,
-        contextPercent: startingContextUsage?.percent ?? null,
-        skillName: options.skillName ?? null,
-      });
-      // A skill command must be the first token for Pi to expand it. The per-turn context is part
-      // of its arguments, so the model reads the skill first and then the evidence and user text.
-      const composedPrompt = composeModelPrompt(prompt, options.promptContext);
-      const modelPrompt = options.skillName
-        ? `/skill:${options.skillName} ${composedPrompt}`
-        : composedPrompt;
-      const run = session.prompt(modelPrompt, {
-        expandPromptTemplates: Boolean(options.skillName),
-        ...(options.images && options.images.length > 0
-          ? {
-              images: options.images.map((image) => ({
-                type: 'image' as const,
-                data: image.data,
-                mimeType: image.mimeType,
-              })),
-            }
-          : {}),
-      }).then(
-        () => {
-          runSettled = true;
-          wake();
-        },
-        (error: unknown) => {
-          runError = error;
-          hasRunError = true;
-          runSettled = true;
-          wake();
-        },
-      );
-
-      // 运行尚未结束，或还有未交付事件时继续；这样能排空最后一批缓冲事件。
-      while (!runSettled || events.length > 0) {
-        if (options.signal?.aborted) {
-          events.length = 0;
-          break;
-        }
-
-        if (events.length > 0) {
-          // yield 将一个 Pi 事件交给 ChatService；消费方处理后再调用 next() 继续。
-          yield events.shift()!;
-          continue;
-        }
-
-        // 队列暂时为空时挂起本生成器（不会阻塞 JS 线程）。
-        // Promise executor 会立即把 resolve 保存到 wakeConsumer；新事件到达后 wake() 调用它，
-        // await 才会恢复并重新检查队列。这里保存 resolve 而不调用它，所以不会立刻继续循环。
-        await new Promise<void>((resolve) => {
-          wakeConsumer = resolve;
-        });
-      }
-
-      await run;
-      if (hasPersistenceError) {
-        throw persistenceError;
-      }
-      if (options.signal?.aborted) {
-        outcome = "cancelled";
-        return;
-      }
-      if (hasRunError) {
-        throw runError;
-      }
-
-      const completion = classifyAssistantCompletion(
-        session.messages,
-        session.getLastAssistantText(),
-      );
-      if (completion.kind === "cancelled") {
-        outcome = "cancelled";
-        writeStructuredEvent(this.logger, "warn", "llm.stream.cancelled", {
-          ...logContext,
-          phase,
-          eventCounts: Object.fromEntries(eventCounts),
-          elapsedMs: Date.now() - startedAt,
-          reason: "assistant_run_aborted",
-        });
-        return;
-      }
-      const responseText = this.readAssistantText(completion);
-      outcome = "completed";
-      const finishedContextUsage = session.getContextUsage();
-      writeStructuredEvent(this.logger, "log", "llm.stream.completed", {
-        ...logContext,
-        resultLength: Array.from(responseText).length,
-        eventCounts: Object.fromEntries(eventCounts),
-        contextTokens: finishedContextUsage?.tokens ?? null,
-        contextPercent: finishedContextUsage?.percent ?? null,
-        elapsedMs: Date.now() - startedAt,
-      });
-    } catch (error) {
-      outcome = options.signal?.aborted ? "cancelled" : "failed";
-      writeStructuredEvent(
-        this.logger,
-        outcome === "cancelled" ? "warn" : "error",
-        outcome === "cancelled" ? "llm.stream.cancelled" : "llm.stream.failed",
-        {
-          ...logContext,
-          phase,
-          eventCounts: Object.fromEntries(eventCounts),
-          elapsedMs: Date.now() - startedAt,
-          ...getSafeErrorLogFields(error),
-          ...getProviderRejectionLogFields(error),
-        },
-      );
-      throw error;
-    } finally {
-      // 无论自然结束、报错还是取消，都解除监听并释放本次请求的 session。
-      if (options.signal?.aborted && outcome !== "failed") {
-        outcome = "cancelled";
-      }
-      options.signal?.removeEventListener("abort", abortSession);
-      if (options.signal?.aborted) await abortPromise;
-      if (persistenceAbortPromise) await persistenceAbortPromise;
-
-      // The snapshot must not keep the per-turn context: the next request restores from it.
-      // Map every historical user row back to its clean stored text so old injected blocks are
-      // removed too, not only the current turn's.
-      const userTextById = new Map<string, string>();
-      for (const message of options.conversation?.history ?? []) {
-        if (message.role !== 'user') continue;
-        try {
-          userTextById.set(
-            message.id,
-            this.parseTextBlocks(message.contentJson)
-              .map((block) => block.text)
-              .join('\n'),
-          );
-        } catch {
-          // A malformed historical row is left untouched; the current prompt still gets cleaned.
-        }
-      }
-      const entries: SessionEntry[] = replaceInjectedUserText(
-        session.sessionManager.getEntries(),
-        prompt,
-        userTextById,
-      );
-      if (options.conversation && !hasPersistenceError && entries.length > 0) {
-        try {
-          await this.piSessionSnapshots.saveSnapshot(
-            options.conversation.id,
-            entries,
-          );
-        } catch (error) {
-          writeStructuredEvent(
-            this.logger,
-            "error",
-            "llm.session_snapshot.save.failed",
-            {
-              ...logContext,
-              entryCount: entries.length,
-              ...getSafeErrorLogFields(error),
-            },
-          );
-        }
-      }
-
-      unsubscribe();
-      try {
-        session.dispose();
-      } catch (error) {
-        outcome = "failed";
-        writeStructuredEvent(
-          this.logger,
-          "error",
-          "llm.session.dispose.failed",
-          {
-            ...logContext,
-            ...getSafeErrorLogFields(error),
-          },
-        );
-        throw error;
-      } finally {
-        writeStructuredEvent(
-          this.logger,
-          outcome === "completed"
-            ? "log"
-            : outcome === "cancelled"
-              ? "warn"
-              : "error",
-          "llm.stream.terminated",
-          {
-            ...logContext,
-            outcome,
-            phase,
-            eventCounts: Object.fromEntries(eventCounts),
-            elapsedMs: Date.now() - startedAt,
-          },
-        );
-      }
-    }
   }
 
   /**
@@ -722,11 +343,8 @@ export class LlmService {
 
     try {
       reportPhase("session");
-      const modelSettings = await this.settings.getLlmSettings();
-      const resolved: LlmGenerateOptions = {
-        ...options,
-        ...getSelectedModelIds(modelSettings),
-      };
+      const { resolved, modelSettings } =
+        await this.resolveRequest(options);
       let resolvedContextWindow: number | null = null;
       session = await this.createSession(resolved, modelSettings, undefined, {
         systemPromptAppend: options.systemPromptAppend,
@@ -861,8 +479,13 @@ export class LlmService {
     }
   }
 
-  /** Creates a request-scoped Pi session rooted in the configured Agent workspace. */
-  private async createSession(
+  /**
+   * Creates a request-scoped Pi session rooted in the configured Agent workspace.
+   *
+   * Both agent entry points build sessions here; `currentUserRequest` is the raw current-turn text
+   * that may grant an external write, and `buildOptions` narrows tools, memory and web access.
+   */
+  async createSession(
     options: LlmRequestOptions,
     modelSettings: StoredLlmSettings,
     currentUserRequest?: string,
@@ -1243,6 +866,63 @@ export class LlmService {
   }
 
   /**
+   * Persists the cleaned Pi snapshot of one chat turn.
+   *
+   * The snapshot is the model context for the next turn, so per-turn injected text must be gone:
+   * this turn's prompt and every historical user row map back to their clean stored text. A
+   * skipped or failed save only logs; the stream result is final and the next request rebuilds
+   * from SQLite history.
+   */
+  async saveConversationSnapshot(input: {
+    conversation: LlmConversationContext | undefined;
+    session: PiAgentSession;
+    prompt: string;
+    skip: boolean;
+    logContext: RequestLogContext;
+  }): Promise<void> {
+    if (!input.conversation || input.skip) return;
+    // Map every historical user row back to its clean stored text so old injected blocks are
+    // removed too, not only the current turn's.
+    const userTextById = new Map<string, string>();
+    for (const message of input.conversation.history) {
+      if (message.role !== "user") continue;
+      try {
+        userTextById.set(
+          message.id,
+          this.parseTextBlocks(message.contentJson)
+            .map((block) => block.text)
+            .join("\n"),
+        );
+      } catch {
+        // A malformed historical row is left untouched; the current prompt still gets cleaned.
+      }
+    }
+    const entries: SessionEntry[] = replaceInjectedUserText(
+      input.session.sessionManager.getEntries(),
+      input.prompt,
+      userTextById,
+    );
+    if (entries.length === 0) return;
+    try {
+      await this.piSessionSnapshots.saveSnapshot(
+        input.conversation.id,
+        entries,
+      );
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        "error",
+        "llm.session_snapshot.save.failed",
+        {
+          ...input.logContext,
+          entryCount: entries.length,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+    }
+  }
+
+  /**
    * Restores the model context by preferring the stored Pi snapshot; SQLite
    * history is rebuilt only when the snapshot is missing or lags behind it.
    */
@@ -1397,20 +1077,10 @@ export class LlmService {
     contentJson: string,
   ): Array<{ type: "text"; text: string }> {
     const value: unknown = JSON.parse(contentJson);
-    if (
-      !Array.isArray(value) ||
-      !value.every(
-        (block) =>
-          typeof block === "object" &&
-          block !== null &&
-          !Array.isArray(block) &&
-          (block as { type?: unknown }).type === "text" &&
-          typeof (block as { text?: unknown }).text === "string",
-      )
-    ) {
+    if (!Array.isArray(value) || !value.every(isStoredTextBlock)) {
       throw new Error("Stored conversation content is not valid text blocks.");
     }
-    return value as Array<{ type: "text"; text: string }>;
+    return value;
   }
 
   /**
@@ -1441,7 +1111,7 @@ export class LlmService {
   }
 
   /** Turns a settled completion into text, naming truncation and legitimately empty runs. */
-  private readAssistantText(
+  readAssistantText(
     completion: Exclude<AssistantCompletion, { kind: "cancelled" }>,
   ): string {
     if (completion.kind === "truncated") {
@@ -1464,7 +1134,7 @@ export class LlmService {
  * model that stopped on `length` or `aborted` after a thinking block looks like an empty
  * completion. Reading the stop reason first keeps truncation and cancellation distinguishable.
  */
-function classifyAssistantCompletion(
+export function classifyAssistantCompletion(
   messages: PiAgentSession["messages"],
   text: string | undefined,
 ): AssistantCompletion {
@@ -1486,11 +1156,22 @@ function classifyAssistantCompletion(
 }
 
 /** Adds the provider's rejection text, which explains a settled run with no assistant text. */
-function getProviderRejectionLogFields(
+export function getProviderRejectionLogFields(
   error: unknown,
 ): Record<string, unknown> {
   if (!(error instanceof LlmProviderRejectedError)) return {};
   return { providerErrorMessage: clipLogText(error.providerMessage, 600) };
+}
+
+/** One persisted content block, narrowed from the stored JSON before Pi restores it. */
+function isStoredTextBlock(
+  block: unknown,
+): block is { type: "text"; text: string } {
+  if (typeof block !== "object" || block === null || Array.isArray(block)) {
+    return false;
+  }
+  if (!("type" in block) || !("text" in block)) return false;
+  return block.type === "text" && typeof block.text === "string";
 }
 
 /** Identifies one Pi message independently of SQLite row and Pi entry IDs. */
@@ -1549,7 +1230,7 @@ function pickSessionEntries(
  * app never calls `session.compact()`. The summary is an extra provider request that rewrites the
  * model context, so both the trigger and the failure must be visible to operators.
  */
-function logPiCompactionEvent(
+export function logPiCompactionEvent(
   logger: Logger,
   logContext: RequestLogContext,
   session: PiAgentSession,
@@ -1599,7 +1280,7 @@ function logPiCompactionEvent(
 }
 
 /** Builds the shared internal request correlation fields for LLM logs. */
-function getRequestLogContext(
+export function getRequestLogContext(
   options: LlmRequestOptions,
   requestId: string,
 ): RequestLogContext {
@@ -1627,7 +1308,7 @@ function getSelectedModelIds(
  * Context goes first and the question last, so the model reads the evidence and then the task; the
  * marker keeps the boundary explicit when the material is a long document.
  */
-function composeModelPrompt(prompt: string, context?: string): string {
+export function composeModelPrompt(prompt: string, context?: string): string {
   const material = context?.trim();
   if (!material) return prompt;
   return `${material}\n\n## 用户输入\n${prompt}`;

@@ -27,8 +27,8 @@ routes:
     token_budget: 18000
     code_globs:
       - "apps/backend/src/lessons/**"
-      - "apps/backend/src/llm/ClassroomSimulationAgent.ts"
-      - "apps/backend/src/llm/StudentAgent.ts"
+      - "apps/backend/src/llm/agents/ClassroomSimulationAgent.ts"
+      - "apps/backend/src/llm/agents/StudentAgent.ts"
       - "apps/backend/src/llm/pi-agent-runtime.ts"
       - "apps/backend/src/llm/model-json.ts"
       - "apps/backend/src/settings/settings.service.ts"
@@ -584,7 +584,7 @@ routes:
     code_globs:
       - "apps/backend/src/artifacts/**"
       - "apps/backend/src/llm/tools/workspace-file-tools.ts"
-      - "apps/backend/src/llm/llm.service.ts"
+      - "apps/backend/src/llm/agents/**"
       - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"
       - "apps/backend/src/database/migrations/1793980000000-conversation-artifacts.ts"
@@ -729,7 +729,7 @@ routes:
       - "apps/backend/src/chat/deep-research-command.ts"
       - "apps/backend/src/chat/turn-command.ts"
       - "apps/backend/src/chat/chat.service.ts"
-      - "apps/backend/src/llm/llm.service.ts"
+      - "apps/backend/src/llm/agents/**"
       - "apps/backend/src/llm/skills.ts"
       - "apps/backend/src/settings/settings.service.ts"
       - "apps/backend/src/artifacts/artifacts.service.ts"
@@ -754,7 +754,7 @@ routes:
     token_budget: 22000
     code_globs:
       - "apps/backend/src/memory/**"
-      - "apps/backend/src/llm/llm.service.ts"
+      - "apps/backend/src/llm/agents/**"
       - "apps/backend/src/llm/session-entries.ts"
       - "apps/backend/src/chat/chat.service.ts"
       - "apps/backend/src/settings/settings.service.ts"

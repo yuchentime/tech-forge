@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ClassroomTurnResult } from '../lessons/lesson.types';
-import type { ClassroomSimulationOptions } from '../llm/ClassroomSimulationAgent';
-import { ClassroomSimulationAgent } from '../llm/ClassroomSimulationAgent';
+import type { ClassroomSimulationOptions } from '../llm/agents/ClassroomSimulationAgent';
+import { ClassroomSimulationAgent } from '../llm/agents/ClassroomSimulationAgent';
 
 /** Raised when a second turn is submitted while one is still running for the same lesson. */
 export class LessonTurnBusyError extends Error {

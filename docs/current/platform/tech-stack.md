@@ -49,7 +49,7 @@ last_verified: 2026-11-11
 | `better-sqlite3` | ^13.0.3（13.0.3） | 原生 SQLite 驱动；本机安装在 `apps/backend/node_modules`，未提升到根 |
 | `@db0-ai/core` / `@db0-ai/backends-sqlite` | 0.3.0 / 0.3.0 | 长期记忆的 harness 与 SQLite backend；ESM-only，经 `new Function("import")` 动态加载；底层依赖 `sql.js`（WASM，无原生编译） |
 | `class-validator` / `class-transformer` | ^0.15.1 / ^0.5.1 | DTO 校验与转换 |
-| `reflect-metadata` / `rxjs` | ^0.2.2 / ^7.8.2（0.2.2 / 7.8.2） | 装饰器元数据（`main.ts` 首行导入）；`rxjs` 由 Nest 运行时使用，源码只有 `llm.service.ts` 一处未使用的 `of` 导入 |
+| `reflect-metadata` / `rxjs` | ^0.2.2 / ^7.8.2（0.2.2 / 7.8.2） | 装饰器元数据（`main.ts` 首行导入）；`rxjs` 由 Nest 运行时使用，源码无直接 import |
 | `typebox` | ^1.3.27（1.3.27） | 工具参数 schema 类型：由 Pi SDK 实际构造，本仓库声明用于对齐 SDK 的 `ToolDefinition` 类型，源码无直接 import |
 
 后端没有 `devDependencies`，共享工具链全部来自根 `package.json`。
@@ -93,8 +93,8 @@ last_verified: 2026-11-11
 
 | 依赖 | 安装 | 现状 |
 |---|---|---|
-| `billion-context-pi` | 0.1.83 | 只有 `llm.service.ts` 中的类型别名 `BillionContextPi`（无任何调用），`DefaultResourceLoader` 也未装载 |
-| `pi-subagents` | 0.86.0 | 同上，仅类型别名 `PiSubagents`；`subagent` 工具未启用 |
+| `billion-context-pi` | 0.1.83 | 源码无任何 import，`DefaultResourceLoader` 也未装载 |
+| `pi-subagents` | 0.86.0 | 同上，源码无直接 import；`subagent` 工具未启用 |
 
 这两项是遗留声明，既不代表已生效能力，也不代表已被评估否决。上下文压缩已确认由 Pi SDK 自身的自动 compaction 负责（`billion-context-pi` 未参与），见 [Agent Runtime](agent-runtime.md#压缩职责结论) 与[Agent Runtime 待办问题](../../source/agent-runtime-open-questions.md)。按现状不要假设 `billion-context-pi` 会自动压缩历史。
 
@@ -109,5 +109,5 @@ last_verified: 2026-11-11
 - SQLite 连接与 pragma：`apps/backend/src/database/database.options.ts`、`database/migrations/`
 - 文档解析适配器：`apps/backend/src/platform/document-parser/parsers/`
 - 本地嵌入：`apps/backend/src/embedding/embedding.service.ts`
-- Agent 与扩展装载：`apps/backend/src/llm/llm.service.ts`
+- Agent 与扩展装载：`apps/backend/src/llm/agents/CommonAgent.ts`、`apps/backend/src/llm/agents/LearnAgent.ts`
 - 桌面进程管理：`apps/desktop/electron/main/main.ts`

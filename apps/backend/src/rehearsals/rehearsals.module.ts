@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationsModule } from '../conversations/conversations.module';
-import { LlmModule } from '../llm/llm.module';
+import { AgentModule } from '../llm/agents/AgentModule';
 import { SettingsModule } from '../settings/settings.module';
 import { ConversationKnowledgeFactEntity } from './conversation-knowledge-fact.entity';
 import { ConversationKnowledgeFactsController } from './conversation-knowledge-facts.controller';
@@ -26,7 +26,7 @@ import { RehearsalsService } from './rehearsals.service';
       ConversationKnowledgeFactEntity,
     ]),
     ConversationsModule,
-    LlmModule,
+    AgentModule,
     SettingsModule,
   ],
   controllers: [

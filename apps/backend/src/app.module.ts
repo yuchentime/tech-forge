@@ -11,7 +11,7 @@ import { EmbeddingModule } from './embedding/embedding.module';
 import { JobsModule } from './jobs/jobs.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { LessonsModule } from './lessons/lessons.module';
-import { LlmModule } from './llm/llm.module';
+import { AgentModule } from './llm/agents/AgentModule';
 import { MemoryModule } from './memory/memory.module';
 import { PlatformModule } from './platform/platform.module';
 import { RehearsalsModule } from './rehearsals/rehearsals.module';
@@ -38,7 +38,7 @@ import { TeachingModule } from './teaching/teaching.module';
     ArtifactsModule,
     MemoryModule,
     ChatModule,
-    LlmModule,
+    AgentModule,
     JobsModule,
   ],
 })

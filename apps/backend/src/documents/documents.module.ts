@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { EmbeddingModule } from '../embedding/embedding.module';
 import { DocumentParserModule } from '../platform/document-parser/document-parser.module';
 import { SettingsModule } from '../settings/settings.module';
-import { LlmModule } from '../llm/llm.module';
+import { AgentModule } from '../llm/agents/AgentModule';
 import { ConversationDocumentEntity } from './conversation-document.entity';
 import { DocumentChunkEntity } from './document-chunk.entity';
 import { DocumentEntity } from './document.entity';
@@ -29,7 +29,7 @@ import { KnowledgeDirectoryService } from './knowledge-directory.service';
     // Legacy embeddings remain injectable for historical maintenance helpers; ingest no longer calls them.
     EmbeddingModule,
     SettingsModule,
-    LlmModule,
+    AgentModule,
   ],
   controllers: [DocumentsController],
   providers: [DocumentsService, DocumentCatalogService, DocumentCatalogIndexService, KnowledgeDirectoryService],

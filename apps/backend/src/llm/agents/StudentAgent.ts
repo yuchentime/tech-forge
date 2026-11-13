@@ -1,14 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession as PiAgentSession } from '@earendil-works/pi-coding-agent';
-import { DeepseekLLMAdapter } from './adapters/deepseek-llm.adapter';
+import { DeepseekLLMAdapter } from '../adapters/deepseek-llm.adapter';
 import {
   createCleanPiSession,
   resolvePiAgentEnvironment,
   runPiTurn,
   type PiTurnOptions,
-} from './pi-agent-runtime';
-import { SettingsService } from '../settings/settings.service';
+} from '../pi-agent-runtime';
+import { SettingsService } from '../../settings/settings.service';
 
 /** Options for one student turn. */
 export interface StudentAgentRunOptions extends PiTurnOptions {

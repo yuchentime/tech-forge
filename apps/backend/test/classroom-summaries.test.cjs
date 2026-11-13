@@ -19,8 +19,8 @@ const { SettingsService } = load('settings/settings.service.js');
 const { LessonsService } = load('lessons/lessons.service.js');
 const { LessonEntity } = load('lessons/lesson.entity.js');
 const {
-  ClassroomSummariesService,
-} = load('classroom/classroom-summaries.service.js');
+  ClassroomSummariesAgent,
+} = load('llm/agents/ClassroomSummariesAgent.js');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-summaries-'));
 test.after(() => rmSync(scratchRoot, { recursive: true, force: true }));
@@ -63,7 +63,7 @@ test('generates, stores and previews a summary for an ended lesson', async () =>
         return '## 本节讲了什么\n讲了缓存雪崩。\n\n## 学生关注点\n林澈问大量 key 同时过期。';
       },
     };
-    const summaries = new ClassroomSummariesService(lessons, fakeLlm);
+    const summaries = new ClassroomSummariesAgent(lessons, fakeLlm);
 
     const ready = await summaries.generate(lessonId);
     assert.equal(ready.summaryStatus, 'ready');
@@ -85,7 +85,7 @@ test('a failed provider call stores a retryable failure without throwing', async
   const { dataSource, lessons } = await createHarness();
   try {
     const lessonId = await seedEndedLesson(lessons);
-    const summaries = new ClassroomSummariesService(lessons, {
+    const summaries = new ClassroomSummariesAgent(lessons, {
       generate: async () => {
         throw new Error('provider exploded with secret text');
       },
@@ -110,7 +110,7 @@ test('a corrupt transcript fails the summary without calling the model', async (
       'utf8',
     );
     let called = false;
-    const summaries = new ClassroomSummariesService(lessons, {
+    const summaries = new ClassroomSummariesAgent(lessons, {
       generate: async () => {
         called = true;
         return 'should not happen';
@@ -134,7 +134,7 @@ test('a second generation while one is running is rejected', async () => {
     const gate = new Promise((resolveGate) => {
       release = resolveGate;
     });
-    const summaries = new ClassroomSummariesService(lessons, {
+    const summaries = new ClassroomSummariesAgent(lessons, {
       generate: () => gate.then(() => '## 本节讲了什么\n缓存雪崩。'),
     });
 
@@ -156,7 +156,7 @@ test('interrupted generations are reset to failed on startup', async () => {
       .getRepository(LessonEntity)
       .update({ id: lessonId }, { summaryStatus: 'generating' });
 
-    const summaries = new ClassroomSummariesService(lessons, {
+    const summaries = new ClassroomSummariesAgent(lessons, {
       generate: async () => '',
     });
     await summaries.onModuleInit();

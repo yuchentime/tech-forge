@@ -48,9 +48,9 @@ import {
 import { LessonsService } from '../lessons/lessons.service';
 import { ClassroomTurnError } from '../llm/turn-errors';
 import {
-  ClassroomSummariesService,
+  ClassroomSummariesAgent,
   LessonSummaryBusyError,
-} from './classroom-summaries.service';
+} from '../llm/agents/ClassroomSummariesAgent';
 import { ListLessonsQueryDto, SendLessonTurnDto } from './classroom.dto';
 import {
   ClassroomTurnsService,
@@ -69,7 +69,7 @@ export class ClassroomController {
 
   constructor(
     private readonly lessons: LessonsService,
-    private readonly summaries: ClassroomSummariesService,
+    private readonly summaries: ClassroomSummariesAgent,
     private readonly turns: ClassroomTurnsService,
   ) {}
 

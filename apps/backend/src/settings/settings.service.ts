@@ -192,7 +192,7 @@ export class SettingsService implements OnModuleInit {
   /**
    * Returns the user-visible Pi skill root (`<configDir>/skills`).
    *
-   * `LlmService` seeds bundled skills here and adds it to Pi's explicit skill paths.
+   * `CommonAgent` seeds bundled skills here and adds it to Pi's explicit skill paths.
    */
   getSkillsDirectory(): string {
     return this.skillsDirectory;

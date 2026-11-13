@@ -21,10 +21,10 @@ import {
   type RestorableConversationHistory,
 } from '../conversations/conversations.service';
 import {
-  LlmService,
+  CommonAgent,
   type LlmConversationContext,
   type LlmGenerateOptions,
-} from '../llm/llm.service';
+} from '../llm/agents/CommonAgent';
 import {
   clipLogText,
   getSafeErrorLogFields,
@@ -202,7 +202,7 @@ export class RehearsalsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly conversations: ConversationsService,
-    private readonly llm: LlmService,
+    private readonly commonAgent: CommonAgent,
     private readonly settings: SettingsService,
     private readonly runs: RehearsalRunRegistry,
     private readonly preparing: RehearsalPreparingRegistry,
@@ -1401,7 +1401,7 @@ export class RehearsalsService {
   ): Promise<T> {
     let text: string;
     try {
-      text = await this.llm.generate(attemptPrompt, callOptions);
+      text = await this.commonAgent.generate(attemptPrompt, callOptions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // Transport retries belong to the Pi SDK; record the diagnostic detail and let the caller

@@ -11,7 +11,7 @@ export const DEEP_RESEARCH_COMMAND = '/探索主题';
  * Pi skill loaded for a research turn.
  *
  * The skill owns the document and knowledge-map procedure; the backend only decides when to load
- * it. Keeping the name here also means a renamed skill fails loudly in `LlmService` instead of
+ * it. Keeping the name here also means a renamed skill fails loudly in `LearnAgent` instead of
  * sending the literal `/skill:...` text to the model.
  */
 export const DEEP_RESEARCH_SKILL_NAME = 'deep-research';

@@ -1,7 +1,7 @@
 /**
  * Fixed prompt for the post-class summary.
  *
- * It is passed as `systemPromptAppend` to `LlmService.generate()`, which replaces the chat prompt,
+ * It is passed as `systemPromptAppend` to `CommonAgent.generate()`, which replaces the chat prompt,
  * so the model sees only these rules. The summary describes the stored transcript; it must not
  * invent assessment the classroom never produced.
  */

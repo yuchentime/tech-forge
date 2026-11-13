@@ -98,7 +98,7 @@ last_verified: 2026-11-10
 
 ### 3.4 注入位置
 
-知识块不进入 system prompt：`ChatService` 把它和附件正文一起作为 `LlmRequestOptions.promptContext` 交给 `LlmService`，由后者拼在本轮 user message 前面（`## 用户输入` 标记之后是用户原话）。system prompt 因此逐字稳定，provider 的前缀缓存不会被每轮数据打断。
+知识块不进入 system prompt：`ChatService` 把它和附件正文一起作为 `LlmRequestOptions.promptContext` 交给 `LearnAgent`，由后者拼在本轮 user message 前面（`## 用户输入` 标记之后是用户原话）。system prompt 因此逐字稳定，provider 的前缀缓存不会被每轮数据打断。
 
 ### 3.5 探索主题
 
@@ -106,7 +106,7 @@ last_verified: 2026-11-10
 
 - 命令解析由 `chat/turn-command.ts` 完成，`/探索主题` 与 `/查询资料库` 可组合、顺序不限；研究轮次即使没写 `/查询资料库` 也固定检索。
 - 检索结果仍写入该轮 `contextRefsJson.knowledge`，`triggeredBy` 仍为 `command`。
-- `ChatService` 额外向 `LlmService` 传 `skillName: 'deep-research'`；`LlmService` 把 `/skill:deep-research` 放在模型 prompt 首位，资料块与主题作为参数。技能正文只进模型输入，不进 SQLite 消息或快照。
+- `ChatService` 额外向 `LearnAgent` 传 `skillName: 'deep-research'`；`LearnAgent` 把 `/skill:deep-research` 放在模型 prompt 首位，资料块与主题作为参数。技能正文只进模型输入，不进 SQLite 消息或快照。
 - 产物是会话工作区里的 `知识文档.md` 与 `知识地图.svg`，按普通 artifact 登记。详见[Agent Runtime](../../platform/agent-runtime.md#技能装载与探索主题)。
 
 ## 4. 日志

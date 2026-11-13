@@ -1,17 +1,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { getSafeErrorLogFields } from '../logging/structured-logger';
-import { LessonCorruptError } from '../lessons/lesson.errors';
-import type { LessonEntity } from '../lessons/lesson.entity';
-import { LessonsService } from '../lessons/lessons.service';
-import { formatTranscript } from '../lessons/transcript-format';
-import { LlmService } from '../llm/llm.service';
+import { getSafeErrorLogFields } from '../../logging/structured-logger';
+import { LessonCorruptError } from '../../lessons/lesson.errors';
+import type { LessonEntity } from '../../lessons/lesson.entity';
+import { LessonsService } from '../../lessons/lessons.service';
+import { formatTranscript } from '../../lessons/transcript-format';
 import {
   buildSummaryPrompt,
   CLASSROOM_SUMMARY_SYSTEM_PROMPT,
   SUMMARY_CHAR_LIMIT,
   SUMMARY_MESSAGE_LIMIT,
   SUMMARY_TIMEOUT_MS,
-} from './classroom-summary.prompt';
+} from '../../classroom/classroom-summary.prompt';
+import { CommonAgent } from './CommonAgent';
 
 /** Raised when a second generation is requested while one is still running. */
 export class LessonSummaryBusyError extends Error {
@@ -24,19 +24,19 @@ export class LessonSummaryBusyError extends Error {
 /**
  * Generates and stores one ended lesson's summary.
  *
- * The model call goes through `LlmService.generate()`: no conversation, no snapshot, no tools and
- * no memory. Failure is a stored status (`failed` + user-safe reason) rather than an HTTP error —
- * the classroom remains readable and the UI can offer a retry.
+ * The model call goes through `CommonAgent.generate()`: no conversation, no snapshot, no tools
+ * and no memory. Failure is a stored status (`failed` + user-safe reason) rather than an HTTP
+ * error — the classroom remains readable and the UI can offer a retry.
  */
 @Injectable()
-export class ClassroomSummariesService implements OnModuleInit {
-  private readonly logger = new Logger(ClassroomSummariesService.name);
+export class ClassroomSummariesAgent implements OnModuleInit {
+  private readonly logger = new Logger(ClassroomSummariesAgent.name);
   /** Lessons currently generating in this process; prevents duplicate writes from double clicks. */
   private readonly inFlight = new Set<string>();
 
   constructor(
     private readonly lessons: LessonsService,
-    private readonly llm: LlmService,
+    private readonly commonAgent: CommonAgent,
   ) {}
 
   /** Fails summaries orphaned by a previous process so the UI never spins forever. */
@@ -92,7 +92,7 @@ export class ClassroomSummariesService implements OnModuleInit {
 
       try {
         const markdown = (
-          await this.llm.generate(buildSummaryPrompt(transcript), {
+          await this.commonAgent.generate(buildSummaryPrompt(transcript), {
             requestId,
             systemPromptAppend: CLASSROOM_SUMMARY_SYSTEM_PROMPT,
             tools: [],

@@ -30,7 +30,7 @@ const { ClassroomModule } = load('classroom/classroom.module.js');
 const { LessonsService } = load('lessons/lessons.service.js');
 const { LessonEntity } = load('lessons/lesson.entity.js');
 const { ClassroomTurnsService } = load('classroom/classroom-turns.service.js');
-const { ClassroomSummariesService } = load('classroom/classroom-summaries.service.js');
+const { ClassroomSummariesAgent } = load('llm/agents/ClassroomSummariesAgent.js');
 
 const LOCAL_TOKEN = 'classroom-test-token';
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-classroom-'));
@@ -465,7 +465,7 @@ test('active and generating lessons cannot be deleted', async () => {
     assert.equal(await ctx.lessons.findLesson(active.id) !== null, true);
 
     await ctx.lessons.endLesson(active.id);
-    const summaries = ctx.app.get(ClassroomSummariesService);
+    const summaries = ctx.app.get(ClassroomSummariesAgent);
     summaries.isGenerating = () => true;
     const generatingDelete = await request(ctx, `/api/lessons/${active.id}`, {
       method: 'DELETE',

@@ -24,7 +24,7 @@ last_verified: 2026-11-12
 ### 开始与上下文
 
 - 开始前必须存在普通对话历史：至少一条已完成 user 行和一条已完成 assistant 行；存在 `pending` 普通行时返回 409。桌面端只有在当前 thread 出现 completed user + assistant round 后启用「开始演练」；同一判定也门控页头的「演练模式」页签——没有该 round 时页签置灰且不可点击，说明文案挂在按钮外层（`title`），与开始页的 `disabledReason` 共用 `REHEARSAL_REQUIRES_ROUND_HINT`。若当前模式已是演练，而 round 消失（如新建议题、清空会话），视图自动退回对话模式。`ConversationsService.getRestorableHistory(conversationId, upToSequenceNo?)` 只读投影可恢复历史并返回 `{ history, maxSequenceNo }`，不创建 turn、不写消息。
-- 开场规划复用父会话 Pi 快照（含 compaction），但 `LlmService.generate()` 不保存快照；快照缺失或落后时按 SQLite 重建。规划输出 `topic`、`learningSummary`、1–8 个知识点和第一道基础题。知识点数量按对话实际内容确定；内容少时可以只有 1–2 个，不要求凑满。
+- 开场规划复用父会话 Pi 快照（含 compaction），但 `CommonAgent.generate()` 不保存快照；快照缺失或落后时按 SQLite 重建。规划输出 `topic`、`learningSummary`、1–8 个知识点和第一道基础题。知识点数量按对话实际内容确定；内容少时可以只有 1–2 个，不要求凑满。
 - 后续答题、跳过和报告只带 `learningSummary + plan + 已有问答 + 当前状态`，不重复注入完整普通历史。演练 Agent 使用代码写死的 system prompt，不加载 IDENTIFY/PREFERENCE 文本或工具；它不能写文件或执行命令。
 - 学生画像可选、最多 1000 字符，只影响提问视角。画像持久化在 `<configDir>/rehearsal-persona.txt`，不建表、不按会话隔离；`PUT /api/rehearsal-persona` 原子写回，空文件等价于没有画像。每次开始把当时文本作为 `persona` 传入，历史演练保留 `personaText`。
 
@@ -65,9 +65,9 @@ stateDiagram-v2
 ### 结果同步
 
 - 评估完成时写 `rehearsals.overallEvaluationJson` 与各 turn 的 `evaluationJson`，并写 `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md` transcript。普通对话由 `ChatService` 调用 `RehearsalsService.buildConversationDigest()`，只取 `loadedContext = 0` 的最近 3 次 completed 演练摘要，总长度封顶 6000 字符。
-- 摘要不拼进本轮 user 文本：`LlmService.stream()` 在 `session.prompt()` 前用 `appendCustomMessageEntry(..., display: false)` 追加 `rehearsal_digest`，随后 `markDigestDelivered()` 置 `loadedContext = 1`；一次投递后 Pi 快照继续携带，不再重复注入。
+- 摘要不拼进本轮 user 文本：`LearnAgent.stream()` 在 `session.prompt()` 前用 `appendCustomMessageEntry(..., display: false)` 追加 `rehearsal_digest`，随后 `markDigestDelivered()` 置 `loadedContext = 1`；一次投递后 Pi 快照继续携带，不再重复注入。
 - digest 包含主题、画像、逐题问答摘要/评估、总体薄弱点/建议和 transcript 路径；`contextRefsJson.rehearsals` 记录 `rehearsalIds` 与字符数，并由 `mergeUserMessageContextRefs()` 与 attachments / knowledge 合并。
-- `LlmService` 保存快照前用 `replaceInjectedUserText()` 清除本轮和历史的附件/知识块注入；`custom_message` entry 不清除，因此 digest 留存。普通对话继续接收摘要上下文；报告通过演练历史查看，不在普通对话展示卡片。
+- `CommonAgent.saveConversationSnapshot()` 保存快照前用 `replaceInjectedUserText()` 清除本轮和历史的附件/知识块注入；`custom_message` entry 不清除，因此 digest 留存。普通对话继续接收摘要上下文；报告通过演练历史查看，不在普通对话展示卡片。
 
 ### 会话知识掌握事实
 
@@ -116,5 +116,5 @@ stateDiagram-v2
 - 知识事实实体、服务/worker、严格校验、预算与 prompt：`conversation-knowledge-fact.entity.ts`、`conversation-knowledge-facts.service.ts`、`conversation-knowledge-facts.validation.ts`、`conversation-knowledge-facts.budget.ts`、`conversation-knowledge-facts.prompts.ts`
 - 知识事实只读 HTTP：`conversation-knowledge-facts.controller.ts`；演练 HTTP 边界：`rehearsals.controller.ts`
 - 知识掌握视图使用 `GET /api/knowledge-facts` 读取轻量列表，打开详情后使用 `GET /api/conversations/:id/knowledge-facts`；展示契约见[知识掌握](../knowledge-profile/api-contract.md)
-- 非流式模型调用：`apps/backend/src/llm/llm.service.ts` 的 `generate()`；普通对话注入：`apps/backend/src/chat/chat.service.ts`；快照清洗：`apps/backend/src/llm/session-entries.ts`
+- 非流式模型调用：`apps/backend/src/llm/agents/CommonAgent.ts` 的 `generate()`；普通对话注入：`apps/backend/src/chat/chat.service.ts`；快照清洗：`apps/backend/src/llm/session-entries.ts`
 - 桌面端：`apps/desktop/src/features/rehearsal/`

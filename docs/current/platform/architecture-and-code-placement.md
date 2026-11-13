@@ -13,7 +13,7 @@ related:
   - docs/source/data-model-design.md
   - docs/source/data-model-fields.md
   - docs/source/system-configuration-design.md
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # TeachForge 当前架构与代码放置指南
@@ -32,7 +32,8 @@ last_verified: 2026-11-12
 | 业务用例与跨组件编排 | 对应领域的 `*Service` | 负责用例规则、调用领域/基础设施能力和持久化协调 |
 | 持久化结构 | 对应领域目录中的 `*.entity.ts` | 只描述表、字段、关系和索引，不放流程规则 |
 | Schema 演进 | `apps/backend/src/database/migrations/` | 新增/修改表结构用迁移；保持 `synchronize: false` |
-| 模型提供商调用 | `apps/backend/src/llm/` | `LlmService` 统一调用入口；提供商差异放 `adapters/` |
+| 模型提供商调用 | `apps/backend/src/llm/` | `CommonAgent`（session 构建与 `generate()`）和 `LearnAgent`（`stream()`）是统一调用入口；提供商差异放 `adapters/` |
+| 大模型场景 Agent | `apps/backend/src/llm/agents/<Scenario>Agent.ts` | 每个不同的大模型调用场景必须单独定义 Agent；文件名和类名统一为 `<Scenario>Agent.ts` / `<Scenario>Agent`。通用生成能力复用 `CommonAgent.generate()`，Agent 只负责该场景的提示词、输入编排和输出解析 |
 | Backend 业务流程诊断日志 | `apps/backend/src/logging/structured-logger.ts` 与各领域 Controller/Service | 通过 Nest Logger 输出带 requestId 的 JSON 事件；由所属边界记录阶段与失败，不输出业务正文或工具 payload |
 | 文件系统、向量索引等底层能力 | 现有领域 Service 的依赖；需要复用时再新增 `platform` adapter | 业务规则归领域，通用 I/O 适配归基础设施 |
 
@@ -50,7 +51,7 @@ flowchart LR
   Nest --> Service[Domain Service]
   Service --> ORM[TypeORM Repository / Entity]
   ORM --> DB[(SQLite)]
-  Service --> LLM[LlmService / Adapter]
+  Service --> LLM[CommonAgent / LearnAgent / Adapter]
   UI -->|streamChat| StreamBridge[Preload typed stream bridge]
   StreamBridge --> MainStream[Electron main fixed Agent proxy]
   MainStream -->|SSE + local token| AgentHTTP[POST /api/chat/stream]
@@ -92,16 +93,16 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 | `platform` / `document-parser` | 文件解析适配层：把 PDF/DOCX/MD/TXT 转成按页文本与质量告警 | `DocumentParserModule` 导出 `DocumentParserService`；v1 使用 `pdfjs-dist` 与 `mammoth`，无 Python、无子进程、无模型下载；`documents` 域尚未接入 |
 | `conversations` | Conversation/Message、普通对话用例和消息持久化 | `ConversationsController` 提供摘要列表、每页最多 30 条的可见文本历史、物理删除（`DELETE /:conversationId`，连同行与本地 session 目录）以及会话知识库范围读写（`GET/PUT /:conversationId/knowledge-scope`，存在 `conversations.metadataJson`）；user 行可嵌套安全工具摘要与附件引用 `{attachmentId, name}`，assistant 行可带本轮 `generatedFiles`。Entity 与 `ConversationsService` 管理 SQLite 持久化、历史投影、pending 对账及 Pi 历史恢复 |
 | `attachments` | 会话附件：按会话存放的副本、正文提取与后续轮路径 | `AttachmentsService.storeForConversation()` 在发送时把文件复制到 `<configDir>/sessions/<conversationId>/attachments/<attachmentId>/`；PDF/DOCX 把解析正文写成同名 `.md`，Markdown/TXT 直接保留原文件，图片编码为 base64 供本轮视觉输入；`readableFilePath()` 供后续轮指针使用。没有 HTTP 入口，不写数据库、不建索引、不参与检索 |
-| `rehearsals` | Rehearsal/RehearsalTurn、提问、回答、轮次评估、总体报告与历史 | `RehearsalsService` 维护 `preparing → awaiting_answer → evaluating/preparing_next → reporting → completed/failed` 状态机；15 次总提问、单题 2 次追问、跳过消耗名额；开场用 `LlmService.generate()` 只读复用父 Pi 快照，后续只带 plan + 问答；报告写 `overallEvaluationJson` 与 session transcript；`GET/POST /api/conversations/:id/rehearsals`、`GET /api/rehearsals/:id`、answers/skip/end 已接入；历史列表只返回摘要并分页。评估直接属于 RehearsalTurn。学生画像不建表，保存在 `<configDir>/rehearsal-persona.txt`，由 `GET/PUT /api/rehearsal-persona` 读写，所有会话共用 |
-| `lessons` | 课堂生命周期与本地对话记录 | `LessonEntity` 只存 `id/status/endedAt/createdAt/updatedAt`；消息不进 SQLite，按 `{id,speaker,text,createdAt}` 写入 `<configDir>/lessons/<lessonId>/messages.jsonl`，`LessonsService` 以每课堂一条 Promise 链串行追加并在写入前校验 `active`；`getLessonDirectory()` 校验 UUID，lessons 根已加入 `getManagedFilePaths()`；`ClassroomController` 提供消息列表（`speaker/role/name` + `integrity`）、课堂列表（含 `summaryPreview`）、建课堂、幂等结束、发言轮次（`ClassroomTurnsService` 每课堂拒绝并发）与总结读写；桌面端 `ClassroomHome`/`ClassroomMode` 消费这些端点；总结存在 `lessons.summaryStatus/summaryMarkdown/summaryError/summaryGeneratedAt`，由 `ClassroomSummariesService` 经 `LlmService.generate()` 生成（仅 ended、可重试、损坏记录不调模型）；损坏记录读取降级、追加被拒绝，靠新课堂恢复 |
+| `rehearsals` | Rehearsal/RehearsalTurn、提问、回答、轮次评估、总体报告与历史 | `RehearsalsService` 维护 `preparing → awaiting_answer → evaluating/preparing_next → reporting → completed/failed` 状态机；15 次总提问、单题 2 次追问、跳过消耗名额；开场用 `CommonAgent.generate()` 只读复用父 Pi 快照，后续只带 plan + 问答；报告写 `overallEvaluationJson` 与 session transcript；`GET/POST /api/conversations/:id/rehearsals`、`GET /api/rehearsals/:id`、answers/skip/end 已接入；历史列表只返回摘要并分页。评估直接属于 RehearsalTurn。学生画像不建表，保存在 `<configDir>/rehearsal-persona.txt`，由 `GET/PUT /api/rehearsal-persona` 读写，所有会话共用 |
+| `lessons` | 课堂生命周期与本地对话记录 | `LessonEntity` 只存 `id/status/endedAt/createdAt/updatedAt`；消息不进 SQLite，按 `{id,speaker,text,createdAt}` 写入 `<configDir>/lessons/<lessonId>/messages.jsonl`，`LessonsService` 以每课堂一条 Promise 链串行追加并在写入前校验 `active`；`getLessonDirectory()` 校验 UUID，lessons 根已加入 `getManagedFilePaths()`；`ClassroomController` 提供消息列表（`speaker/role/name` + `integrity`）、课堂列表（含 `summaryPreview`）、建课堂、幂等结束、发言轮次（`ClassroomTurnsService` 每课堂拒绝并发）与总结读写；桌面端 `ClassroomHome`/`ClassroomMode` 消费这些端点；总结存在 `lessons.summaryStatus/summaryMarkdown/summaryError/summaryGeneratedAt`，由 `ClassroomSummariesAgent` 经 `CommonAgent.generate()` 生成（仅 ended、可重试、损坏记录不调模型）；损坏记录读取降级、追加被拒绝，靠新课堂恢复 |
 | `documents` | 共享/会话资料、文件版本、解析与目录摘要状态、资料库目录 `index.md` | `DocumentsService.ingestFile()` 实现"本地文件路径 → 解析 → 转换 Markdown → 目录摘要（提示词给 200 字符软上限，3–8 关键词与资料类型参与校验，长度不参与拒绝）→ 写 `documents` / `document_versions` 目录字段 → 原子重建 `index.md`"，状态 `parsing → cataloging → ready`，摘要失败为 `failed` + `catalogStatus='failed'` + `catalogError`（文件与转换文本保留，写 `documents.catalog.failed` 结构化日志，不回显正文）；旧的 `document_chunks` / `chunk_search_terms` / `chunk_embeddings` 不再写入，`chunkCount` 恒为 0；按 `contentHash` 幂等，可指定 `documentId` 追加版本；上传按 `IMPORT_CONCURRENCY = 3` 并发、其余排队，数据库写入与 `index.md` 重建串行；`listDocuments` / `getDocumentDetail` / `retryCatalog` 提供读取与摘要重试；`DocumentsController` 暴露 `GET /api/documents`、`POST /api/documents/import`（复制进 `<configDir>/knowledge/documents/<id>/v<n>/`）、`POST /api/documents/:documentId/catalog/retry`、`DELETE /api/documents/:id`（清派生行 + 文件副本，处理中返回 409）。会话关联未实现 |
 | `artifacts` | 会话产出文件的索引与只读预览 | `write`/`edit` 成功后登记 `ArtifactsService.registerArtifact()`：会话内文件存相对路径（`pathKind='session'`），用户指定绝对路径存 `external`；`ArtifactsController` 提供 `GET /api/conversations/:id/artifacts`、`GET /api/artifacts/:id/content`、`/location`；`missing` 现算；不设计 ArtifactVersion |
 | `settings` | 本机 DeepSeek 模型、Agent 默认输出路径、身份设定与风格偏好文件 | `SettingsController` 暴露 `GET/PUT /api/settings`；`SettingsService` 独占 `.tech-forge/config.toml`、`IDENTIFY.md` 和 `PREFERENCE.md`，并提供 `getWorkspacePath()` / `getSessionWorkspaceDirectory()` / `getIdentitySetting()` / `getStylePreference()` 与托管文件路径；全局 workspace 设置已从界面移除，仅保留存储值与知识库历史目录迁移使用；API Key 仅由本机设置 API 返回设置页，不进入 Agent SSE、日志或 SQLite |
 | `retrieval` | 按 Conversation 资料范围组合检索上下文 | `RetrievalService.search()` 实现词法 + 向量双通道与 RRF 融合（k=60，候选 50/路，默认返回 12），支持 `documentIds` 范围过滤与向量下限 0.55；向量不可用时退回词法单路。`LlmQueryExpander` 在词法零命中时用已配置模型做错字纠正与同义词扩展，只增补、800 ms 预算、失败回落。`text-normalizer.ts` 提供中文 bigram 归一化与 MATCH 构造 |
 | `knowledge` | 本轮知识上下文：`/查询资料库` 命令解析、会话范围、分片选择、重排与渲染 | `KnowledgeService` 只消费 `documents`、`retrieval` 与 `chunk-reranker`；不拥有存储，不做范围判定（范围归 `documents`） |
 | `embedding` | 文本向量化能力 | `EmbeddingService` 加载随仓库分发的 `bge-small-zh-v1.5` q8 模型（`assets/models`，离线，148 ms 加载），批量 32 编码并返回已归一化的 512 维向量；失败时调用方可降级 |
-| `llm` | 模型运行时及提供商适配 | `LlmService` 提供 `generate` 与 `stream`：`stream` 用于普通对话并保存 Pi 快照；`generate` 供演练做非流式 JSON 调用，可读父历史但从不保存快照、可禁用工具。每个 session 从 SettingsService 读取 DeepSeek 模型配置、IDENTIFY.md、PREFERENCE.md 和 workspace；Pi cwd 是会话工作区 `<configDir>/sessions/<conversationId>/workspace`；工具适配层实施读写分离与托管文件保护；不注册检索或记忆工具：知识库由 `/查询资料库`（及 `/探索主题`）命令在 `ChatService` 中显式触发；知识块与附件正文经 `LlmRequestOptions.promptContext` 拼在本轮 user message 前面，演练 digest 经 `LlmRequestOptions.contextMessage` 作为持久 `custom_message` entry 追加一次（system prompt 保持逐字稳定），保存 Pi 快照前用 `replaceInjectedUserText` 把当前和历史 user 消息还原为纯文本；Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与用户 `<workspace>/skills` 装载，`skillName` 请求把 `/skill:<name>` 放在模型 prompt 首位；课堂模拟由 `lessons` 域和 `ClassroomSimulationAgent`/`StudentAgent` 组成：每轮把老师消息追加到 `<configDir>/lessons/<lessonId>/messages.jsonl`，无思考的导演会话按 JSON 选学生，再由 `StudentAgent.createAgent(systemPrompt)` 生成回复并追加；SQLite 只存 `lessons` 生命周期行，消息不落库；两者共用 `pi-agent-runtime`（`systemPrompt` 替换默认编码提示词、`tools: []`、无快照/记忆/skill、每次运行新建内存 session），尚未接入 HTTP 或课堂视图 |
-| `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；每轮还调用 `RehearsalsService.buildConversationDigest()`，把尚未投递的 completed 演练摘要经 `LlmRequestOptions.contextMessage` 交给 `LlmService` 追加为持久 `custom_message` entry，并用 `mergeUserMessageContextRefs()` 合并 `rehearsals` 引用、`markDigestDelivered()` 置位。`LlmService` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
+| `llm` | 模型运行时及提供商适配 | `CommonAgent` 提供 Pi session 构建与 `generate`，`LearnAgent` 提供 `stream`：`stream` 用于普通对话并保存 Pi 快照；`generate` 供演练做非流式 JSON 调用，可读父历史但从不保存快照、可禁用工具。每个 session 从 SettingsService 读取 DeepSeek 模型配置、IDENTIFY.md、PREFERENCE.md 和 workspace；Pi cwd 是会话工作区 `<configDir>/sessions/<conversationId>/workspace`；工具适配层实施读写分离与托管文件保护；不注册检索或记忆工具：知识库由 `/查询资料库`（及 `/探索主题`）命令在 `ChatService` 中显式触发；知识块与附件正文经 `LlmRequestOptions.promptContext` 拼在本轮 user message 前面，演练 digest 经 `LlmRequestOptions.contextMessage` 作为持久 `custom_message` entry 追加一次（system prompt 保持逐字稳定），保存 Pi 快照前用 `replaceInjectedUserText` 把当前和历史 user 消息还原为纯文本；Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与用户 `<workspace>/skills` 装载，`skillName` 请求把 `/skill:<name>` 放在模型 prompt 首位；课堂模拟由 `lessons` 域和 `ClassroomSimulationAgent`/`StudentAgent` 组成：每轮把老师消息追加到 `<configDir>/lessons/<lessonId>/messages.jsonl`，无思考的导演会话按 JSON 选学生，再由 `StudentAgent.createAgent(systemPrompt)` 生成回复并追加；SQLite 只存 `lessons` 生命周期行，消息不落库；两者共用 `pi-agent-runtime`（`systemPrompt` 替换默认编码提示词、`tools: []`、无快照/记忆/skill、每次运行新建内存 session），尚未接入 HTTP 或课堂视图 |
+| `chat` | Agent 单轮运行入口；必要时编排模型和工具协作 | `ChatController` 提供受本地认证保护的 `POST /api/chat/stream` SSE；可选 `conversationId` 指定持久对话，未提供时服务创建 ID 并先发送 `conversation` 元数据事件。`ChatService` 按 conversation 串行化请求，并只投影允许展示的 Pi lifecycle、tool start/end 与文本 delta 字段；每轮还调用 `RehearsalsService.buildConversationDigest()`，把尚未投递的 completed 演练摘要经 `LlmRequestOptions.contextMessage` 交给 `LearnAgent` 追加为持久 `custom_message` entry，并用 `mergeUserMessageContextRefs()` 合并 `rehearsals` 引用、`markDigestDelivered()` 置位。`CommonAgent` 的请求级 Pi 扩展钩子在事件继续派发或工具启动前等待 ConversationsService 落库。Controller/Service 使用同一 requestId 记录业务阶段、持久化、工具和终态日志 |
 | `jobs` | 必须在后台运行的长任务与恢复机制 | Service 为空壳；未建 Job 表或队列 |
 
 `assessments`、`teaching` 目前只有空壳或未接入用例。当前数据模型将每轮评估放入 RehearsalTurn；长期记忆由 `memory` 域实现，但存储在独立的 db0 SQLite 文件中，不建 Memory 表（见[长期记忆](../domains/memory/index.md)）。不要据目录名就新增 Assessment 或 Memory 表。Course 与 Lesson 模块及课程原型界面已从运行代码中移除；Course/Class/Lesson 不属于当前目标模型。
@@ -116,7 +117,9 @@ Nest 根入口通过 `AppModule` 组合模块；业务逻辑按领域模块放�
 4. **Entity/Repository**：实体定义 TypeORM 映射；Repository 由 Nest `TypeOrmModule.forFeature` 提供，业务查询从所属领域 Service 发起。
 5. **Migration**：Schema 变化放在 `database/migrations`，并在 `database.options.ts` 注册实体；不要依赖开发环境自动同步表结构。
 
-LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmService` 管提供商/会话调用，不拥有 Conversation 或 Rehearsal 的业务规则；具体领域 Service 决定何时调用模型、保存哪些业务状态。
+LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`CommonAgent`/`LearnAgent` 管提供商/会话调用，不拥有 Conversation 或 Rehearsal 的业务规则；具体领域 Service 决定何时调用模型、保存哪些业务状态。
+
+不同的大模型调用场景必须各自定义 Agent，放在 `apps/backend/src/llm/agents/`，文件名与类名使用 `<Scenario>Agent.ts` / `<Scenario>Agent`，并在 `AgentModule` 注册后由领域 Service 注入。`CommonAgent` 提供通用生成能力（`generate()` 与 session 构建），可被多个场景 Agent 复用；场景 Agent 只承载该场景的提示词、输入编排和结果解析，不复制 session、工具、记忆或配置装配。同一个场景内增加调用分支不需要新建 Agent，只有提示词契约、输入结构或结果语义变化才视为新场景。
 
 实体类采用应用生成的 ID，不自动生成业务流程。当前实体字段和关系见[字段草案](../../source/data-model-fields.md)；实体实现是代码事实，草案状态仍需单独维护。
 
@@ -126,7 +129,7 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - 文档解析适配层位于 [platform/document-parser](../../../apps/backend/src/platform/document-parser/)，由 `PlatformModule` 装配并导出 `DocumentParserService`。v1 只做文本层提取（`pdfjs-dist` 逐页重建行/段、`mammoth` 转 Markdown），PDF 无文本层返回 `NO_TEXT_LAYER`；解析结果按 `pages[]` 返回，页码锚点由 Documents 域写入 `locatorJson`。MinerU 子进程方案保留为触发式升级路径，见[解析适配层设计](../../changes/2026-11-08-document-parser-adapter/design.md)。
 - 后端测试统一编译到 `.test-dist`（`BACKEND_TEST_BUILD_DIR` 可覆盖），因为开发模式下运行中的 backend 会锁住 `dist`。
 - Course 模块和桌面端课程原型已从运行代码中移除。为保留历史迁移，新建数据库仍会创建遗留 `courses` 表；本次清理不删除既有数据库中的课程表或数据。
-- 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。[Pi session 快照迁移](../../../apps/backend/src/database/migrations/1793940000000-pi-session-snapshots.ts)另行创建 `pi_session_snapshots` 表；`LlmService` 每轮结束后 upsert Pi `getEntries()`，下一轮优先使用快照（含 compaction），仅当快照落后于 SQLite 最新消息时回退重建。
+- 目标数据表由 [个人学习迁移](../../../apps/backend/src/database/migrations/1793930000000-personal-learning-schema.ts)创建。[Pi session 快照迁移](../../../apps/backend/src/database/migrations/1793940000000-pi-session-snapshots.ts)另行创建 `pi_session_snapshots` 表；`LearnAgent` 每轮 `stream()` 结束时调用 `CommonAgent.saveConversationSnapshot()` upsert Pi `getEntries()`，下一轮优先使用快照（含 compaction），仅当快照落后于 SQLite 最新消息时回退重建。
 - `HealthModule` 由 `PlatformModule` 装配，而 `PlatformModule` 已导入 [AppModule](../../../apps/backend/src/app.module.ts)；`HealthController` 提供桌面端使用的 `/api/health`。
 - Electron 默认不再设置 `TEACHFORGE_DATA_DIR`，backend 因而使用用户主目录 `.tech-forge`（SQLite 主库 `~/.tech-forge/db/teachforge.db`，托管文档副本位于同根 `documents/`）；Electron 只把自身 `userData` 作为 `TEACHFORGE_LEGACY_DATA_DIR` 传入，backend 在 Nest 启动前先把旧布局的 `<dataRoot>/teachforge.db`（含 WAL/SHM）迁入 `db/`；若目标仍无数据库，再把该目录下已有的 `teachforge.db`（含 WAL/SHM）与 `documents/` 一次性迁入。目标已有数据库时跳过后续迁移。`TEACHFORGE_DATA_DIR` 仍可显式覆盖并同时重定向 Electron 的 `userData`。本机模型设置在同一用户主目录 `.tech-forge/config.toml`（`TEACHFORGE_CONFIG_DIR` 可覆盖配置根目录），风格偏好在同目录 `PREFERENCE.md`；每个新 Pi session 读取模型、风格和 workspace 配置。`config.toml` 的 `[workspace].path` 默认是 `.tech-forge/workspace/`，旧默认值映射到该目录；Pi cwd 和文件工具都使用此路径。config.toml 与 PREFERENCE.md 仍固定归 SettingsService 所有。API Key 按用户要求明文写入 TOML，并经本机设置 API 返回 Renderer 设置页显示；候选草案建议使用操作系统安全存储，差异记录在[系统设置当前事实](../domains/system-settings/index.md)。
 - `Course` API 与桌面端课程原型不再注册或调用；不要把它复制成新的 Course/Class/Lesson 依赖路径。
@@ -143,5 +146,6 @@ LLM 和文件 I/O 都是外部副作用，不放在 SQLite 写事务中。`LlmSe
 - UI 交互放 React feature；业务规则、校验和数据写入放 backend domain Service。
 - Controller 只做 HTTP 边界；Entity 只做结构映射；Schema 改动必须带 migration。
 - 跨领域调用经过对方模块的公开 Service 契约，避免 Controller 互调或直接穿透到其他领域 Repository。
+- 新增大模型调用场景时，先在 `apps/backend/src/llm/agents/` 下建立 `<Scenario>Agent.ts`，再在 `AgentModule` 注册并由领域 Service 注入；通用生成复用 `CommonAgent.generate()`，不要在其他 Service 里直接拼装 Pi session。
 - 不添加账号/teacherId/tenantId、课程层级、独立 Assessment、ArtifactVersion 或长期记忆实体，除非产品决策重新改变。
 - 若能力尚未实现，保留清晰的领域 Service 边界即可；不要为了架构完整而填入空业务方法或过早增加通用抽象。

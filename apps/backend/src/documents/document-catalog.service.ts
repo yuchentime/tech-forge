@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join, parse } from 'node:path';
 import { SettingsService } from '../settings/settings.service';
-import { LlmService } from '../llm/llm.service';
+import { CommonAgent } from '../llm/agents/CommonAgent';
 import { DocumentEntity } from './document.entity';
 import { DocumentVersionEntity } from './document-version.entity';
 
@@ -38,11 +38,11 @@ export class DocumentCatalogError extends Error {
  */
 @Injectable()
 export class DocumentCatalogService {
-  constructor(private readonly llm: LlmService) {}
+  constructor(private readonly commonAgent: CommonAgent) {}
 
   async summarize(title: string, text: string): Promise<CatalogSummary> {
     const excerpt = buildCatalogExcerpt(text, 12_000);
-    const response = await this.llm.generate(
+    const response = await this.commonAgent.generate(
       `标题：${title}\n\n<document>\n${excerpt}\n</document>\n\n只输出 JSON。`,
       {
         tools: [],

@@ -14,7 +14,7 @@ import {
   type StoredAttachments,
 } from '../attachments/attachments.service';
 import { KnowledgeDirectoryService } from '../documents/knowledge-directory.service';
-import { LlmService } from '../llm/llm.service';
+import { LearnAgent } from '../llm/agents/LearnAgent';
 import { MemoryService } from '../memory/memory.service';
 import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
 import { parseTurnCommand } from './turn-command';
@@ -51,7 +51,7 @@ export class ChatService {
 
   /** Injects persistence and model services used by one streamed conversation turn. */
   constructor(
-    private readonly llm: LlmService,
+    private readonly llm: LearnAgent,
     private readonly conversations: ConversationsService,
     private readonly directory: KnowledgeDirectoryService,
     private readonly attachments: AttachmentsService,
