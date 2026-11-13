@@ -39,8 +39,7 @@ import {
   WEB_TOOL_NAMES,
 } from "../tools/web-tools";
 import {
-  createWorkspaceFileTools,
-  prepareWorkspaceDirectory,
+  prepareWorkspaceDirectory
 } from "../tools/workspace-file-tools";
 
 type PiSdk = typeof PiSdkModule;
@@ -562,77 +561,6 @@ export class CommonAgent {
         ? this.settings.getSessionWorkspaceDirectory(options.conversation.id)
         : configuredWorkspace;
       const cwd = await prepareWorkspaceDirectory(sessionWorkspace);
-      const managedFilePaths = await this.settings.getManagedFilePaths();
-      const workspaceFileTools = await createWorkspaceFileTools(
-        sdk,
-        cwd,
-        undefined,
-        {
-          protectedPaths: managedFilePaths,
-          // Reads are allowed by default everywhere except this guarded subtree, which needs an
-          // explicit path in the current user request (same shape as the external write grant).
-          guardedDirectories: [this.settings.getKnowledgeDirectory()],
-          // The catalog is app-generated and the session policy tells the model to read it; the
-          // uploaded originals beside it stay denied.
-          readableGuardedPaths: [this.settings.getKnowledgeCatalogPath()],
-          // Only stream() supplies this raw current-turn text. generate() has no grant.
-          currentUserRequest,
-          ...(options.onFileWritten
-            ? { onFileWritten: options.onFileWritten }
-            : {}),
-          onFileReadResolution: ({
-            outcome,
-            pathScope,
-            protectedPathCount,
-            guardedDirectoryCount,
-            readGrantKind,
-            grantLiftedGuard,
-            elapsedMs,
-          }) => {
-            writeStructuredEvent(
-              this.logger,
-              outcome === "resolved" ? "log" : "warn",
-              "llm.file_tool.read.resolution",
-              {
-                ...logContext,
-                outcome,
-                pathScope,
-                protectedPathCount,
-                guardedDirectoryCount,
-                readGrantKind,
-                grantLiftedGuard,
-                elapsedMs,
-              },
-            );
-          },
-          onFileOperationFailed: ({
-            toolName,
-            operation,
-            pathScope,
-            elapsedMs,
-            error,
-          }) => {
-            const errorFields = getSafeErrorLogFields(error);
-            const isPolicyDenied = errorFields.errorCode === "EWORKSPACE";
-            writeStructuredEvent(
-              this.logger,
-              isPolicyDenied ? "warn" : "error",
-              "llm.file_tool.operation.failed",
-              {
-                ...logContext,
-                toolName,
-                operation,
-                pathScope,
-                elapsedMs,
-                ...(isPolicyDenied
-                  ? { failureReason: "workspace_policy_denied" }
-                  : {}),
-                ...errorFields,
-              },
-            );
-          },
-        },
-      );
       // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
       // already-built context block into this request.
       //
@@ -655,7 +583,7 @@ export class CommonAgent {
             logger: this.logger,
           })
         : [];
-      const customTools = [...workspaceFileTools, ...webTools];
+      const customTools = [...webTools];
       // Chat turns load long-term memory; internal JSON calls (`generate`) opt out.
       // Extensions are in-process only. `noExtensions` keeps Pi from discovering packages, so a
       // session registers exactly the persistence hook plus the allowlisted memory tools.
@@ -673,8 +601,6 @@ export class CommonAgent {
         "edit",
         "write",
         "grep",
-        "find",
-        "ls",
         ...(webToolsEnabled ? [...WEB_TOOL_NAMES] : []),
       ];
       let customSystemPrompt: string;
