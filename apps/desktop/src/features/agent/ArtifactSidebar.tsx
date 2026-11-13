@@ -13,6 +13,7 @@ import {
   ArtifactTabs,
 } from './ArtifactSidebarParts';
 import { ArtifactPreview } from './ArtifactPreview';
+import { KeywordSearch } from './KeywordSearch';
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_MAX_WIDTH,
@@ -59,7 +60,17 @@ function storePanelWidth(value: number): void {
  * artifact's preview. Nothing here writes files or edits artifacts, and the file list itself is
  * fetched by the conversation page so the header entry and this panel share one snapshot.
  */
-export function ArtifactSidebar() {
+export function ArtifactSidebar({
+  focusSeq = 0,
+  isSearchOpen,
+  onSearchOpenChange,
+}: {
+  /** Bumped by Ctrl+F so the file search box can take focus. */
+  focusSeq?: number;
+  /** Owned by the conversation page: only one surface searches at a time. */
+  isSearchOpen: boolean;
+  onSearchOpenChange: (open: boolean) => void;
+}) {
   const tabsState = useSyncExternalStore(
     artifactTabsStore.subscribe,
     artifactTabsStore.getSnapshot,
@@ -102,6 +113,9 @@ export function ArtifactSidebar() {
   const [reloadToken, setReloadToken] = useState(0);
   const fullscreenTriggerRef = useRef<HTMLButtonElement>(null);
   const fullscreenCloseRef = useRef<HTMLButtonElement>(null);
+  /** Scroll containers the keyword search indexes; the panel and the overlay each own one. */
+  const panelPreviewRef = useRef<HTMLDivElement | null>(null);
+  const overlayPreviewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     requestedWidthRef.current = requestedWidth;
@@ -249,6 +263,17 @@ export function ArtifactSidebar() {
   // from re-running (and re-stealing focus) on an unchanged file.
   const activeTabId = activeTab?.id ?? null;
 
+  // The search box targets the file header's preview: switching away from a file tab or into the
+  // fullscreen overlay replaces the container the ranges point at, so the search closes instead of
+  // painting over a preview the user can no longer see.
+  const wasFullscreenRef = useRef(false);
+  useEffect(() => {
+    const enteredFullscreen = wasFullscreenRef.current !== isFullscreen;
+    wasFullscreenRef.current = isFullscreen;
+    if (!isSearchOpen) return;
+    if (activeTabId === null || enteredFullscreen) onSearchOpenChange(false);
+  }, [activeTabId, isFullscreen, isSearchOpen, onSearchOpenChange]);
+
   /**
    * Keeps the overlay keyboard-accessible: Escape closes it, the background stops scrolling, and
    * focus moves into the overlay and back to the trigger, so closing it returns the panel's focus.
@@ -297,6 +322,7 @@ export function ArtifactSidebar() {
 
   return (
     <aside
+      data-search-surface="file"
       className={
         // Row layout: the resize handle is the aside's first child and must sit beside the
         // content, so the container must never become a column.
@@ -340,6 +366,16 @@ export function ArtifactSidebar() {
                 {activeTab.external && (
                   <span className="text-xs text-ink-500">外部文件</span>
                 )}
+                {!isFullscreen && (
+                  <KeywordSearch
+                    containerRef={panelPreviewRef}
+                    focusSeq={focusSeq}
+                    isOpen={isSearchOpen}
+                    label="搜索文件内容"
+                    onOpenChange={onSearchOpenChange}
+                    size="sm"
+                  />
+                )}
                 <button
                   aria-label="重新读取文件"
                   className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
@@ -361,7 +397,11 @@ export function ArtifactSidebar() {
                 </button>
               </div>
             </header>
-            <ArtifactPreview file={activeTab} reloadToken={reloadToken} />
+            <ArtifactPreview
+              containerRef={panelPreviewRef}
+              file={activeTab}
+              reloadToken={reloadToken}
+            />
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -409,6 +449,7 @@ export function ArtifactSidebar() {
             aria-label={`${activeTab.fileName} 全屏预览`}
             aria-modal="true"
             className="fixed inset-0 z-40 flex flex-col bg-white"
+            data-search-surface="file"
             role="dialog"
           >
             <header className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-200 px-4 py-2">
@@ -419,6 +460,14 @@ export function ArtifactSidebar() {
                 {activeTab.external && (
                   <span className="text-xs text-ink-500">外部文件</span>
                 )}
+                <KeywordSearch
+                  containerRef={overlayPreviewRef}
+                  focusSeq={focusSeq}
+                  isOpen={isSearchOpen}
+                  label="搜索文件内容"
+                  onOpenChange={onSearchOpenChange}
+                  size="sm"
+                />
                 <button
                   aria-label="重新读取文件"
                   className="flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-ink-200 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
@@ -441,7 +490,11 @@ export function ArtifactSidebar() {
               </div>
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <ArtifactPreview file={activeTab} reloadToken={reloadToken} />
+              <ArtifactPreview
+                containerRef={overlayPreviewRef}
+                file={activeTab}
+                reloadToken={reloadToken}
+              />
             </div>
           </div>,
           document.body,

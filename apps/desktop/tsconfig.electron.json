@@ -24,6 +24,7 @@
     "src/features/rehearsal/rehearsal-api.ts",
     "src/features/rehearsal/rehearsal-availability.ts",
     "src/features/rehearsal/rehearsal-preparing-progress.ts",
-    "src/features/rehearsal/rehearsal-store.ts"
+    "src/features/rehearsal/rehearsal-store.ts",
+    "src/features/agent/search-text-index.ts"
   ]
 }

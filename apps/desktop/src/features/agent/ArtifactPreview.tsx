@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import { hasDesktopBridge } from '../../types/desktop-bridge';
 import type { GeneratedFileRef } from './artifact-store';
 import { MarkdownContent } from './MarkdownContent';
@@ -28,9 +28,12 @@ const MAX_PRETTY_JSON_CHARS = 256 * 1024;
  * changed file produces no prop change. Bumping the token re-reads the same file on demand.
  */
 export function ArtifactPreview({
+  containerRef,
   file,
   reloadToken = 0,
 }: {
+  /** Scroll container the keyword search indexes; only the visible copy receives it. */
+  containerRef?: Ref<HTMLDivElement>;
   file: GeneratedFileRef;
   reloadToken?: number;
 }) {
@@ -86,7 +89,10 @@ export function ArtifactPreview({
 
   const { payload } = state;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4"
+      ref={containerRef}
+    >
       {payload.binary && (
         <p className="text-sm text-ink-600">该文件不是文本，无法预览。</p>
       )}

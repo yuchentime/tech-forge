@@ -34,6 +34,7 @@ import {
 import { agentEventBus } from './agent-event-bus';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactSidebar } from './ArtifactSidebar';
+import { KeywordSearch } from './KeywordSearch';
 import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
 import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
 import { ToastHost } from './toast';
@@ -130,6 +131,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const [classroomSummaryLessonId, setClassroomSummaryLessonId] = useState<string | null>(null);
   const [conversationDisplayMode, setConversationDisplayMode] =
     useState<'conversation' | 'rehearsal'>('conversation');
+  /** Surface owning the keyword search box; the two surfaces never search at the same time. */
+  const [searchSurface, setSearchSurface] = useState<'chat' | 'file' | null>(null);
+  /** Bumped by Ctrl+F so a box that is already open takes focus and selects its query again. */
+  const [searchFocusSeq, setSearchFocusSeq] = useState(0);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
@@ -487,6 +492,52 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     }),
   );
 
+  /** Opens or closes the chat search box. */
+  const handleChatSearchOpenChange = useCallback((open: boolean) => {
+    setSearchSurface(open ? 'chat' : null);
+  }, []);
+
+  /** Opens or closes the artifact search box. */
+  const handleFileSearchOpenChange = useCallback((open: boolean) => {
+    setSearchSurface(open ? 'file' : null);
+  }, []);
+
+  /**
+   * Routes Ctrl+F to the search box of the panel that owns focus.
+   *
+   * The desktop shell removes the application menu (`Menu.setApplicationMenu(null)`), so Electron
+   * has no find bar and the shortcut is free; it is still consumed here so a dev-server browser tab
+   * never opens its own find UI.
+   */
+  useEffect(() => {
+    if (activeView !== 'chat' || isRehearsalMode) return;
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'f') return;
+      event.preventDefault();
+      const target = event.target instanceof Element ? event.target : null;
+      const ownsFiles =
+        target !== null && target.closest('[data-search-surface="file"]') !== null;
+      setSearchSurface(ownsFiles && artifactTabs.visible ? 'file' : 'chat');
+      setSearchFocusSeq((sequence) => sequence + 1);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [activeView, artifactTabs.visible, isRehearsalMode]);
+
+  // Leaving the conversation view or entering rehearsal hides the surface being searched.
+  useEffect(() => {
+    setSearchSurface(null);
+  }, [activeView, classroomStage, isRehearsalMode]);
+
+  // A hidden artifact panel cannot host a running search.
+  useEffect(() => {
+    if (artifactTabs.visible) return;
+    setSearchSurface((current) => (current === 'file' ? null : current));
+  }, [artifactTabs.visible]);
+
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       {activeView === 'classroom' && classroomStage ? (
@@ -564,7 +615,19 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </h1>
                   <div className="flex shrink-0 items-center gap-2">
                     {!isRehearsalMode && (
-                      <ArtifactEntry count={conversationFiles.length} visible={artifactTabs.visible} />
+                      <>
+                        <KeywordSearch
+                          containerRef={messageViewportRef}
+                          focusSeq={searchFocusSeq}
+                          isOpen={searchSurface === 'chat'}
+                          label="搜索消息"
+                          onOpenChange={handleChatSearchOpenChange}
+                        />
+                        <ArtifactEntry
+                          count={conversationFiles.length}
+                          visible={artifactTabs.visible}
+                        />
+                      </>
                     )}
                     <div
                       aria-label="会话模式"
@@ -651,7 +714,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     ref={messageViewportRef}
                   >
                     {hasEarlierMessages && (
-                      <div className="flex shrink-0 flex-col items-center gap-2 py-2">
+                      <div
+                        className="flex shrink-0 flex-col items-center gap-2 py-2"
+                        data-search-ignore
+                      >
                         {earlierMessagesError && (
                           <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
                             <span>{earlierMessagesError}</span>
@@ -782,7 +848,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 </div>
               </div>
-              {!isRehearsalMode && <ArtifactSidebar />}
+              {!isRehearsalMode && (
+                <ArtifactSidebar
+                  focusSeq={searchFocusSeq}
+                  isSearchOpen={searchSurface === 'file'}
+                  onSearchOpenChange={handleFileSearchOpenChange}
+                />
+              )}
             </div>
           )}
         </>
@@ -968,7 +1040,7 @@ function TurnProgress({
   if (!isWaiting) return null;
 
   return (
-    <div className="flex w-full justify-start" role="status">
+    <div className="flex w-full justify-start" data-search-ignore role="status">
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2.5 text-sm text-ink-600">
           <CircleNotch
@@ -1192,7 +1264,7 @@ function LiveArtifactFooter({
 }) {
   if (files.length === 0) return null;
   return (
-    <div className="flex w-full justify-start">
+    <div className="flex w-full justify-start" data-search-ignore>
       <div className="min-w-0 max-w-full">
         <ArtifactFileChips files={files} />
       </div>
