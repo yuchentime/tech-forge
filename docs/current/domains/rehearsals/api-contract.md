@@ -188,6 +188,15 @@ last_verified: 2026-11-10
 - **响应**：HTTP 200 `{ "rehearsalId": "uuid", "discarded": true }`。
 - **错误**：409 已有回答或正在处理。
 
+### Delete a finished report
+
+- **方法**：`DELETE`
+- **路径**：`/api/rehearsals/:rehearsalId/report`
+- **用途**：用户在演练历史的「已完成 / 报告未完成」行删除一份不再需要的报告。
+- **行为**：只接受终态（`completed` / `failed`），进行中的演练返回 409（必须先结束或丢弃，避免丢掉正在作答的题）。同一事务删除该 Rehearsal 与全部 turns，并重置派生的知识事实：仍剩 `completed` 演练时把 `conversation_knowledge_facts` 置为 `pending` 并在提交后唤醒 worker 重算；一份都不剩时直接删除该事实行，使知识掌握回到空状态，而不是把已删报告的内容留在失败状态里。transcript 文件在事务提交后删除。
+- **响应**：HTTP 200 `{ "rehearsalId": "uuid", "deleted": true }`。
+- **错误**：404；409 演练还在进行中。
+
 ### List conversation knowledge facts
 
 - **方法**：`GET`

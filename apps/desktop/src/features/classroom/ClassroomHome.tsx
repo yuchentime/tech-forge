@@ -7,8 +7,8 @@ import {
   Trash,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { EmptyState } from '../../components/EmptyState';
-import { DeleteLessonDialog } from './DeleteLessonDialog';
 import { clearClassroomDraft } from './classroom-drafts';
 import { PageHeader } from '../../components/PageHeader';
 import { MarkdownContent } from '../agent/MarkdownContent';
@@ -362,11 +362,15 @@ export function ClassroomHome({
       )}
 
       {deleteTarget && (
-        <DeleteLessonDialog
+        <ConfirmDialog
           busy={isDeleting}
-          label={formatDateTime(deleteTarget.endedAt ?? deleteTarget.updatedAt)}
+          busyLabel="正在删除…"
+          confirmLabel="删除"
+          description="课堂记录与总结会被永久删除，无法恢复。"
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => void confirmDelete()}
+          title={`删除课堂 · ${formatDateTime(deleteTarget.endedAt ?? deleteTarget.updatedAt)}`}
+          tone="danger"
         />
       )}
     </section>

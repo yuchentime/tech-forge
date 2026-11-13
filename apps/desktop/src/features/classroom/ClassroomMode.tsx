@@ -6,10 +6,10 @@ import {
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import classroomBackground from '../../assets/classroom/bg-classroom.png';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ClassroomComposer } from './ClassroomComposer';
 import { ClassroomMessageDrawer } from './ClassroomMessageDrawer';
 import { ClassroomRecoveryBanner } from './ClassroomRecoveryBanner';
-import { EndClassroomDialog } from './EndClassroomDialog';
 import {
   clearClassroomDraft,
   getClassroomDraft,
@@ -571,10 +571,17 @@ export function ClassroomMode({
           />
 
           {isEndDialogOpen && (
-            <EndClassroomDialog
-              hasUnsavedDraft={draftInProgress}
+            <ConfirmDialog
+              busy={isEnding}
+              busyLabel="正在结束…"
+              cancelLabel="继续上课"
+              confirmLabel="结束课堂"
+              description="结束后，本节课的讲稿、提问与你的回答会整理为课堂记录，并返回对话。"
+              note={draftInProgress ? '正在编辑的内容不会保存。' : undefined}
               onCancel={closeEndDialog}
               onConfirm={() => void endClassroom()}
+              title="结束本节课？"
+              tone="danger"
             />
           )}
         </div>

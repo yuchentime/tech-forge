@@ -1,4 +1,6 @@
-import { CircleNotch } from '@phosphor-icons/react';
+import { CircleNotch, Trash } from '@phosphor-icons/react';
+import { useState } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type {
   RehearsalDetail,
   RehearsalList,
@@ -16,8 +18,10 @@ export function RehearsalHistory({
   status,
   error,
   currentDetail,
+  deletingRehearsalId,
   onResume,
   onOpen,
+  onDelete,
   onLoadMore,
   onRetry,
 }: {
@@ -25,11 +29,15 @@ export function RehearsalHistory({
   status: 'idle' | 'loading' | 'ready' | 'error';
   error: string | null;
   currentDetail: RehearsalDetail | null;
+  deletingRehearsalId: string | null;
   onResume: (rehearsalId: string) => void;
   onOpen: (rehearsalId: string) => void;
+  onDelete: (rehearsalId: string) => void;
   onLoadMore: () => void;
   onRetry: () => void;
 }) {
+  /** Finished rehearsal whose report the confirmation dialog is asking about. */
+  const [deleteTarget, setDeleteTarget] = useState<RehearsalSummary | null>(null);
   const active = history?.items.filter((item) => isActiveStatus(item.status)) ?? [];
   const completed =
     history?.items.filter((item) => item.status === 'completed') ?? [];
@@ -94,8 +102,10 @@ export function RehearsalHistory({
               {completed.map((item) => (
                 <HistoryRow
                   actionLabel="查看报告"
+                  deleting={deletingRehearsalId === item.rehearsalId}
                   item={item}
                   key={item.rehearsalId}
+                  onDelete={() => setDeleteTarget(item)}
                   onOpen={() => onOpen(item.rehearsalId)}
                 />
               ))}
@@ -112,13 +122,30 @@ export function RehearsalHistory({
               {failed.map((item) => (
                 <HistoryRow
                   actionLabel="查看记录"
+                  deleting={deletingRehearsalId === item.rehearsalId}
                   item={item}
                   key={item.rehearsalId}
+                  onDelete={() => setDeleteTarget(item)}
                   onOpen={() => onOpen(item.rehearsalId)}
                 />
               ))}
             </div>
           </section>
+        )}
+
+        {deleteTarget && (
+          <ConfirmDialog
+            confirmLabel="删除报告"
+            description="这份报告、逐题问答与本次记录会被永久删除，无法恢复。"
+            note="知识掌握会按剩余演练重新计算。"
+            onCancel={() => setDeleteTarget(null)}
+            onConfirm={() => {
+              onDelete(deleteTarget.rehearsalId);
+              setDeleteTarget(null);
+            }}
+            title="删除这份演练报告？"
+            tone="danger"
+          />
         )}
 
         {history?.nextCursor && (
@@ -138,15 +165,25 @@ export function RehearsalHistory({
   );
 }
 
-/** One clickable history row; active batches say resume, completed say report. */
+/**
+ * One history row; active batches say resume, finished ones say report.
+ *
+ * Finished rows carry their own delete action, so the open target is a button inside the row
+ * instead of the row itself — a button cannot nest another button.
+ */
 function HistoryRow({
   item,
   actionLabel,
+  deleting = false,
   onOpen,
+  onDelete,
 }: {
   item: RehearsalSummary;
   actionLabel: string;
+  /** True while this row's report is being deleted. */
+  deleting?: boolean;
   onOpen: () => void;
+  onDelete?: () => void;
 }) {
   const description =
     item.status === 'completed'
@@ -155,28 +192,46 @@ function HistoryRow({
         ? '总体评估生成失败，逐题记录已保留。'
         : '这场演练还没有结束。';
   return (
-    <button
-      className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-left transition hover:border-brand-300 hover:bg-brand-50/30"
-      onClick={onOpen}
-      type="button"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-ink-900">
-          {item.topic || '准备中'}
-        </span>
-        <span className="text-xs font-medium text-brand-600">{actionLabel}</span>
-      </div>
-      <p className="mt-1 text-xs text-ink-500">
-        {formatRehearsalDate(item.endedAt ?? item.createdAt)}
-        {item.endReason ? ` · ${endReasonLabel(item.endReason)}` : ''}
-        {` · 已提问 ${item.progress.asked} 次（最多 ${item.progress.limit} 次）`}
-        {item.progress.skipped > 0 ? ` · 跳过 ${item.progress.skipped}` : ''}
-      </p>
-      {description && (
-        <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink-600">
-          {description}
+    <div className="flex items-center gap-1 rounded-2xl border border-ink-200 bg-white pr-2 transition hover:border-brand-300 hover:bg-brand-50/30">
+      <button
+        className="min-w-0 flex-1 rounded-2xl px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
+        onClick={onOpen}
+        type="button"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-ink-900">
+            {item.topic || '准备中'}
+          </span>
+          <span className="text-xs font-medium text-brand-600">{actionLabel}</span>
+        </div>
+        <p className="mt-1 text-xs text-ink-500">
+          {formatRehearsalDate(item.endedAt ?? item.createdAt)}
+          {item.endReason ? ` · ${endReasonLabel(item.endReason)}` : ''}
+          {` · 已提问 ${item.progress.asked} 次（最多 ${item.progress.limit} 次）`}
+          {item.progress.skipped > 0 ? ` · 跳过 ${item.progress.skipped}` : ''}
         </p>
+        {description && (
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink-600">
+            {description}
+          </p>
+        )}
+      </button>
+      {onDelete && (
+        <button
+          aria-label={`删除演练报告 ${item.topic || '未命名演练'}`}
+          className="shrink-0 rounded-lg p-2 text-ink-400 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-wait disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40"
+          disabled={deleting}
+          onClick={onDelete}
+          title="删除这份演练报告"
+          type="button"
+        >
+          {deleting ? (
+            <CircleNotch aria-hidden className="size-4 animate-spin" />
+          ) : (
+            <Trash aria-hidden className="size-4" />
+          )}
+        </button>
       )}
-    </button>
+    </div>
   );
 }

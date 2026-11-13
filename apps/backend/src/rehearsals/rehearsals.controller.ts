@@ -321,7 +321,7 @@ export class RehearsalsController {
     });
   }
 
-  /** Discards a rehearsal with no answers after the user confirms ending. */
+  /** Discards a rehearsal with no answers after the zero-answer end confirmation. */
   @Delete(':rehearsalId')
   @HttpCode(HttpStatus.OK)
   discard(
@@ -330,6 +330,20 @@ export class RehearsalsController {
   ): Promise<{ rehearsalId: string; discarded: true }> {
     const requestId = randomUUID();
     return this.rehearsals.discard(rehearsalId, {
+      requestId,
+      rehearsalId,
+    });
+  }
+
+  /** Deletes a finished rehearsal together with its report, turns and transcript. */
+  @Delete(':rehearsalId/report')
+  @HttpCode(HttpStatus.OK)
+  deleteReport(
+    @Param('rehearsalId', new ParseUUIDPipe({ version: '4' }))
+    rehearsalId: string,
+  ): Promise<{ rehearsalId: string; deleted: true }> {
+    const requestId = randomUUID();
+    return this.rehearsals.deleteReport(rehearsalId, {
       requestId,
       rehearsalId,
     });

@@ -1,6 +1,8 @@
 import { CircleNotch, ListBullets } from '@phosphor-icons/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSyncExternalStore } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { RehearsalEvaluating } from './RehearsalEvaluating';
 import { RehearsalHistory } from './RehearsalHistory';
 import { RehearsalPreparing } from './RehearsalPreparing';
 import { RehearsalReport } from './RehearsalReport';
@@ -22,6 +24,8 @@ export function RehearsalMode({
     rehearsalStore.getSnapshot,
     rehearsalStore.getSnapshot,
   );
+  /** Which end action the confirmation dialog is asking about; `null` keeps it closed. */
+  const [pendingEnd, setPendingEnd] = useState<'discard' | 'end' | null>(null);
 
   useEffect(() => {
     void rehearsalStore.loadForConversation(conversationId);
@@ -54,24 +58,13 @@ export function RehearsalMode({
       state.detail.status,
     );
   const handleEnd = (): void => {
-    const detail = state.detail;
-    if (!detail) return;
-    const hasAnswers = detail.turns.some((turn) =>
-      Boolean(turn.answer?.trim()),
-    );
-    if (!hasAnswers) {
-      if (
-        window.confirm(
-          '还没有回答任何问题。结束后本次演练会被丢弃，确定吗？',
-        )
-      ) {
-        void rehearsalStore.discard();
-      }
-      return;
-    }
-    if (window.confirm('结束后会生成评估，当前题不能再回答。确定结束吗？')) {
-      void rehearsalStore.end();
-    }
+    if (!state.detail) return;
+    setPendingEnd(answeredCount > 0 ? 'end' : 'discard');
+  };
+  const confirmEnd = (): void => {
+    if (pendingEnd === 'discard') void rehearsalStore.discard();
+    else if (pendingEnd === 'end') void rehearsalStore.end();
+    setPendingEnd(null);
   };
 
   const historyBack =
@@ -140,7 +133,9 @@ export function RehearsalMode({
       )}
 
       <div className="min-h-0 flex-1">
-        {state.isStarting ? (
+        {state.endingAction === 'report' && state.view === 'session' ? (
+          <RehearsalEvaluating />
+        ) : state.isStarting ? (
           <RehearsalPreparing
             complete={state.preparingComplete}
             preparing={state.preparing}
@@ -148,8 +143,10 @@ export function RehearsalMode({
         ) : state.view === 'history' ? (
           <RehearsalHistory
             currentDetail={state.detail}
+            deletingRehearsalId={state.deletingRehearsalId}
             error={state.historyError}
             history={state.history}
+            onDelete={(rehearsalId) => void rehearsalStore.deleteReport(rehearsalId)}
             onLoadMore={() => void rehearsalStore.loadMoreHistory()}
             onOpen={(rehearsalId) =>
               void rehearsalStore.openHistoryDetail(rehearsalId)
@@ -225,6 +222,21 @@ export function RehearsalMode({
           />
         )}
       </div>
+
+      {pendingEnd && (
+        <ConfirmDialog
+          confirmLabel={pendingEnd === 'discard' ? '丢弃演练' : '结束演练'}
+          description={
+            pendingEnd === 'discard'
+              ? '你还没有回答任何问题。结束后本次演练会被丢弃，不会生成评估。'
+              : '结束后会根据已答题目生成评估报告，当前这一题不能再回答。'
+          }
+          onCancel={() => setPendingEnd(null)}
+          onConfirm={confirmEnd}
+          title={pendingEnd === 'discard' ? '丢弃这次演练？' : '结束本次演练？'}
+          tone={pendingEnd === 'discard' ? 'danger' : 'default'}
+        />
+      )}
     </div>
   );
 }

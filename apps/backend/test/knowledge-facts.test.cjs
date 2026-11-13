@@ -345,6 +345,52 @@ test('facts publish atomically with isolated model options', async () => {
   }
 });
 
+test('deleting a report resets derived facts and clears the row when none remain', async () => {
+  const ctx = await createFactsContext();
+  try {
+    const conversationId = await seedConversation(ctx);
+    const endedAt = new Date('2026-11-10T08:00:00.000Z');
+    const rehearsalId = await seedCompletedRehearsal(ctx, conversationId, { endedAt });
+    await markPending(ctx, conversationId);
+    ctx.service.wake(conversationId);
+    await ctx.llm.waitForCalls(1);
+    ctx.llm.resolveCall(
+      0,
+      JSON.stringify(
+        makeFactResponse({
+          rehearsalId,
+          endedAt: endedAt.toISOString(),
+          summary: '已能解释牛顿第二定律。',
+        }),
+      ),
+    );
+    await ctx.service.waitForIdle();
+    assert.equal((await readFactRow(ctx, conversationId)).summary, '已能解释牛顿第二定律。');
+
+    // Another completed report still exists, so the row is only queued for a recompute.
+    await seedCompletedRehearsal(ctx, conversationId, {
+      endedAt: new Date('2026-11-11T08:00:00.000Z'),
+    });
+    const recompute = await ctx.dataSource.transaction((manager) =>
+      ctx.service.resetAfterReportDeletion(manager, conversationId),
+    );
+    assert.equal(recompute, true);
+    assert.equal((await readFactRow(ctx, conversationId)).generationStatus, 'pending');
+
+    // The last report is gone: the row must disappear instead of keeping its content.
+    await ctx.dataSource
+      .getRepository(RehearsalEntity)
+      .delete({ conversationId });
+    const again = await ctx.dataSource.transaction((manager) =>
+      ctx.service.resetAfterReportDeletion(manager, conversationId),
+    );
+    assert.equal(again, false);
+    assert.equal(await readFactRow(ctx, conversationId), null);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('a failed generation keeps all old content and records a sanitized error', async () => {
   const ctx = await createFactsContext();
   try {

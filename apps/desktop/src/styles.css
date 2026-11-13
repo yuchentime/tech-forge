@@ -349,11 +349,35 @@ body {
   animation: tf-rise 0.45s ease-out both;
 }
 
+/*
+ * Indeterminate sweep for waits that cannot report a real percentage (the end request blocks on
+ * the generated report). With reduced motion the bar becomes a static full-width track instead of
+ * a moving segment that could read as a stalled progress.
+ */
+.tf-progress-sweep {
+  animation: tf-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes tf-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tf-float,
   .tf-twinkle,
   .tf-rise {
     animation: none;
+  }
+
+  .tf-progress-sweep {
+    width: 100%;
+    animation: none;
+    opacity: 0.6;
   }
 }
 

@@ -1,6 +1,7 @@
 import { describeFailure } from '../../api/backend-error';
 import {
   answerRehearsal,
+  deleteRehearsalReport,
   discardRehearsal,
   endRehearsal,
   getLatestRehearsal,
@@ -14,6 +15,7 @@ import {
   type RehearsalDetail,
   type RehearsalList,
   type RehearsalPreparing,
+  type RehearsalStatus,
 } from './rehearsal-api';
 
 export type RehearsalView =
@@ -38,6 +40,8 @@ export interface RehearsalSnapshot {
   /** True only while an answer evaluation is in flight; skip/report submits leave it false. */
   isEvaluatingAnswer: boolean;
   isEnding: boolean;
+  /** Which end request is in flight; `report` blocks on the generated report, `discard` deletes. */
+  endingAction: 'report' | 'discard' | null;
   pendingAnswer: {
     turnId: string;
     answer: string;
@@ -50,6 +54,8 @@ export interface RehearsalSnapshot {
   history: RehearsalList | null;
   historyStatus: 'idle' | 'loading' | 'ready' | 'error';
   historyError: string | null;
+  /** Row currently being deleted from history; blocks a second delete and disables that row. */
+  deletingRehearsalId: string | null;
   historyDetail: RehearsalDetail | null;
   historyDetailLoading: boolean;
   historyDetailError: string | null;
@@ -69,6 +75,7 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   isSubmitting: false,
   isEvaluatingAnswer: false,
   isEnding: false,
+  endingAction: null,
   pendingAnswer: null,
   answerError: null,
   persona: '',
@@ -76,6 +83,7 @@ const INITIAL_SNAPSHOT: RehearsalSnapshot = {
   history: null,
   historyStatus: 'idle',
   historyError: null,
+  deletingRehearsalId: null,
   historyDetail: null,
   historyDetailLoading: false,
   historyDetailError: null,
@@ -92,6 +100,20 @@ function viewFor(detail: RehearsalDetail): RehearsalView {
     return detail.turns.length > 0 ? 'report' : 'start';
   }
   return 'session';
+}
+
+/** Drops one row from the history counts so the list totals stay in step with the rows. */
+function decrementCounts(
+  counts: RehearsalList['counts'],
+  status: RehearsalStatus,
+): RehearsalList['counts'] {
+  if (status === 'completed') {
+    return { ...counts, completed: Math.max(0, counts.completed - 1) };
+  }
+  if (status === 'failed') {
+    return { ...counts, failed: Math.max(0, counts.failed - 1) };
+  }
+  return { ...counts, active: Math.max(0, counts.active - 1) };
 }
 
 /** Returns a random UUID for request idempotency. */
@@ -431,11 +453,12 @@ export class RehearsalStore {
   async end(): Promise<void> {
     const detail = this.snapshot.detail;
     if (!detail || this.snapshot.isEnding) return;
-    this.update({ isEnding: true, error: null });
+    this.update({ isEnding: true, endingAction: 'report', error: null });
     try {
       const completed = await endRehearsal(detail.rehearsalId);
       this.update({
         isEnding: false,
+        endingAction: null,
         detail: completed,
         view: 'report',
         completionVersion: this.snapshot.completionVersion + 1,
@@ -449,6 +472,7 @@ export class RehearsalStore {
       const failed = await getRehearsal(detail.rehearsalId).catch(() => null);
       this.update({
         isEnding: false,
+        endingAction: null,
         error: describeFailure(error, '结束演练失败。'),
         ...(failed?.status === 'failed'
           ? { detail: failed, view: 'report' as const }
@@ -466,11 +490,12 @@ export class RehearsalStore {
   async discard(): Promise<void> {
     const detail = this.snapshot.detail;
     if (!detail || this.snapshot.isEnding) return;
-    this.update({ isEnding: true, error: null });
+    this.update({ isEnding: true, endingAction: 'discard', error: null });
     try {
       await discardRehearsal(detail.rehearsalId);
       this.update({
         isEnding: false,
+        endingAction: null,
         detail: null,
         view: 'start',
         pendingAnswer: null,
@@ -482,7 +507,56 @@ export class RehearsalStore {
     } catch (error) {
       this.update({
         isEnding: false,
+        endingAction: null,
         error: describeFailure(error, '丢弃演练失败，请重试。'),
+      });
+    }
+  }
+
+  /**
+   * Deletes one finished rehearsal report and drops every view that pointed at it.
+   *
+   * The list row, an open detail and a stale active `detail` are all cleared so a deleted report
+   * cannot be reopened from memory. The user stays wherever they were browsing: only a session or
+   * report view falls back to start. `completionVersion` bumps so derived cards refresh.
+   */
+  async deleteReport(rehearsalId: string): Promise<void> {
+    if (this.snapshot.deletingRehearsalId) return;
+    const history = this.snapshot.history;
+    const removed = history?.items.find(
+      (item) => item.rehearsalId === rehearsalId,
+    );
+    this.update({ deletingRehearsalId: rehearsalId, historyError: null });
+    try {
+      await deleteRehearsalReport(rehearsalId);
+      const detailDeleted = this.snapshot.detail?.rehearsalId === rehearsalId;
+      const historyDetailDeleted =
+        this.snapshot.historyDetail?.rehearsalId === rehearsalId;
+      const viewLostItsDetail =
+        detailDeleted &&
+        (this.snapshot.view === 'session' || this.snapshot.view === 'report');
+      this.update({
+        deletingRehearsalId: null,
+        history: history
+          ? {
+              ...history,
+              items: history.items.filter(
+                (item) => item.rehearsalId !== rehearsalId,
+              ),
+              counts: removed
+                ? decrementCounts(history.counts, removed.status)
+                : history.counts,
+            }
+          : null,
+        detail: detailDeleted ? null : this.snapshot.detail,
+        view: viewLostItsDetail ? 'start' : this.snapshot.view,
+        ...(historyDetailDeleted ? { historyDetail: null } : {}),
+        completionVersion: this.snapshot.completionVersion + 1,
+      });
+    } catch (error) {
+      this.update({
+        deletingRehearsalId: null,
+        historyError: describeFailure(error, '删除演练报告失败。'),
       });
     }
   }

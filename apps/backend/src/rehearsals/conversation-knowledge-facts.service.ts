@@ -200,6 +200,31 @@ export class ConversationKnowledgeFactsService
       .execute();
   }
 
+  /**
+   * Drops the derived fact row after a completed report is deleted.
+   *
+   * Facts are a projection of completed reports, so a deleted report must not stay readable
+   * through them. Remaining reports ask for a recompute (`true`, caller wakes the worker); with no
+   * report left the row is removed instead of marked failed, so the knowledge view shows its empty
+   * state rather than keeping content from a deleted report behind an error.
+   */
+  async resetAfterReportDeletion(
+    manager: EntityManager,
+    conversationId: string,
+  ): Promise<boolean> {
+    const remaining = await manager.getRepository(RehearsalEntity).count({
+      where: { conversationId, status: 'completed' },
+    });
+    if (remaining === 0) {
+      await manager
+        .getRepository(ConversationKnowledgeFactEntity)
+        .delete({ conversationId });
+      return false;
+    }
+    await this.markPending(manager, conversationId);
+    return true;
+  }
+
   /** Wakes the worker without blocking the report response; failures fall back to the scan. */
   wake(conversationId: string): void {
     if (this.stopped) return;

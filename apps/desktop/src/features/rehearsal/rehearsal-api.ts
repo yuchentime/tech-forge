@@ -266,6 +266,13 @@ export function discardRehearsal(
   return request(`/api/rehearsals/${rehearsalId}`, 'DELETE');
 }
 
+/** Deletes one finished rehearsal report together with its turns and transcript. */
+export function deleteRehearsalReport(
+  rehearsalId: string,
+): Promise<{ rehearsalId: string; deleted: true }> {
+  return request(`/api/rehearsals/${rehearsalId}/report`, 'DELETE');
+}
+
 /** Reads the student persona shared by every conversation's drill. */
 export function getRehearsalPersona(): Promise<{ persona: string }> {
   return request('/api/rehearsal-persona', 'GET');

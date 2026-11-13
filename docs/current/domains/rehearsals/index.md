@@ -55,6 +55,10 @@ stateDiagram-v2
 
 `reporting` 生成总体报告；`completed` / `failed` 为终态，失败保留逐题数据并可重试结束。
 
+- 桌面端结束流程：确认框（共享 `ConfirmDialog`）→ 关闭确认框并立即整块换成等待面板 [RehearsalEvaluating.tsx](../../../apps/desktop/src/features/rehearsal/RehearsalEvaluating.tsx)（`brand` 圆环 + 不确定进度条 + 已等待秒数），因为 `POST /api/rehearsals/:id/end` 同步生成并返回报告，客户端没有阶段可订阅。面板只声明已成立的事实（逐题回答已保存、正在汇总总体评估），不显示无法得知的百分比；45 秒后追加“模型响应较慢”提示。一题未答的丢弃走 `DELETE`，不显示该面板。
+- 历史列表的终态行（`completed` / `failed`）各带一个垃圾桶按钮，点击弹同一个 `ConfirmDialog`（`tone="danger"`，主按钮「删除报告」），确认后调用 `DELETE /api/rehearsals/:id/report`。行本身不再是一枚按钮，而是「打开按钮 + 删除按钮」的组合，避免按钮嵌套；删除进行中该行图标转 `CircleNotch` 并禁用。成功后只从本地快照里摘掉该行并同步 `counts`，不重新拉列表；删除当前缓存中的 `detail` 时清空它（没有视图引用时留在原视图），并递增 `completionVersion` 让派生卡片刷新。失败时保留行并在历史错误条显示后端文案。
+- 已作答的逐题卡片（演练进行中的 [RehearsalSession.tsx](../../../apps/desktop/src/features/rehearsal/RehearsalSession.tsx) 与报告的「逐题记录」）右上角各有一枚复制按钮 [TurnCopyButton.tsx](../../../apps/desktop/src/features/rehearsal/TurnCopyButton.tsx)，替代原来的状态文字（「已评估」等）：已作答的卡片显示复制，未作答的卡片仍显示状态（「等待回答」「已跳过」），因为此时没有可复制的问答。写 `navigator.clipboard.writeText`，内容按卡片可见顺序拼成纯文本（`提问` + 问题、`你的回答` + 回答、评估等级 + `- ` 问题列表），不复制卡片上看不到的 `evidence` / `missingPoints`，也不带卡片上的「第 n 问」序号（改用「提问」标签）。复制成功后图标换成 `brand-600` 对勾、`aria-label`/`title` 变「已复制」，1.8 秒后复原；剪贴板被拒或不可用时用 toast 说明，不静默失败。演练不是 assistant-ui 线程，因此不用 `ActionBarPrimitive.Copy`，直接调 Clipboard API（与应用内用户消息复制同一机制）。
+
 ### 限额
 
 - 总提问数上限 15，包含基础题、追问和跳过；它是上限而不是目标，对话内容少时不会为了凑满 15 次继续出题。`askedQuestionCount` 在题目展示时计数，计数从 `rehearsal_turns` 派生并写回 `rehearsals`，不信任模型返回值。同一基础题最多 2 次追问；`followUpDepth` 为 0/1/2，第 2 次追问之后后端强制下一基础题。

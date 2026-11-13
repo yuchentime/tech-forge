@@ -1,6 +1,7 @@
 import { CircleNotch } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import type { RehearsalDetail } from './rehearsal-api';
+import { TurnCopyButton } from './TurnCopyButton';
 import {
   assessmentLabel,
   assessmentTone,
@@ -118,7 +119,11 @@ export function RehearsalSession({
           >
             <div className="flex items-center justify-between gap-3 text-xs text-ink-500">
               <span>第 {turn.sequenceNo} 问</span>
-              <span>{turnStatusLabel(turn)}</span>
+              {turn.answer?.trim() ? (
+                <TurnCopyButton turn={turn} />
+              ) : (
+                <span>{turnStatusLabel(turn)}</span>
+              )}
             </div>
             <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-6 text-ink-900">
               {turn.question}

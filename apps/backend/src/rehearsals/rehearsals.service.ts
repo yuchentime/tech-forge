@@ -43,6 +43,7 @@ import {
   MAX_TOTAL_QUESTIONS,
   PERSONA_FILE_NAME,
   RECONCILE_STALE_MS,
+  TERMINAL_REHEARSAL_STATUSES,
 } from './rehearsal.constants';
 import {
   renderPriorRehearsalSummaries,
@@ -1038,6 +1039,62 @@ export class RehearsalsService {
       throw error;
     } finally {
       lease.finish();
+    }
+  }
+
+  /**
+   * Deletes one finished rehearsal and everything derived from it.
+   *
+   * Only terminal rows can be deleted: an active drill must be finished or discarded first, so a
+   * user can never lose an in-flight question. The same transaction drops the turns and resets the
+   * derived knowledge facts; the transcript file is removed afterwards, outside the transaction.
+   */
+  async deleteReport(
+    rehearsalId: string,
+    logContext: RequestLogContext,
+  ): Promise<{ rehearsalId: string; deleted: true }> {
+    const startedAt = Date.now();
+    const existing = await this.requireRehearsal(rehearsalId);
+    if (
+      !(TERMINAL_REHEARSAL_STATUSES as readonly string[]).includes(
+        existing.status,
+      )
+    ) {
+      throw new ConflictException('演练还没有结束，请先结束或丢弃本次演练。');
+    }
+
+    try {
+      const recompute = await this.dataSource.transaction(async (manager) => {
+        await manager.getRepository(RehearsalTurnEntity).delete({ rehearsalId });
+        await manager.getRepository(RehearsalEntity).delete({ id: rehearsalId });
+        return this.knowledgeFacts.resetAfterReportDeletion(
+          manager,
+          existing.conversationId,
+        );
+      });
+      if (recompute) this.knowledgeFacts.wake(existing.conversationId);
+      this.removeTranscript(existing);
+      writeStructuredEvent(this.logger, 'log', 'rehearsal.report.deleted', {
+        ...logContext,
+        conversationId: existing.conversationId,
+        rehearsalId,
+        status: existing.status,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return { rehearsalId, deleted: true };
+    } catch (error) {
+      writeStructuredEvent(
+        this.logger,
+        error instanceof HttpException ? 'warn' : 'error',
+        'rehearsal.report.delete_failed',
+        {
+          ...logContext,
+          rehearsalId,
+          elapsedMs: Date.now() - startedAt,
+          ...getSafeErrorLogFields(error),
+        },
+      );
+      throw error;
     }
   }
 

@@ -63,6 +63,7 @@ Tailwind v4 的 `@theme` 块在 [apps/desktop/src/styles.css](../../../apps/desk
 - 表单控件的基础样式放在 `@layer base`：`button/input/textarea { font: inherit }` 若写在 layer 外会压过 Tailwind 工具类，而且 `font` 简写会重置 `font-weight`，导致按钮上的 `font-medium`/`font-semibold` 全部失效。
 - 空状态统一由 [apps/desktop/src/components/EmptyState.tsx](../../../apps/desktop/src/components/EmptyState.tsx) 渲染：一个 `brand-400` filled 图标（36px）+ 标题 + 两行说明 + 一行提示，无卡片、无边框、无投影、无胶囊底色，避免在内容上方叠出第二块面板。现有使用者是对话首屏（`Sparkle`）、资料库空列表（`Books`）与知识掌握空列表（`Stack`）；图形取侧栏同一入口的图标，视觉重量与首屏星点一致。
 - 空状态在可视区域垂直居中（外层滚动容器改为 `flex flex-col`，空状态自身 `my-auto`）；说明文字最宽 `max-w-sm`，因此每段控制在两行内，第三行只放"下一步做什么"的提示。加载态同样 `my-auto` 居中，避免加载完成时空状态从顶部跳到中间。
+- 不可逆操作的确认框统一由 [apps/desktop/src/components/ConfirmDialog.tsx](../../../apps/desktop/src/components/ConfirmDialog.tsx) 渲染，不再使用 `window.confirm`（原生框在 Electron 里带 `@teachforge/desktop` 窗口标题，且不受皮肤控制）。契约：`createPortal` 到 `body` 的 `z-50` 遮罩（`bg-ink-900/25` + `2px` 背景模糊）+ `max-w-sm` 白卡 `shadow-float` + `tf-rise` 入场；`role="dialog"` + `aria-modal`，标题与说明各由 `useId` 关联；`Esc`、遮罩点击取消，Tab 限制在卡内，初始焦点落在「取消/继续」这类安全选项，关闭后焦点回到触发按钮。`tone="danger"`（`rose` 图标底、`rose-700` 主按钮）只用于会丢数据的动作；`tone="default"` 用 `brand` 表示"正常结束"。`busy` 时主按钮禁用并显示 `busyLabel`。现有使用者：结束课堂（`rose`，取消文案「继续上课」）、删除历史课堂（`rose`）、结束/丢弃演练（结束为 `brand`，一题未答的丢弃为 `rose`）。
 
 ## 验证方式
 

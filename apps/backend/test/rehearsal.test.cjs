@@ -128,6 +128,12 @@ async function createContext() {
   const llm = createFakeLlm();
   const knowledgeFacts = {
     markPending: async () => undefined,
+    resetAfterReportDeletion: async (_manager, conversationId) => {
+      knowledgeFacts.resetCalls.push(conversationId);
+      return knowledgeFacts.recompute;
+    },
+    resetCalls: [],
+    recompute: false,
     wake: () => undefined,
   };
   const service = new RehearsalsService(
@@ -149,6 +155,7 @@ async function createContext() {
     conversations,
     dataSource,
     llm,
+    knowledgeFacts,
     service,
     async close() {
       await app.close();
@@ -731,6 +738,73 @@ test('discard is rejected after a submitted answer', async () => {
         }),
       /已经有回答/,
     );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a finished report can be deleted while an active drill cannot', async () => {
+  const ctx = await createContext();
+  const conversationId = await seedConversation(ctx);
+  try {
+    const started = await ctx.service.start(
+      conversationId,
+      { startRequestId: randomUUID() },
+      { requestId: randomUUID(), conversationId },
+    );
+    const first = currentTurn(started);
+    await assert.rejects(
+      () =>
+        ctx.service.deleteReport(started.rehearsalId, {
+          requestId: randomUUID(),
+          rehearsalId: started.rehearsalId,
+        }),
+      /还没有结束/,
+    );
+
+    await ctx.service.answer(
+      started.rehearsalId,
+      {
+        turnId: first.turnId,
+        answer: '结论先行就是先给结论，再给理由。',
+        answerRequestId: randomUUID(),
+      },
+      { requestId: randomUUID(), rehearsalId: started.rehearsalId },
+    );
+    await ctx.service.end(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    const transcriptPath = join(
+      ctx.configDirectory,
+      'sessions',
+      conversationId,
+      'rehearsals',
+      `${started.rehearsalId}.md`,
+    );
+    assert.equal(existsSync(transcriptPath), true);
+
+    const deleted = await ctx.service.deleteReport(started.rehearsalId, {
+      requestId: randomUUID(),
+      rehearsalId: started.rehearsalId,
+    });
+    assert.deepEqual(deleted, {
+      rehearsalId: started.rehearsalId,
+      deleted: true,
+    });
+    assert.deepEqual(ctx.knowledgeFacts.resetCalls, [conversationId]);
+    assert.equal(existsSync(transcriptPath), false);
+    const counts = await ctx.dataSource.query(
+      'SELECT (SELECT COUNT(*) FROM rehearsals WHERE conversationId = ?) AS rehearsals, (SELECT COUNT(*) FROM rehearsal_turns WHERE rehearsalId = ?) AS turns',
+      [conversationId, started.rehearsalId],
+    );
+    assert.equal(Number(counts[0].rehearsals), 0);
+    assert.equal(Number(counts[0].turns), 0);
+    const latest = await ctx.service.getLatest(conversationId, {
+      requestId: randomUUID(),
+      conversationId,
+    });
+    assert.equal(latest, null);
   } finally {
     await ctx.close();
   }
