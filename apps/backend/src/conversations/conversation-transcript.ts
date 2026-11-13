@@ -15,6 +15,10 @@ export interface PersistedToolExecution {
   displayPath?: string;
   /** Safe grep pattern kept for the history label; never the full argument object. */
   displayPattern?: string;
+  /** 1-based first line requested by `read`; absent when the call named no window. */
+  displayOffset?: number;
+  /** Requested line count for `read`; absent when the call named no limit. */
+  displayLimit?: number;
   status: 'running' | 'completed' | 'failed' | 'interrupted';
   durationMs?: number;
   partialResult?: unknown;
@@ -22,23 +26,46 @@ export interface PersistedToolExecution {
 }
 
 /**
- * Keeps the only tool arguments a tool-execution row may persist: a path and,
- * for grep, the search pattern. Every other argument stays out of storage.
+ * Keeps the only tool arguments a tool-execution row may persist: a path, the
+ * grep search pattern, and a read window. Every other argument stays out of storage.
  */
 export function getToolDisplayFields(
   toolName: string,
   args: unknown,
-): { displayPath?: string; displayPattern?: string } {
+): {
+  displayPath?: string;
+  displayPattern?: string;
+  displayOffset?: number;
+  displayLimit?: number;
+} {
   if (typeof args !== 'object' || args === null || Array.isArray(args)) {
     return {};
   }
 
   const record = args as Record<string, unknown>;
+  const offset = record.offset;
+  const limit = record.limit;
+  const readOffset =
+    toolName === 'read' &&
+    typeof offset === 'number' &&
+    Number.isSafeInteger(offset) &&
+    offset >= 0
+      ? { displayOffset: offset }
+      : {};
+  const readLimit =
+    toolName === 'read' &&
+    typeof limit === 'number' &&
+    Number.isSafeInteger(limit) &&
+    limit >= 1
+      ? { displayLimit: limit }
+      : {};
   return {
     ...(typeof record.path === 'string' ? { displayPath: record.path } : {}),
     ...(toolName === 'grep' && typeof record.pattern === 'string'
       ? { displayPattern: record.pattern }
       : {}),
+    ...readOffset,
+    ...readLimit,
   };
 }
 
@@ -150,12 +177,18 @@ export function parseToolExecution(
   if (!isRecord(value) || value.format !== 'teachforge-tool-execution-v1') {
     return undefined;
   }
+  const offset = value.displayOffset;
+  const limit = value.displayLimit;
   if (
     typeof value.toolCallId !== 'string' ||
     typeof value.toolName !== 'string' ||
     (value.displayPath !== undefined && typeof value.displayPath !== 'string') ||
     (value.displayPattern !== undefined &&
       typeof value.displayPattern !== 'string') ||
+    (offset !== undefined &&
+      !(typeof offset === 'number' && Number.isSafeInteger(offset) && offset >= 0)) ||
+    (limit !== undefined &&
+      !(typeof limit === 'number' && Number.isSafeInteger(limit) && limit >= 1)) ||
     (value.status !== 'running' &&
       value.status !== 'completed' &&
       value.status !== 'failed' &&

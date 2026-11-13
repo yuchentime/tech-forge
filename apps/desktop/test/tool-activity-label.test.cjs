@@ -29,6 +29,47 @@ test('read, write and edit use plain-language actions with the file name', () =>
   });
 });
 
+test('read shows the requested window so repeated reads stay distinguishable', () => {
+  assert.deepEqual(
+    describeToolActivity('read', 'completed', {
+      path: 'C:/knowledge/guide.md',
+      offset: 1486,
+      limit: 180,
+    }),
+    { action: '已读取', fileName: 'guide.md', lineRange: '第 1486–1665 行' },
+  );
+  assert.deepEqual(describeToolActivity('read', 'completed', { path: 'guide.md', limit: 120 }), {
+    action: '已读取',
+    fileName: 'guide.md',
+    lineRange: '第 1–120 行',
+  });
+  assert.deepEqual(describeToolActivity('read', 'completed', { path: 'guide.md', offset: 121 }), {
+    action: '已读取',
+    fileName: 'guide.md',
+    lineRange: '第 121 行起',
+  });
+  assert.deepEqual(
+    describeToolActivity('read', 'completed', { path: 'guide.md', offset: 7, limit: 1 }),
+    { action: '已读取', fileName: 'guide.md', lineRange: '第 7 行' },
+  );
+});
+
+test('only a valid read window reaches the label', () => {
+  // grep 的 offset/limit 语义不同，不能显示成行范围。
+  assert.deepEqual(
+    describeToolActivity('grep', 'completed', { pattern: 'x', path: 'a.md', offset: 1, limit: 20 }),
+    { action: '已搜索', pattern: 'x', fileName: 'a.md' },
+  );
+  assert.deepEqual(
+    describeToolActivity('read', 'completed', { path: 'a.md', offset: '3', limit: 0 }),
+    { action: '已读取', fileName: 'a.md' },
+  );
+  assert.deepEqual(
+    describeToolActivity('read', 'completed', { path: 'a.md', offset: -5, limit: 10 }),
+    { action: '已读取', fileName: 'a.md', lineRange: '第 1–10 行' },
+  );
+});
+
 test('directories, globs and unrelated arguments never reach the label', () => {
   const description = describeToolActivity('grep', 'running', {
     pattern: 'aaa',

@@ -25,11 +25,13 @@ export interface ToolActivityDescription {
   pattern?: string;
   /** Last path segment only, so the row never exposes the surrounding directories. */
   fileName?: string;
+  /** Requested `read` window, e.g. `第 121–230 行`; absent when the call named none. */
+  lineRange?: string;
 }
 
 /**
  * Turns one raw tool call into the wording shown in the activity list.
- * Only `pattern` and `path` are read, so no other argument can reach the UI.
+ * Only `pattern`, `path`, `offset` and `limit` are read, so no other argument can reach the UI.
  */
 export function describeToolActivity(
   toolName: string,
@@ -38,12 +40,34 @@ export function describeToolActivity(
 ): ToolActivityDescription {
   const pattern = getToolTarget(toolName, args);
   const fileName = getFileName(getStringArg(args, 'path'));
+  const lineRange = toolName === 'read' ? describeReadLineRange(args) : undefined;
 
   return {
     action: getToolAction(toolName, status),
     ...(pattern ? { pattern } : {}),
     ...(fileName ? { fileName } : {}),
+    ...(lineRange ? { lineRange } : {}),
   };
+}
+
+/**
+ * Summarises the window a `read` asked for.
+ *
+ * Pi reads 1-based line numbers and treats `limit` as a line count, so the visible upper bound is
+ * the requested window; a file shorter than that window ends earlier. Calls that named no window
+ * return undefined so the row keeps its old short form.
+ */
+function describeReadLineRange(args: unknown): string | undefined {
+  const rawOffset = getIntegerArg(args, 'offset');
+  const rawLimit = getIntegerArg(args, 'limit');
+  const offset = rawOffset !== undefined && rawOffset >= 0 ? rawOffset : undefined;
+  const limit = rawLimit !== undefined && rawLimit >= 1 ? rawLimit : undefined;
+  if (offset === undefined && limit === undefined) return undefined;
+
+  const first = offset !== undefined && offset > 0 ? offset : 1;
+  if (limit === undefined) return `第 ${first} 行起`;
+  const last = first + limit - 1;
+  return last === first ? `第 ${first} 行` : `第 ${first}–${last} 行`;
 }
 
 /** Maps a tool and its lifecycle state to a plain-language action. */
@@ -83,6 +107,15 @@ function getStringArg(args: unknown, key: string): string {
   }
   const value = (args as Record<string, unknown>)[key];
   return typeof value === 'string' ? value : '';
+}
+
+/** Reads one named safe integer argument and ignores every other shape. */
+function getIntegerArg(args: unknown, key: string): number | undefined {
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) {
+    return undefined;
+  }
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
 }
 
 /** Reduces a path to its final segment and drops root or relative placeholders. */

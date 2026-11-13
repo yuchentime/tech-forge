@@ -1052,6 +1052,14 @@ function isConversationToolActivity(
     typeof activity.toolName === 'string' &&
     (activity.path === undefined || typeof activity.path === 'string') &&
     (activity.pattern === undefined || typeof activity.pattern === 'string') &&
+    (activity.offset === undefined ||
+      (typeof activity.offset === 'number' &&
+        Number.isSafeInteger(activity.offset) &&
+        activity.offset >= 0)) &&
+    (activity.limit === undefined ||
+      (typeof activity.limit === 'number' &&
+        Number.isSafeInteger(activity.limit) &&
+        activity.limit >= 1)) &&
     (activity.status === 'completed' || activity.status === 'failed') &&
     (activity.durationMs === undefined ||
       (typeof activity.durationMs === 'number' &&
@@ -1188,7 +1196,8 @@ function describeTurnStatus(
   if (!running) return '正在思考…';
 
   const description = describeToolActivity(running.toolName, running.status, running.args);
-  if (description.fileName) return `${description.action} ${description.fileName}`;
+  const range = description.lineRange ? ` · ${description.lineRange}` : '';
+  if (description.fileName) return `${description.action} ${description.fileName}${range}`;
   if (description.pattern) return `${description.action}“${description.pattern}”`;
   return `${description.action}…`;
 }
@@ -1229,6 +1238,9 @@ function ToolActivityRow({
           <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-600" />
           <code className="min-w-0 break-all font-mono text-[0.9em]">{description.fileName}</code>
         </span>
+      )}
+      {description.lineRange && (
+        <span className="shrink-0 text-xs text-ink-500">{description.lineRange}</span>
       )}
       <span className="sr-only">{getToolStatusLabel(tool.status)}</span>
     </div>

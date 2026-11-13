@@ -46,6 +46,10 @@ export interface ConversationToolActivityDto {
   path?: string;
   /** Safe grep pattern, present only for knowledge/file searches. */
   pattern?: string;
+  /** 1-based first line a `read` requested; used to tell repeated reads apart. */
+  offset?: number;
+  /** Requested line count for that `read`. */
+  limit?: number;
   status: 'completed' | 'failed';
   durationMs?: number;
 }

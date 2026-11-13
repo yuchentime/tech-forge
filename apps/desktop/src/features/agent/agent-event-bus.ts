@@ -68,13 +68,16 @@ export class AgentEventBus {
     turnId: string,
     activities: readonly ConversationToolActivity[],
   ): void {
-    // ToolActivityRow 从 args.path / args.pattern 读取目标，因此历史 DTO 只映射回这两项参数。
+    // ToolActivityRow 从 args.path / args.pattern / args.offset / args.limit 读取目标，
+    // 因此历史 DTO 只映射回这几项参数。
     const tools: AgentToolActivity[] = activities.map((activity) => ({
       toolCallId: activity.toolCallId,
       toolName: activity.toolName,
       args: {
         ...(activity.path === undefined ? {} : { path: activity.path }),
         ...(activity.pattern === undefined ? {} : { pattern: activity.pattern }),
+        ...(activity.offset === undefined ? {} : { offset: activity.offset }),
+        ...(activity.limit === undefined ? {} : { limit: activity.limit }),
       },
       status: activity.status,
       ...(activity.durationMs === undefined

@@ -666,6 +666,12 @@ export class ChatService {
             ...(display.displayPattern === undefined
               ? {}
               : { displayPattern: display.displayPattern }),
+            ...(display.displayOffset === undefined
+              ? {}
+              : { displayOffset: display.displayOffset }),
+            ...(display.displayLimit === undefined
+              ? {}
+              : { displayLimit: display.displayLimit }),
             ...(event.parentToolCallId
               ? { parentToolCallId: event.parentToolCallId }
               : {}),

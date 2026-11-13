@@ -255,7 +255,62 @@ test('grep history returns the search pattern next to its display path only', as
   }
 });
 
-test('tool argument extraction persists only the path and grep pattern', () => {
+test('read history returns the requested window next to its display path only', async () => {
+  const dataSource = await createTestDatabase();
+  try {
+    const conversationId = randomUUID();
+    await dataSource.getRepository(ConversationEntity).save({ id: conversationId, title: null });
+    const userId = '00000000-0000-4000-8000-000000000002';
+    await dataSource.getRepository(MessageEntity).save([
+      messageRow(
+        conversationId,
+        1,
+        'user',
+        JSON.stringify([{ type: 'text', text: '读第 33 章' }]),
+        userId,
+      ),
+      messageRow(
+        conversationId,
+        2,
+        'toolExecution',
+        JSON.stringify({
+          format: 'teachforge-tool-execution-v1',
+          toolCallId: 'call-read',
+          toolName: 'read',
+          displayPath: 'E:/knowledge/学生手册.docx',
+          displayOffset: 121,
+          displayLimit: 110,
+          status: 'completed',
+          durationMs: 3,
+          result: { secret: 'must not leave storage' },
+        }),
+      ),
+      messageRow(conversationId, 3, 'assistant', piMessage('assistant', 'answer-read')),
+    ]);
+
+    const page = await new ConversationsService(dataSource, undefined, artifactsStub).getConversationMessages(
+      conversationId,
+    );
+    const user = page.messages.find(({ id }) => id === userId);
+
+    assert.deepEqual(user.toolActivities, [
+      {
+        toolCallId: 'call-read',
+        toolName: 'read',
+        path: 'E:/knowledge/学生手册.docx',
+        offset: 121,
+        limit: 110,
+        status: 'completed',
+        durationMs: 3,
+      },
+    ]);
+    assert.equal(JSON.stringify(page).includes('must not leave storage'), false);
+  } finally {
+    await dataSource.destroy();
+  }
+});
+
+test('tool argument extraction persists only the path, grep pattern and read window', () => {
   assert.deepEqual(
     getToolDisplayFields('grep', {
       pattern: '抄袭|剽窃',
@@ -266,6 +321,21 @@ test('tool argument extraction persists only the path and grep pattern', () => {
     { displayPath: 'E:/knowledge/学生手册.docx', displayPattern: '抄袭|剽窃' },
   );
   assert.deepEqual(getToolDisplayFields('read', { path: 'notes/a.md', offset: 1 }), {
+    displayPath: 'notes/a.md',
+    displayOffset: 1,
+  });
+  assert.deepEqual(
+    getToolDisplayFields('read', { path: 'notes/a.md', offset: 121, limit: 110 }),
+    { displayPath: 'notes/a.md', displayOffset: 121, displayLimit: 110 },
+  );
+  assert.deepEqual(getToolDisplayFields('read', { path: 'notes/a.md', limit: 120 }), {
+    displayPath: 'notes/a.md',
+    displayLimit: 120,
+  });
+  assert.deepEqual(getToolDisplayFields('read', { path: 'notes/a.md', offset: 1.5, limit: 0 }), {
+    displayPath: 'notes/a.md',
+  });
+  assert.deepEqual(getToolDisplayFields('grep', { path: 'notes/a.md', offset: 1, limit: 2 }), {
     displayPath: 'notes/a.md',
   });
   assert.deepEqual(getToolDisplayFields('read', { pattern: 'x' }), {});

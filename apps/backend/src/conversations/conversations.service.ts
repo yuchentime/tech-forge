@@ -679,6 +679,12 @@ export class ConversationsService {
         ...(execution.displayPattern === undefined
           ? {}
           : { pattern: execution.displayPattern }),
+        ...(execution.displayOffset === undefined
+          ? {}
+          : { offset: execution.displayOffset }),
+        ...(execution.displayLimit === undefined
+          ? {}
+          : { limit: execution.displayLimit }),
         ...(typeof execution.durationMs === 'number' &&
         Number.isFinite(execution.durationMs) &&
         execution.durationMs >= 0

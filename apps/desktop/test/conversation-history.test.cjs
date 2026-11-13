@@ -65,6 +65,26 @@ test('history restores a grep pattern next to its target path', () => {
   );
 });
 
+test('history restores a read window next to its target path', () => {
+  const bus = new AgentEventBus();
+  bus.restoreHistoryActivity('persisted-user-message-id', [
+    {
+      toolCallId: 'call-read',
+      toolName: 'read',
+      path: 'E:/knowledge/学生手册.docx',
+      offset: 121,
+      limit: 110,
+      status: 'completed',
+      durationMs: 3,
+    },
+  ]);
+
+  assert.deepEqual(
+    bus.getTurnSnapshots()['persisted-user-message-id'].tools[0].args,
+    { path: 'E:/knowledge/学生手册.docx', offset: 121, limit: 110 },
+  );
+});
+
 test('history tool activity restores an idle snapshot by persisted user message ID', () => {
   const bus = new AgentEventBus();
   bus.restoreHistoryActivity('persisted-user-message-id', [

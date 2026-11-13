@@ -37,6 +37,10 @@ export interface ConversationToolActivity {
   path?: string;
   /** Safe grep pattern used by the activity label. */
   pattern?: string;
+  /** 1-based first line a `read` requested; tells repeated reads apart. */
+  offset?: number;
+  /** Requested line count for that `read`. */
+  limit?: number;
   status: 'completed' | 'failed';
   durationMs?: number;
 }
