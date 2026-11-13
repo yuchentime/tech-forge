@@ -5,6 +5,7 @@ const test = require('node:test');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { DataSource } = require('typeorm');
+const BetterSqlite3 = require('better-sqlite3');
 const buildDirectory = path.resolve(__dirname, '..', process.env.BACKEND_TEST_BUILD_DIR ?? '.test-dist');
 const { ConversationEntity } = require(path.join(buildDirectory, 'conversations/conversation.entity.js'));
 const { MessageEntity } = require(path.join(buildDirectory, 'conversations/message.entity.js'));
@@ -18,6 +19,7 @@ const artifactsStub = { listArtifacts: async () => [] };
 async function createTestDatabase() {
   const dataSource = new DataSource({
     type: 'better-sqlite3',
+    driver: BetterSqlite3,
     database: ':memory:',
     entities: [ConversationEntity, MessageEntity],
     synchronize: true,
@@ -134,7 +136,7 @@ test('history nests durable tool execution under its user without exposing resul
   }
 });
 
-test('cursor history keeps tool activity attached to the earlier user turn', async () => {
+test('full history keeps every turn and tool activity in order', async () => {
   const dataSource = await createTestDatabase();
   try {
     const conversationId = randomUUID();
@@ -149,17 +151,13 @@ test('cursor history keeps tool activity attached to the earlier user turn', asy
     }
 
     const service = new ConversationsService(dataSource, undefined, artifactsStub);
-    const latestPage = await service.getConversationMessages(conversationId);
-    const earlierPage = await service.getConversationMessages(
-      conversationId,
-      latestPage.messages[0].id,
-    );
+    const history = await service.getConversationMessages(conversationId);
 
-    assert.equal(latestPage.messages.length, 30);
-    assert.equal(latestPage.hasMore, true);
-    assert.equal(earlierPage.messages[0].id, users[0]);
-    assert.deepEqual(earlierPage.messages.map(({ role }) => role), ['user', 'assistant']);
-    assert.deepEqual(earlierPage.messages[0].toolActivities, [
+    // Sixteen turns produce thirty-two visible rows; no page cap may hide the earliest ones.
+    assert.equal(history.messages.length, 32);
+    assert.equal(history.messages[0].id, users[0]);
+    assert.equal(history.messages.at(-1).role, 'assistant');
+    assert.deepEqual(history.messages[0].toolActivities, [
       {
         toolCallId: 'call-1',
         toolName: 'write',

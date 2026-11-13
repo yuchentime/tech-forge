@@ -54,7 +54,7 @@ export function ComposerAttachmentChips() {
  * Nothing is uploaded here: the backend copies the file into the conversation's session directory
  * when the message is sent, because a brand-new conversation has no id yet.
  */
-export function AttachmentPickerButton({ disabled }: { disabled: boolean }) {
+export function AttachmentPickerButton() {
   const [isPicking, setIsPicking] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
 
@@ -83,7 +83,7 @@ export function AttachmentPickerButton({ disabled }: { disabled: boolean }) {
       <button
         aria-label="添加附件"
         className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={disabled || isPicking}
+        disabled={isPicking}
         onClick={() => void pick()}
         title="添加 PDF、Word、Markdown、TXT 或图片（PNG/JPEG/GIF/WebP）"
         type="button"

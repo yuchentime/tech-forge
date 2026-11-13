@@ -1,4 +1,5 @@
 import {
+  BookmarkSimple,
   Books,
   Chalkboard,
   ChatCircle,
@@ -15,7 +16,13 @@ import {
 } from './conversation-store';
 
 /** Views the sidebar can switch the main area to; `chat` is the conversation view. */
-export type SidebarView = 'chat' | 'settings' | 'knowledge' | 'knowledgeProfile' | 'classroom';
+export type SidebarView =
+  | 'chat'
+  | 'settings'
+  | 'knowledge'
+  | 'knowledgeProfile'
+  | 'focus'
+  | 'classroom';
 
 /** Renders the conversation list and actions without owning API or runtime state. */
 export function ConversationSidebar({
@@ -46,7 +53,7 @@ export function ConversationSidebar({
   return (
     <aside
       aria-label="对话列表"
-      className="tf-sidebar-art relative isolate flex h-48 min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-ink-200/60 md:h-full md:w-64 md:border-b-0 md:border-r"
+      className="tf-sidebar-art relative isolate flex h-56 min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-ink-200/60 md:h-full md:w-64 md:border-b-0 md:border-r"
     >
       <header className="relative z-10 shrink-0 border-b border-ink-200/70 px-2 py-2">
         <div className="flex items-center">
@@ -108,6 +115,20 @@ export function ConversationSidebar({
         >
           <Chalkboard aria-hidden="true" className="size-4 shrink-0" />
           <span className="truncate">课堂模式</span>
+        </button>
+        <button
+          aria-pressed={activeView === 'focus'}
+          className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
+            activeView === 'focus'
+              ? 'bg-brand-100 text-brand-800'
+              : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
+          }`}
+          onClick={() => onSelectView('focus')}
+          title="重点关注"
+          type="button"
+        >
+          <BookmarkSimple aria-hidden="true" className="size-4 shrink-0" />
+          <span className="truncate">重点关注</span>
         </button>
       </header>
 

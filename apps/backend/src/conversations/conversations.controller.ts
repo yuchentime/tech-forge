@@ -11,17 +11,15 @@ import {
   ParseUUIDPipe,
   Patch,
   Put,
-  Query,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ConversationsService } from './conversations.service';
 import type {
   ConversationKnowledgeScopeDto,
-  ConversationMessagePageDto,
+  ConversationMessagesDto,
   ConversationSummaryDto,
 } from './conversation-query.dto';
 import {
-  ConversationMessagesQueryDto,
   RenameConversationDto,
   SetKnowledgeScopeDto,
 } from './conversation-query.dto';
@@ -118,23 +116,22 @@ export class ConversationsController {
     }
   }
 
-  /** Returns one bounded visible-message page for an existing UUIDv4 conversation. */
+  /** Returns the complete visible-message history for an existing UUIDv4 conversation. */
   @Get(':conversationId/messages')
   getMessages(
     @Param('conversationId', new ParseUUIDPipe({ version: '4' }))
     conversationId: string,
-    @Query() query: ConversationMessagesQueryDto,
-  ): Promise<ConversationMessagePageDto> {
+  ): Promise<ConversationMessagesDto> {
     const requestId = randomUUID();
     const startedAt = Date.now();
     writeStructuredEvent(
       this.logger,
       'log',
       'conversations.http.messages.accepted',
-      { requestId, conversationId, hasCursor: Boolean(query.beforeMessageId) },
+      { requestId, conversationId },
     );
     return this.conversations
-      .getConversationMessages(conversationId, query.beforeMessageId, {
+      .getConversationMessages(conversationId, {
         requestId,
         conversationId,
       })
@@ -147,7 +144,6 @@ export class ConversationsController {
             requestId,
             conversationId,
             messageCount: result.messages.length,
-            hasMore: result.hasMore,
             elapsedMs: Date.now() - startedAt,
           },
         );

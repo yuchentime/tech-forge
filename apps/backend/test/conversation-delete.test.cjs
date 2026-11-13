@@ -18,6 +18,7 @@ const load = (modulePath) => require(join(buildDirectory, modulePath));
 const { buildDatabaseOptions } = load('database/database.options.js');
 const { ConversationsModule } = load('conversations/conversations.module.js');
 const { ConversationsService } = load('conversations/conversations.service.js');
+const { FocusItemEntity } = load('focus-items/focus-item.entity.js');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-conversation-delete-'));
 
@@ -65,6 +66,15 @@ test('deleting a conversation removes its rows, children and session files', asy
       'INSERT INTO pi_session_snapshots (conversation_id, entries_json) VALUES (?, ?)',
       [conversationId, '[]'],
     );
+    await ctx.dataSource.getRepository(FocusItemEntity).save({
+      id: '99999999-9999-4999-8999-999999999999',
+      conversationId,
+      messageId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      messageSequenceNo: 1,
+      messageIndex: 1,
+      quote: '保存的摘录',
+      quoteKey: 'test-quote-key',
+    });
     const attachmentDirectory = join(sessionDirectory, 'attachments', 'att-1');
     mkdirSync(attachmentDirectory, { recursive: true });
     writeFileSync(join(attachmentDirectory, 'lecture.md'), '# 讲义', 'utf8');
@@ -83,10 +93,14 @@ test('deleting a conversation removes its rows, children and session files', asy
         'SELECT COUNT(*) AS total FROM pi_session_snapshots WHERE conversation_id = ?',
         [conversationId],
       ),
+      ctx.dataSource.query(
+        'SELECT COUNT(*) AS total FROM focus_items WHERE "conversationId" = ?',
+        [conversationId],
+      ),
     ]);
     assert.deepEqual(
       counts.map((rows) => Number(rows[0].total)),
-      [0, 0, 0],
+      [0, 0, 0, 0],
     );
     assert.equal(existsSync(sessionDirectory), false, 'session files must be removed');
   } finally {

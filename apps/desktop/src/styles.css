@@ -277,6 +277,15 @@ body {
   }
 }
 
+/* Temporary ring when 重点关注 opens the saved message; the class is removed by the caller. */
+.tf-focus-target {
+  border-radius: 0.75rem;
+  background-color: var(--color-brand-50);
+  box-shadow:
+    0 0 0 2px var(--color-brand-400),
+    0 0 0 6px var(--color-brand-100);
+}
+
 
 @media (prefers-reduced-motion: reduce) {
   .tf-classroom-art {

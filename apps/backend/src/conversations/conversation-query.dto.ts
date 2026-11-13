@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsString, IsUUID } from 'class-validator';
 
 /** Describes one sidebar row returned by the Conversation list API. */
 export interface ConversationSummaryDto {
@@ -70,15 +70,7 @@ export class SetKnowledgeScopeDto {
   documentIds!: string[];
 }
 
-/** Describes one bounded visible-message page and whether an older page exists. */
-export interface ConversationMessagePageDto {
+/** Describes the complete visible message history of one conversation. */
+export interface ConversationMessagesDto {
   messages: ConversationMessageDto[];
-  hasMore: boolean;
-}
-
-/** Validates the optional same-conversation message cursor for history paging. */
-export class ConversationMessagesQueryDto {
-  @IsOptional()
-  @IsUUID('4')
-  beforeMessageId?: string;
 }

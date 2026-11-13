@@ -8,6 +8,7 @@ import {
   type AssistantRuntime,
 } from '@assistant-ui/react';
 import {
+  BookmarkSimple,
   CaretDown,
   Chats,
   Check,
@@ -26,7 +27,6 @@ import {
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -37,7 +37,7 @@ import { ArtifactSidebar } from './ArtifactSidebar';
 import { KeywordSearch } from './KeywordSearch';
 import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
 import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
-import { ToastHost } from './toast';
+import { ToastHost, showToast } from './toast';
 import { describeFailure } from '../../api/backend-error';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
@@ -64,6 +64,8 @@ import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage'
 import { ClassroomHome } from '../classroom/ClassroomHome';
 import { ClassroomMode } from '../classroom/ClassroomMode';
 import { generateLessonSummary } from '../classroom/classroom-api';
+import { FocusPointsPage } from '../focus/FocusPointsPage';
+import { createFocusItem } from '../focus/focus-api';
 import {
   REHEARSAL_REQUIRES_ROUND_HINT,
   hasCompletedConversationRound,
@@ -74,7 +76,7 @@ import { hasDesktopBridge } from '../../types/desktop-bridge';
 import {
   conversationStore,
   type ConversationAttachment,
-  type ConversationHistoryPage,
+  type ConversationMessages,
   type ConversationHistoryMessage,
   type ConversationToolActivity,
 } from './conversation-store';
@@ -86,6 +88,19 @@ function truncateConversationTitle(title: string): string {
   const characters = Array.from(title);
   if (characters.length <= CONVERSATION_HEADER_TITLE_LIMIT) return title;
   return `${characters.slice(0, CONVERSATION_HEADER_TITLE_LIMIT - 1).join('')}…`;
+}
+
+/** Resolves the assistant message wrapper that owns a selection node. */
+function findAssistantMessageNode(node: Node): HTMLElement | null {
+  const element =
+    node.nodeType === Node.ELEMENT_NODE
+      ? (node as Element)
+      : node.parentElement;
+  return (
+    element?.closest<HTMLElement>(
+      '[data-message-role="assistant"][data-message-id]',
+    ) ?? null
+  );
 }
 
 /** Loads persisted conversation history into the long-lived Agent runtime. */
@@ -138,15 +153,20 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
-  const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
-  const [isLoadingEarlierMessages, setIsLoadingEarlierMessages] = useState(false);
-  const [earlierMessagesError, setEarlierMessagesError] = useState<string | null>(null);
-  const [historyPageRevision, setHistoryPageRevision] = useState(0);
+  /** Selection inside one assistant reply, with the viewport position of the action button. */
+  const [focusSelection, setFocusSelection] = useState<{
+    conversationId: string;
+    messageId: string;
+    messageIndex: number;
+    quote: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [isSavingFocus, setIsSavingFocus] = useState(false);
   const [hasLoadedInitialList, setHasLoadedInitialList] = useState(false);
   const requestVersion = useRef(0);
   const restoredInitialConversation = useRef(false);
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
-  const pendingScrollAnchor = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const slashMenu = useSlashCommandMenu(composerInputRef);
   const composerCommand = useSyncExternalStore(
@@ -169,20 +189,51 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     void artifactListStore.load(conversationState.activeConversationId);
   }, [conversationState.activeConversationId, liveArtifactToken]);
 
-  /** Fetches one history snapshot and replaces the visible local thread on success. */
-  const loadConversation = useCallback(async (conversationId: string) => {
+  /** Scrolls to one message after the complete history renders, then flashes it briefly. */
+  const scrollToMessage = useCallback((messageId: string, version: number) => {
+    let attempts = 0;
+    const tryScroll = (): void => {
+      if (version !== requestVersion.current) return;
+      const viewport = messageViewportRef.current;
+      const target = viewport?.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(messageId)}"]`,
+      );
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'auto' });
+        target.classList.add('tf-focus-target');
+        // The thread may settle its own scroll one frame later; re-assert once.
+        window.setTimeout(() => target.scrollIntoView({ block: 'center', behavior: 'auto' }), 150);
+        window.setTimeout(() => target.classList.remove('tf-focus-target'), 2400);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 300) {
+        window.requestAnimationFrame(tryScroll);
+        return;
+      }
+      showToast('没有找到这条消息，可能已被删除。');
+    };
+    window.requestAnimationFrame(tryScroll);
+  }, []);
+
+  /** Fetches the complete history and optionally scrolls to a saved focus message. */
+  const loadConversation = useCallback(async (
+    conversationId: string,
+    anchorMessageId?: string,
+  ) => {
     await runtime.threads.switchToThread(conversationId);
     const threadRuntime = runtime.threads.getById(conversationId);
     // A visited background thread already owns its live message repository. Reloading persisted
     // history into it would reset the repository while its SSE adapter is still appending deltas.
     if (threadRuntime.getState().isRunning) {
       conversationStore.setActiveConversationId(conversationId);
+      if (anchorMessageId) {
+        showToast('会话正在生成，暂时无法定位到这条消息。');
+      }
       return;
     }
     const version = ++requestVersion.current;
     setLoadingConversationId(conversationId);
-    setIsLoadingEarlierMessages(false);
-    setEarlierMessagesError(null);
     setHistoryError(null);
     setHistoryErrorConversationId(null);
     let failureMessage = '历史消息加载失败，请重试。';
@@ -198,7 +249,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
     let httpStatus: number | null = null;
     try {
-      const response = await window.teachforge.request<ConversationHistoryPage>({
+      const response = await window.teachforge.request<ConversationMessages>({
         method: 'GET',
         path: `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
       });
@@ -233,13 +284,12 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         failureMessage = `历史消息加载失败（HTTP ${response.status}），请重试。`;
         throw new Error(failureMessage);
       }
-      if (!isConversationHistoryPage(response.data)) {
+      if (!isConversationMessages(response.data)) {
         failureMessage = '历史消息响应格式异常，请重试。';
         throw new Error(failureMessage);
       }
       if (version !== requestVersion.current) return;
 
-      pendingScrollAnchor.current = null;
       restoreHistoryToolActivities(response.data.messages);
       restoreHistoryAttachments(response.data.messages);
       artifactHistoryStore.setFromHistory(response.data.messages);
@@ -247,8 +297,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       // The history footer now owns this conversation's files.
       agentEventBus.clearArtifacts(conversationId);
       threadRuntime.reset(response.data.messages.map(toThreadMessage));
-      setHasEarlierMessages(response.data.hasMore);
       conversationStore.setActiveConversationId(conversationId);
+      if (anchorMessageId) scrollToMessage(anchorMessageId, version);
     } catch (error) {
       if (version !== requestVersion.current) return;
       const bridgeUnavailable = !hasDesktopBridge();
@@ -265,111 +315,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     } finally {
       if (version === requestVersion.current) setLoadingConversationId(null);
     }
-  }, [runtime]);
-
-  /** Loads and prepends the page immediately before the oldest visible message. */
-  const loadEarlierMessages = useCallback(async () => {
-    if (isRunning || isLoadingEarlierMessages || !hasEarlierMessages) return;
-    const conversationId = conversationStore.getSnapshot().activeConversationId;
-    if (!conversationId) return;
-    const threadRuntime = runtime.threads.getById(conversationId);
-    const currentMessages = threadRuntime.getState().messages;
-    const beforeMessageId = currentMessages[0]?.id;
-    if (!conversationId || !beforeMessageId) return;
-
-    const version = requestVersion.current;
-    setIsLoadingEarlierMessages(true);
-    setEarlierMessagesError(null);
-    let httpStatus: number | null = null;
-    let failureMessage = '更早的消息加载失败，请重试。';
-
-    if (!hasDesktopBridge()) {
-      failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
-      setEarlierMessagesError(failureMessage);
-      setIsLoadingEarlierMessages(false);
-      console.error('[TeachForge][conversation.history.earlier] desktop_bridge_unavailable');
-      return;
-    }
-
-    try {
-      const response = await window.teachforge.request<ConversationHistoryPage>({
-        method: 'GET',
-        path: `/api/conversations/${encodeURIComponent(conversationId)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`,
-      });
-      httpStatus = response.status;
-      if (response.status === 404) {
-        await conversationStore.refresh();
-        if (version !== requestVersion.current) return;
-        failureMessage = '该会话已不存在，对话列表已刷新。';
-        throw new Error(failureMessage);
-      }
-      if (response.status !== 200) {
-        failureMessage = `更早的消息加载失败（HTTP ${response.status}），请重试。`;
-        throw new Error(failureMessage);
-      }
-      if (!isConversationHistoryPage(response.data)) {
-        failureMessage = '历史消息响应格式异常，请重试。';
-        throw new Error(failureMessage);
-      }
-      if (version !== requestVersion.current) return;
-
-      if (response.data.messages.length === 0) {
-        setHasEarlierMessages(false);
-        return;
-      }
-
-      restoreHistoryToolActivities(response.data.messages);
-      restoreHistoryAttachments(response.data.messages);
-      artifactHistoryStore.mergeFromHistory(response.data.messages);
-      const latestMessages = threadRuntime.getState().messages;
-      const latestMessageIds = new Set(latestMessages.map(({ id }) => id));
-      const earlierThreadMessages = response.data.messages
-        .map(toThreadMessage)
-        .filter(({ id }) => !id || !latestMessageIds.has(id));
-      if (earlierThreadMessages.length === 0) {
-        setHasEarlierMessages(false);
-        return;
-      }
-
-      const viewport = messageViewportRef.current;
-      if (viewport) {
-        pendingScrollAnchor.current = {
-          scrollHeight: viewport.scrollHeight,
-          scrollTop: viewport.scrollTop,
-        };
-      }
-      threadRuntime.reset([...earlierThreadMessages, ...latestMessages]);
-      setHasEarlierMessages(response.data.hasMore);
-      setHistoryPageRevision((revision) => revision + 1);
-    } catch (error) {
-      if (version !== requestVersion.current) return;
-      const bridgeUnavailable = !hasDesktopBridge();
-      if (bridgeUnavailable) {
-        failureMessage = '浏览器预览无法读取本地会话，请通过 TeachForge 桌面应用打开。';
-      }
-      console.error('[TeachForge][conversation.history.earlier] load_failed', {
-        code: bridgeUnavailable ? 'desktop_bridge_unavailable' : 'history_request_failed',
-        httpStatus,
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-      });
-      setEarlierMessagesError(failureMessage);
-    } finally {
-      if (version === requestVersion.current) {
-        setIsLoadingEarlierMessages(false);
-      }
-    }
-  }, [hasEarlierMessages, isLoadingEarlierMessages, isRunning, runtime]);
-
-  /** Restores the first visible message after older rows are prepended. */
-  useLayoutEffect(() => {
-    const anchor = pendingScrollAnchor.current;
-    const viewport = messageViewportRef.current;
-    if (!anchor || !viewport) return;
-
-    viewport.scrollTop =
-      anchor.scrollTop + viewport.scrollHeight - anchor.scrollHeight;
-    pendingScrollAnchor.current = null;
-  }, [historyPageRevision]);
+  }, [runtime, scrollToMessage]);
 
   /** Loads sidebar rows when the Agent page first mounts. */
   useEffect(() => {
@@ -395,13 +341,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       // `reset()` emits assistant-ui's initialize event even for an empty repository. On a remote
       // draft that event calls the adapter's `initialize()` and would persist a Conversation before
       // the teacher sends anything. The seeded draft is already empty, so leave it untouched.
-      setHasEarlierMessages(false);
       return;
     }
     if (!conversationState.conversations.some(({ id }) => id === savedConversationId)) {
       conversationStore.setActiveConversationId(null);
       // See the empty-draft note above: clearing a stale selection must not materialize it remotely.
-      setHasEarlierMessages(false);
       return;
     }
 
@@ -413,9 +357,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     void runtime.threads.switchToNewThread();
     requestVersion.current += 1;
     setLoadingConversationId(null);
-    setIsLoadingEarlierMessages(false);
-    setHasEarlierMessages(false);
-    setEarlierMessagesError(null);
     setHistoryError(null);
     setHistoryErrorConversationId(null);
     conversationStore.setActiveConversationId(null);
@@ -425,7 +366,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     artifactHistoryStore.clear();
     artifactTabsStore.reset();
     agentEventBus.clearArtifacts();
-  }, [isRunning, runtime]);
+  }, [runtime]);
 
   /**
    * Deletes one conversation and clears the thread when it was the one on screen.
@@ -450,9 +391,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
       requestVersion.current += 1;
       setLoadingConversationId(null);
-      setIsLoadingEarlierMessages(false);
-      setHasEarlierMessages(false);
-      setEarlierMessagesError(null);
       composerCommandStore.reset();
       composerAttachmentStore.reset();
       sentAttachmentStore.reset();
@@ -469,6 +407,137 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const renameConversation = useCallback(async (conversationId: string, title: string) => {
     await conversationStore.renameConversation(conversationId, title);
   }, []);
+
+  /** Captures a selection inside one assistant reply and anchors the action button to it. */
+  useEffect(() => {
+    if (activeView !== 'chat' || conversationDisplayMode !== 'conversation') {
+      setFocusSelection(null);
+      return;
+    }
+
+    /**
+     * Reads the finished selection regardless of where the pointer was released.
+     *
+     * Releasing over the sidebar or page margin must not discard a valid selection: the range, not
+     * the mouseup target, decides whether the action applies.
+     */
+    const handleMouseUp = (): void => {
+      const viewport = messageViewportRef.current;
+      if (!viewport || isRunning) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setFocusSelection(null);
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const startMessage = findAssistantMessageNode(range.startContainer);
+      const endMessage = findAssistantMessageNode(range.endContainer);
+      const messageId = startMessage?.dataset.messageId;
+      const conversationId = conversationStore.getSnapshot().activeConversationId;
+      const quote = selection.toString().trim();
+      if (
+        !startMessage ||
+        startMessage !== endMessage ||
+        !viewport.contains(startMessage) ||
+        !messageId ||
+        !conversationId ||
+        !quote
+      ) {
+        setFocusSelection(null);
+        return;
+      }
+      if (Array.from(quote).length > 1000) {
+        setFocusSelection(null);
+        showToast('选中内容过长，请分次添加。');
+        return;
+      }
+
+      const threadRuntime = runtime.threads.getById(conversationId);
+      const messageIndex =
+        threadRuntime
+          .getState()
+          .messages.findIndex((message) => message.id === messageId) + 1;
+      const rect = range.getBoundingClientRect();
+      if (messageIndex < 1 || (rect.width === 0 && rect.height === 0)) {
+        setFocusSelection(null);
+        return;
+      }
+
+      // Anchor the action to the first line of the selection. Users look at where they started
+      // selecting, not at the centre of a long multi-line code block.
+      const firstLine = range.getClientRects()[0];
+      const startRect =
+        firstLine && (firstLine.width > 0 || firstLine.height > 0)
+          ? firstLine
+          : rect;
+      const aboveTop = startRect.top - 48;
+      setFocusSelection({
+        conversationId,
+        messageId,
+        messageIndex,
+        quote,
+        top:
+          aboveTop >= 8
+            ? aboveTop
+            : Math.min(window.innerHeight - 44, startRect.bottom + 8),
+        left: Math.min(Math.max(8, startRect.left), window.innerWidth - 184),
+      });
+    };
+
+    // Any collapsed selection (clicking elsewhere) hides the action; the button itself keeps the
+    // range alive with `onMouseDown` preventDefault.
+    const handleSelectionChange = (): void => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setFocusSelection(null);
+      }
+    };
+
+    const handleScroll = (event: Event): void => {
+      if (event.target === messageViewportRef.current) {
+        setFocusSelection(null);
+      }
+    };
+
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [activeView, conversationDisplayMode, isRunning, runtime]);
+
+  /** Clears the action when the conversation or the view changes. */
+  useEffect(() => {
+    setFocusSelection(null);
+  }, [activeView, conversationState.activeConversationId]);
+
+  /** Saves the selected excerpt and confirms it with a toast. */
+  const addFocusFromSelection = useCallback(async (): Promise<void> => {
+    if (!focusSelection || isSavingFocus) return;
+    setIsSavingFocus(true);
+    try {
+      await createFocusItem({
+        conversationId: focusSelection.conversationId,
+        messageId: focusSelection.messageId,
+        quote: focusSelection.quote,
+        messageIndex: focusSelection.messageIndex,
+      });
+      showToast('已添加到重点关注');
+      window.getSelection()?.removeAllRanges();
+      setFocusSelection(null);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '添加失败，请重试。');
+    } finally {
+      setIsSavingFocus(false);
+    }
+  }, [focusSelection, isSavingFocus]);
 
   const isHistoryLoading = loadingConversationId !== null;
   /** Drills need a completed round, so the toggle and the view both follow that gate. */
@@ -594,6 +663,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 void loadConversation(conversationId);
               }}
             />
+          ) : activeView === 'focus' ? (
+            <FocusPointsPage
+              onOpenConversation={(conversationId, messageId) => {
+                setActiveView('chat');
+                setConversationDisplayMode('conversation');
+                void loadConversation(conversationId, messageId);
+              }}
+            />
           ) : activeView === 'classroom' ? (
             <ClassroomHome
               onEnterStage={(lessonId) =>
@@ -674,6 +751,29 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 </PageHeader>
 
+                {focusSelection && !isRehearsalMode && (
+                  <div
+                    className="fixed z-50"
+                    style={{ top: focusSelection.top, left: focusSelection.left }}
+                  >
+                    <button
+                      className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-float transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                      disabled={isSavingFocus}
+                      onClick={() => void addFocusFromSelection()}
+                      // Keep the text selected until the click handler reads it.
+                      onMouseDown={(event) => event.preventDefault()}
+                      type="button"
+                    >
+                      <BookmarkSimple
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0 text-honey-500"
+                        weight="fill"
+                      />
+                      添加到重点关注
+                    </button>
+                  </div>
+                )}
+
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <div
                     aria-hidden={isRehearsalMode}
@@ -713,35 +813,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                     className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 pr-1"
                     ref={messageViewportRef}
                   >
-                    {hasEarlierMessages && (
-                      <div
-                        className="flex shrink-0 flex-col items-center gap-2 py-2"
-                        data-search-ignore
-                      >
-                        {earlierMessagesError && (
-                          <div className="flex items-center gap-2 text-xs text-rose-700" role="alert">
-                            <span>{earlierMessagesError}</span>
-                            <button
-                              className="font-medium underline underline-offset-2"
-                              disabled={isLoadingEarlierMessages}
-                              onClick={() => void loadEarlierMessages()}
-                              type="button"
-                            >
-                              重试
-                            </button>
-                          </div>
-                        )}
-                        <button
-                          className="rounded-full border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-600 transition hover:border-ink-400 hover:text-ink-900 disabled:cursor-wait disabled:opacity-50"
-                          disabled={isLoadingEarlierMessages || isRunning}
-                          onClick={() => void loadEarlierMessages()}
-                          type="button"
-                        >
-                          {isLoadingEarlierMessages ? '正在加载更早的消息…' : '查看更早的消息'}
-                        </button>
-                      </div>
-                    )}
-
                     <AuiIf condition={(state) => state.thread.isEmpty}>
                       <EmptyState
                         className="my-auto"
@@ -797,7 +868,6 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       <ComposerPrimitive.Input
                         aria-label="发送给备课助手"
                         className="h-24 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-6 text-ink-900 outline-none placeholder:text-ink-400 tf-scrollbar"
-                        disabled={isLoadingEarlierMessages}
                         onKeyDown={slashMenu.handleKeyDown}
                         placeholder="写下你正在准备的内容或问题…输入 / 可查询资料库或发起探索主题"
                         ref={composerInputRef}
@@ -808,7 +878,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                       />
                       <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <AttachmentPickerButton disabled={isLoadingEarlierMessages} />
+                          <AttachmentPickerButton />
                           <span className="text-xs text-ink-500">Ctrl + Enter 发送</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -818,10 +888,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                             </ComposerPrimitive.Cancel>
                           </AuiIf>
                           <AuiIf condition={(state) => !state.thread.isRunning}>
-                            <ComposerPrimitive.Send
-                              className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={isLoadingEarlierMessages}
-                            >
+                            <ComposerPrimitive.Send className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40">
                               发送
                             </ComposerPrimitive.Send>
                           </AuiIf>
@@ -864,10 +931,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   );
 }
 
-/** Validates the stable response envelope used by the history paging API. */
-function isConversationHistoryPage(
+/** Validates the complete-history envelope returned by the conversation API. */
+function isConversationMessages(
   value: unknown,
-): value is ConversationHistoryPage {
+): value is ConversationMessages {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -876,11 +943,10 @@ function isConversationHistoryPage(
     return false;
   }
 
-  const page = value as Partial<ConversationHistoryPage>;
+  const page = value as Partial<ConversationMessages>;
   return (
     Array.isArray(page.messages) &&
-    page.messages.every(isConversationHistoryMessage) &&
-    typeof page.hasMore === 'boolean'
+    page.messages.every(isConversationHistoryMessage)
   );
 }
 
@@ -1235,7 +1301,11 @@ function AssistantMessage({ messageId }: { messageId: string }) {
 
   return (
     <MessagePrimitive.Root className="flex justify-start">
-      <div className="min-w-0 w-full max-w-full text-[15px] leading-7 text-ink-800">
+      <div
+        className="min-w-0 w-full max-w-full text-[15px] leading-7 text-ink-800"
+        data-message-id={messageId}
+        data-message-role="assistant"
+      >
         <MessagePrimitive.Parts>
           {({ part }) =>
             part.type === 'text' ? <AssistantMarkdown /> : null

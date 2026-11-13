@@ -4,6 +4,7 @@ import Database = require('better-sqlite3');
 import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { resolveTeachForgeDatabasePath } from '../platform/local-paths';
 import { ArtifactEntity } from '../artifacts/artifact.entity';
+import { FocusItemEntity } from '../focus-items/focus-item.entity';
 import { ConversationEntity } from '../conversations/conversation.entity';
 import { MessageEntity } from '../conversations/message.entity';
 import { PiSessionSnapshotEntity } from '../conversations/pi-session-snapshot.entity';
@@ -38,6 +39,7 @@ export function buildDatabaseOptions(): TypeOrmModuleOptions {
       DocumentChunkEntity,
       ArtifactEntity,
       LessonEntity,
+      FocusItemEntity,
     ],
     migrations: [join(__dirname, 'migrations/*{.js,.ts}')],
     migrationsRun: true,

@@ -41,10 +41,9 @@ export interface ConversationToolActivity {
   durationMs?: number;
 }
 
-/** Describes one bounded history page and whether an earlier page remains. */
-export interface ConversationHistoryPage {
+/** Describes the complete visible history of one conversation. */
+export interface ConversationMessages {
   messages: ConversationHistoryMessage[];
-  hasMore: boolean;
 }
 
 /** Exposes conversation list state to the Agent page and streamed adapter. */

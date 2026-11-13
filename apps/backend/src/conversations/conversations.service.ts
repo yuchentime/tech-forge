@@ -30,7 +30,7 @@ import { ConversationRunRegistry } from './conversation-run-registry';
 import type {
   ConversationAttachmentDto,
   ConversationGeneratedFileDto,
-  ConversationMessagePageDto,
+  ConversationMessagesDto,
   ConversationMessageDto,
   ConversationSummaryDto,
   ConversationToolActivityDto,
@@ -40,9 +40,6 @@ import {
   writeStructuredEvent,
   type RequestLogContext,
 } from '../logging/structured-logger';
-
-const CONVERSATION_HISTORY_PAGE_SIZE = 30;
-const CONVERSATION_HISTORY_SCAN_BATCH_SIZE = 64;
 
 /** User-supplied sidebar titles are short labels, counted in Unicode code points. */
 const CONVERSATION_TITLE_MAX_CHARACTERS = 20;
@@ -213,27 +210,7 @@ export class ConversationsService {
         return [];
       }
 
-      const firstUserMessages = await this.dataSource
-        .getRepository(MessageEntity)
-        .createQueryBuilder('message')
-        .select('message.conversationId', 'conversationId')
-        .addSelect('message.contentJson', 'contentJson')
-        .where('message.role = :userRole', { userRole: 'user' })
-        .andWhere(
-          `message.sequenceNo = (
-            SELECT MIN(firstUser.sequenceNo)
-            FROM messages firstUser
-            WHERE firstUser.conversationId = message.conversationId
-              AND firstUser.role = :userRole
-          )`,
-        )
-        .getRawMany<{ conversationId: string; contentJson: string }>();
-      const titleByConversationId = new Map(
-        firstUserMessages.map(({ conversationId, contentJson }) => [
-          conversationId,
-          extractDisplayTitle(contentJson),
-        ]),
-      );
+      const titleByConversationId = await this.loadDerivedTitles();
       const result = conversations.map((conversation) => ({
         id: conversation.id,
         title:
@@ -259,18 +236,91 @@ export class ConversationsService {
     }
   }
 
-  /** Returns one ordered text page with safe tool summaries on its user messages. */
+  /**
+   * Resolves the displayed sidebar title for a small set of conversations.
+   *
+   * The 重点关注 list uses this to reflect renames and the first-prompt fallback without storing a
+   * stale title snapshot on every focus row.
+   */
+  async getConversationDisplayTitles(
+    conversationIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    const ids = [...new Set(conversationIds)];
+    if (ids.length === 0) return new Map();
+
+    const conversations = await this.dataSource
+      .getRepository(ConversationEntity)
+      .createQueryBuilder('conversation')
+      .where('conversation.id IN (:...ids)', { ids })
+      .getMany();
+    const derived = await this.loadDerivedTitles(ids);
+    return new Map(
+      conversations.map((conversation) => [
+        conversation.id,
+        normalizeDisplayTitle(conversation.title) ??
+          derived.get(conversation.id) ??
+          '新对话',
+      ]),
+    );
+  }
+
+  /**
+   * Derives first-prompt titles, optionally restricted to the given conversations.
+   *
+   * Omitting the ids keeps the sidebar's original one-query behavior; the focus list passes only the
+   * conversations it renders.
+   */
+  private async loadDerivedTitles(
+    conversationIds?: readonly string[],
+  ): Promise<Map<string, string | undefined>> {
+    if (conversationIds !== undefined && conversationIds.length === 0) {
+      return new Map();
+    }
+
+    const query = this.dataSource
+      .getRepository(MessageEntity)
+      .createQueryBuilder('message')
+      .select('message.conversationId', 'conversationId')
+      .addSelect('message.contentJson', 'contentJson')
+      .where('message.role = :userRole', { userRole: 'user' })
+      .andWhere(
+        `message.sequenceNo = (
+          SELECT MIN(firstUser.sequenceNo)
+          FROM messages firstUser
+          WHERE firstUser.conversationId = message.conversationId
+            AND firstUser.role = :userRole
+        )`,
+      );
+    if (conversationIds !== undefined) {
+      query.andWhere('message.conversationId IN (:...conversationIds)', {
+        conversationIds: [...conversationIds],
+      });
+    }
+
+    const firstUserMessages = await query.getRawMany<{
+      conversationId: string;
+      contentJson: string;
+    }>();
+    return new Map(
+      firstUserMessages.map(({ conversationId, contentJson }) => [
+        conversationId,
+        extractDisplayTitle(contentJson),
+      ]),
+    );
+  }
+
+  /**
+   * Returns every visible message of one conversation in order.
+   *
+   * The local app loads the whole transcript so 重点关注 can scroll to an old message. Tool
+   * executions stay out of the visible list but are projected onto their user message.
+   */
   async getConversationMessages(
     conversationId: string,
-    beforeMessageId?: string,
     logContext?: RequestLogContext,
-  ): Promise<ConversationMessagePageDto> {
+  ): Promise<ConversationMessagesDto> {
     const startedAt = Date.now();
-    const context = {
-      ...logContext,
-      conversationId,
-      hasCursor: Boolean(beforeMessageId),
-    };
+    const context = { ...logContext, conversationId };
     writeStructuredEvent(
       this.logger,
       'log',
@@ -292,86 +342,39 @@ export class ConversationsService {
       }
 
       const messages = this.dataSource.getRepository(MessageEntity);
-      let beforeSequenceNo: number | null = null;
-      if (beforeMessageId) {
-        const anchor = await messages.findOneBy({
-          id: beforeMessageId,
-          conversationId,
-        });
-        if (!anchor) {
-          throw new BadRequestException(
-            'beforeMessageId must belong to the requested conversation.',
-          );
-        }
-        beforeSequenceNo = anchor.sequenceNo;
-      }
+      // 工具执行行不是可见聊天消息；一次读全 user/assistant，避免分页把定位目标截掉。
+      const rows = await messages
+        .createQueryBuilder('message')
+        .where('message.conversationId = :conversationId', { conversationId })
+        .andWhere('message.role IN (:...roles)', {
+          roles: ['user', 'assistant'],
+        })
+        .andWhere('message.status IN (:...statuses)', {
+          statuses: ['completed', 'failed', 'cancelled'],
+        })
+        .orderBy('message.sequenceNo', 'ASC')
+        .getMany();
 
-      const visibleRows: Array<{
-        message: MessageEntity;
-        content: string;
-      }> = [];
-      let scannedMessageCount = 0;
-      let queryBatchCount = 0;
-      let hasExhaustedCandidates = false;
+      const visibleRows = rows.flatMap((message) => {
+        const content = extractVisibleMessageText(message.contentJson);
+        return content.trim() ? [{ message, content }] : [];
+      });
 
-      while (
-        visibleRows.length < CONVERSATION_HISTORY_PAGE_SIZE + 1 &&
-        !hasExhaustedCandidates
-      ) {
-        // 工具执行行不是可见聊天消息；先分页 user/assistant，避免工具数量改变页大小和 hasMore。
-        const query = messages
-          .createQueryBuilder('message')
-          .where('message.conversationId = :conversationId', { conversationId })
-          .andWhere('message.role IN (:...roles)', {
-            roles: ['user', 'assistant'],
-          })
-          .andWhere('message.status IN (:...statuses)', {
-            statuses: ['completed', 'failed', 'cancelled'],
-          });
-        if (beforeSequenceNo !== null) {
-          query.andWhere('message.sequenceNo < :beforeSequenceNo', {
-            beforeSequenceNo,
-          });
-        }
-
-        const batch = await query
-          .orderBy('message.sequenceNo', 'DESC')
-          .take(CONVERSATION_HISTORY_SCAN_BATCH_SIZE)
-          .getMany();
-        queryBatchCount += 1;
-        scannedMessageCount += batch.length;
-        hasExhaustedCandidates =
-          batch.length < CONVERSATION_HISTORY_SCAN_BATCH_SIZE;
-
-        for (const message of batch) {
-          beforeSequenceNo = message.sequenceNo;
-          const content = extractVisibleMessageText(message.contentJson);
-          if (!content.trim()) continue;
-          visibleRows.push({ message, content });
-          if (visibleRows.length === CONVERSATION_HISTORY_PAGE_SIZE + 1) break;
-        }
-      }
-
-      const hasMore = visibleRows.length > CONVERSATION_HISTORY_PAGE_SIZE;
-      const pageRows = visibleRows
-        .slice(0, CONVERSATION_HISTORY_PAGE_SIZE)
-        .reverse();
-      // 先确定文本页，再补工具摘要；工具执行行不占用 30 条可见消息配额。
       const toolActivitiesByUserId = await this.getToolActivitiesByUserMessageId(
         conversationId,
-        pageRows
+        visibleRows
           .map(({ message }) => message)
           .filter((message) => message.role === 'user'),
         logContext,
       );
-      // 本轮产出的文件挂在响应消息上；页内找不到该轮最后一条 assistant 时跳过，翻到下一页再显示。
       const generatedFilesByAssistantId =
         await this.getGeneratedFilesByAssistantMessageId(
           conversationId,
-          pageRows.map(({ message }) => message),
+          visibleRows.map(({ message }) => message),
         );
-      const result: ConversationMessagePageDto = {
-        messages: pageRows.map(
+
+      const result: ConversationMessagesDto = {
+        messages: visibleRows.map(
           ({ message, content }): ConversationMessageDto => ({
             id: message.id,
             role: message.role as 'user' | 'assistant',
@@ -388,7 +391,6 @@ export class ConversationsService {
                 }),
           }),
         ),
-        hasMore,
       };
       writeStructuredEvent(
         this.logger,
@@ -396,14 +398,12 @@ export class ConversationsService {
         'conversations.messages.query.completed',
         {
           ...context,
-          scannedMessageCount,
-          queryBatchCount,
+          scannedMessageCount: rows.length,
           visibleMessageCount: result.messages.length,
           toolActivityCount: [...toolActivitiesByUserId.values()].reduce(
             (count, activities) => count + activities.length,
             0,
           ),
-          hasMore,
           elapsedMs: Date.now() - startedAt,
         },
       );
@@ -970,6 +970,10 @@ export class ConversationsService {
           conversationId,
         ]);
         await manager.query('DELETE FROM "conversation_documents" WHERE "conversationId" = ?', [
+          conversationId,
+        ]);
+        // 重点关注引用会话与消息；会话删除后这些摘录没有可定位的目标。
+        await manager.query('DELETE FROM "focus_items" WHERE "conversationId" = ?', [
           conversationId,
         ]);
         await manager.query('DELETE FROM "messages" WHERE "conversationId" = ?', [
