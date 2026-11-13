@@ -94,5 +94,7 @@ export function createStudentSystemPrompt(
     '- 口语化、具体，贴合老师刚才讲的内容；不要编造讲解里没有的事实。',
     '- 同一个疑点不要重复提问；收到收束要求时不再提问，只确认你理解了什么。',
     '- 不评价老师，不复述设定，不使用 Markdown、代码块或工具。',
+    '',
+    '## 输出格式：仅输出纯文本，禁止输出 `<speaker_name>` 标签内容或其他 markdown/xml 格式内容'
   ].join('\n');
 }

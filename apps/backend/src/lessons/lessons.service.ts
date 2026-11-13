@@ -196,8 +196,6 @@ export class LessonsService {
       {
         pointStartMessageId: state.startMessageId,
         pointLabel: state.label,
-        pointClosed: state.closed,
-        pointUpdatedAt: new Date(),
       },
     );
   }

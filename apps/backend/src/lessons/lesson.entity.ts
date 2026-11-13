@@ -41,13 +41,6 @@ export class LessonEntity {
   @Column({ type: 'varchar', nullable: true })
   pointLabel!: string | null;
 
-  /** True once the point reached its student-turn cap; later turns only acknowledge. */
-  @Column({ type: 'boolean', default: false })
-  pointClosed!: boolean;
-
-  @Column({ type: 'datetime', nullable: true })
-  pointUpdatedAt!: Date | null;
-
   @CreateDateColumn({ type: 'datetime' })
   createdAt!: Date;
 

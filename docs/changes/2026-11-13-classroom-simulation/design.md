@@ -103,8 +103,8 @@ sequenceDiagram
 
 - 名册由 `CLASSROOM_STUDENTS` 生成，避免提示词与代码漂移。
 - 选人规则：优先最近没发言的学生；上一位学生的问题还没被老师回应时可以继续选他；三人轮完后重新轮转；需要收束时优先最近提问的学生。
-- 知识点：同时判断 `mode=new|continue`，`new` 时给出 ≤20 字 `pointLabel`；状态机与上限见 [point-state.md](point-state.md)。
-- 输出 `{"student":"su","mode":"continue","pointLabel":null}`；`student` 仅接受三名学生，`mode` 非法按 `continue`；非 JSON、缺字段、非法 id 一律抛错，不做修复或随机兜底。
+- 知识点：导演输出 `pointLabel`、`done`、`nextStudent`、`nextFocus`；标签变化即新点；收束后代码按提名（非法则发言最少→随机）让另一名学生提出新点问题；上限与轮次见 [point-state.md](point-state.md)。
+- 输出 `{"student":"su","pointLabel":"缓存雪崩","done":false,"nextStudent":"lin","nextFocus":"…"}`；`student/nextStudent` 仅接受三名学生，`done` 为布尔；非 JSON、缺字段、非法 id 一律抛错，不做修复或随机兜底。
 
 **学生**
 

@@ -10,13 +10,19 @@ import {
   type ClassroomStudentId,
 } from '../lessons/classroom-students';
 import {
-  MAX_POINT_STUDENT_TURNS,
+  MAX_POINT_TURNS,
   countPointTurns,
+  countPointTurnsByStudent,
+  normalizePointLabel,
   resolvePointTurn,
+  selectNextQuestioner,
   type LessonPointState,
   type ResolvedPointTurn,
 } from '../lessons/lesson-point';
-import type { ClassroomTurnResult } from '../lessons/lesson.types';
+import type {
+  ClassroomTurnResult,
+  LessonMessage,
+} from '../lessons/lesson.types';
 import {
   formatSpeakerSequence,
   formatTranscript,
@@ -34,6 +40,7 @@ import {
   CLASSROOM_TRANSCRIPT_CHAR_LIMIT,
   CLASSROOM_TRANSCRIPT_MESSAGE_LIMIT,
   buildDirectorPrompt,
+  buildNextPointQuestionPrompt,
   buildStudentPrompt,
   parseDirectorDecision,
   type DirectorDecision,
@@ -125,7 +132,6 @@ export class ClassroomSimulationAgent {
       const pointState: LessonPointState = {
         startMessageId: lesson.pointStartMessageId,
         label: lesson.pointLabel,
-        closed: lesson.pointClosed,
       };
       const currentTurns = countPointTurns(
         lessonMessages,
@@ -135,6 +141,7 @@ export class ClassroomSimulationAgent {
       let studentId: ClassroomStudentId;
       let reply: string;
       let pointTurn: ResolvedPointTurn | undefined;
+      let decision: DirectorDecision | undefined;
       try {
         const environment = await resolvePiAgentEnvironment(
           this.deepseekAdapter,
@@ -146,28 +153,39 @@ export class ClassroomSimulationAgent {
           'off',
         );
         const directorSession = session;
-        const decision = await this.selectNextStudent(
+        const resolvedDecision = await this.selectNextStudent(
           directorSession,
           transcript,
           speakerSequence,
           {
             label: pointState.label,
             turns: currentTurns,
-            closed: pointState.closed,
-            maxTurns: MAX_POINT_STUDENT_TURNS,
+            maxTurns: MAX_POINT_TURNS,
           },
           {
             ...options,
             timeoutMs: options.timeoutMs ?? DIRECTOR_TIMEOUT_MS,
           },
         );
-        studentId = decision.student as ClassroomStudentId;
+        decision = resolvedDecision;
+        studentId = resolvedDecision.student as ClassroomStudentId;
         pointTurn = resolvePointTurn({
           state: pointState,
           messages: lessonMessages,
           teacherMessage,
-          decision,
-          maxTurns: MAX_POINT_STUDENT_TURNS,
+          decision: resolvedDecision,
+          maxTurns: MAX_POINT_TURNS,
+        });
+        this.logger.log({
+          event: 'classroom.point.decision',
+          requestId,
+          lessonId: lesson.id,
+          done: resolvedDecision.done,
+          labelChanged: pointTurn.started,
+          turns: pointTurn.turns,
+          pointLabelChars: pointTurn.state.label
+            ? Array.from(pointTurn.state.label).length
+            : 0,
         });
         reply = await this.studentReply(
           studentId,
@@ -177,7 +195,7 @@ export class ClassroomSimulationAgent {
             label: pointTurn.state.label,
             turns: pointTurn.turns,
             forceClose: pointTurn.forceClose,
-            maxTurns: MAX_POINT_STUDENT_TURNS,
+            maxTurns: MAX_POINT_TURNS,
           },
           {
             ...options,
@@ -195,7 +213,73 @@ export class ClassroomSimulationAgent {
       );
       // Persist the point state only after the student's line exists, so a failed turn cannot
       // mark a point closed (or started) without the reply it describes.
-      if (pointTurn?.started) {
+      let nextMessage: LessonMessage | undefined;
+      if (pointTurn?.forceClose) {
+        this.logger.log({
+          event: 'classroom.point.closed',
+          requestId,
+          lessonId: lesson.id,
+          pointTurns: pointTurn.turns,
+        });
+        const counts = countPointTurnsByStudent(
+          [...lessonMessages, studentMessage],
+          pointTurn.state.startMessageId,
+        );
+        const nextStudentId = selectNextQuestioner({
+          directorChoice: decision?.nextStudent,
+          closer: studentId,
+          counts,
+        });
+        const nextTranscript = formatTranscript(
+          [...lessonMessages, studentMessage],
+          {
+            limit: CLASSROOM_TRANSCRIPT_MESSAGE_LIMIT,
+            charLimit: CLASSROOM_TRANSCRIPT_CHAR_LIMIT,
+          },
+        );
+        try {
+          const question = await this.nextPointQuestion(
+            nextStudentId,
+            nextTranscript,
+            pointTurn.state.label,
+            decision?.nextFocus ?? null,
+            requestId,
+            options,
+          );
+          nextMessage = await this.lessons.appendMessage(
+            lesson.id,
+            nextStudentId,
+            question,
+          );
+          const label =
+            normalizePointLabel(decision?.nextFocus) ??
+            normalizePointLabel(question) ??
+            pointTurn.state.label;
+          await this.lessons.savePointState(lesson.id, {
+            startMessageId: nextMessage.id,
+            label,
+          });
+          this.logger.log({
+            event: 'classroom.point.next_question',
+            requestId,
+            lessonId: lesson.id,
+            studentId: nextStudentId,
+            oldLabelChars: pointTurn.state.label
+              ? Array.from(pointTurn.state.label).length
+              : 0,
+            newLabelChars: label ? Array.from(label).length : 0,
+          });
+        } catch (error) {
+          // The closing line is already durable; a failed next question must not fail the turn.
+          this.logger.error({
+            event: 'classroom.point.next_question.failed',
+            requestId,
+            lessonId: lesson.id,
+            studentId: nextStudentId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else if (pointTurn?.started) {
         await this.lessons.savePointState(lesson.id, pointTurn.state);
         this.logger.log({
           event: 'classroom.point.started',
@@ -205,19 +289,12 @@ export class ClassroomSimulationAgent {
             ? Array.from(pointTurn.state.label).length
             : 0,
         });
-      } else if (pointTurn?.forceClose) {
-        await this.lessons.savePointState(lesson.id, {
-          ...pointTurn.state,
-          closed: true,
-        });
-        this.logger.log({
-          event: 'classroom.point.closed',
-          requestId,
-          lessonId: lesson.id,
-          pointTurns: pointTurn.turns,
-        });
       }
-      const messages = [...lessonMessages, studentMessage];
+      const messages = [
+        ...lessonMessages,
+        studentMessage,
+        ...(nextMessage ? [nextMessage] : []),
+      ];
 
       outcome = 'completed';
       this.logger.log({
@@ -290,6 +367,34 @@ export class ClassroomSimulationAgent {
       signal: options.signal,
       timeoutMs: options.timeoutMs,
     });
+  }
+
+  /** Generates the question that opens the next knowledge point after a close. */
+  private async nextPointQuestion(
+    studentId: ClassroomStudentId,
+    transcript: string,
+    oldLabel: string | null,
+    nextFocus: string | null,
+    requestId: string,
+    options: ClassroomSimulationOptions,
+  ): Promise<string> {
+    const student = CLASSROOM_STUDENTS[studentId];
+    const agent = this.studentAgent.createAgent(
+      createStudentSystemPrompt(student),
+    );
+    return agent.run(
+      buildNextPointQuestionPrompt({
+        transcript,
+        studentName: student.name,
+        oldLabel,
+        nextFocus,
+      }),
+      {
+        requestId,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs ?? STUDENT_TIMEOUT_MS,
+      },
+    );
   }
 
   /** Disposes one session without letting a cleanup failure mask the turn's own result. */

@@ -12,9 +12,11 @@ const buildDirectory = resolve(
 );
 const load = (modulePath) => require(join(buildDirectory, modulePath));
 const {
-  MAX_POINT_STUDENT_TURNS,
+  MAX_POINT_TURNS,
   countPointTurns,
+  countPointTurnsByStudent,
   resolvePointTurn,
+  selectNextQuestioner,
 } = load('lessons/lesson-point.js');
 const { parseDirectorDecision } = load(
   'llm/classroom-simulation.prompt.js',
@@ -25,7 +27,7 @@ function message(id, speaker, text = '内容') {
   return { id, speaker, text, createdAt: '2026-01-01T00:00:00.000Z' };
 }
 
-const emptyState = { startMessageId: null, label: null, closed: false };
+const emptyState = { startMessageId: null, label: null };
 
 test('a lesson without state starts a point from the teacher message', () => {
   const teacher = message('t1', 'teacher', '老师讲解缓存雪崩');
@@ -33,7 +35,7 @@ test('a lesson without state starts a point from the teacher message', () => {
     state: emptyState,
     messages: [teacher],
     teacherMessage: teacher,
-    decision: { mode: 'continue', pointLabel: null },
+    decision: { pointLabel: null, done: false },
   });
   assert.equal(result.started, true);
   assert.equal(result.forceClose, false);
@@ -42,110 +44,170 @@ test('a lesson without state starts a point from the teacher message', () => {
   assert.equal(result.state.label, '老师讲解缓存雪崩');
 });
 
-test('the director can name a new point', () => {
+test('the director label becomes the status bar', () => {
   const teacher = message('t1', 'teacher', '老师讲解');
   const result = resolvePointTurn({
     state: emptyState,
     messages: [teacher],
     teacherMessage: teacher,
-    decision: { mode: 'new', pointLabel: '缓存雪崩的触发条件' },
+    decision: { pointLabel: '缓存雪崩的触发条件', done: false },
   });
   assert.equal(result.state.label, '缓存雪崩的触发条件');
-  assert.equal(result.state.closed, false);
 });
 
-test('student turns are derived from the transcript and close at the cap', () => {
-  const state = { startMessageId: 't1', label: '缓存雪崩', closed: false };
+test('the same label continues and counts student turns', () => {
+  const state = { startMessageId: 't1', label: '缓存雪崩' };
   const teacher1 = message('t1', 'teacher', '讲解');
   const student1 = message('s1', 'lin', '问题一');
   const teacher2 = message('t2', 'teacher', '回答一');
   const student2 = message('s2', 'su', '问题二');
   const teacher3 = message('t3', 'teacher', '回答二');
+  const messages = [teacher1, student1, teacher2, student2, teacher3];
 
-  assert.equal(countPointTurns([teacher1, student1], 't1'), 1);
-  assert.equal(
-    countPointTurns([teacher1, student1, teacher2, student2], 't1'),
-    2,
-  );
-
-  const atCap = resolvePointTurn({
+  assert.equal(countPointTurns(messages, 't1'), 2);
+  const result = resolvePointTurn({
     state,
-    messages: [teacher1, student1, teacher2, student2, teacher3],
+    messages,
     teacherMessage: teacher3,
-    decision: { mode: 'continue', pointLabel: null },
+    decision: { pointLabel: '缓存雪崩', done: false },
   });
-  assert.equal(atCap.turns, MAX_POINT_STUDENT_TURNS);
-  assert.equal(atCap.forceClose, true);
-  assert.equal(atCap.started, false);
+  assert.equal(result.started, false);
+  assert.equal(result.turns, 2);
+  assert.equal(result.forceClose, false);
 });
 
-test('a closed point stays closed until a new point starts', () => {
-  const closedState = {
-    startMessageId: 't1',
-    label: '缓存雪崩',
-    closed: true,
-  };
-  const teacher = message('t2', 'teacher', '继续讲同一个点');
-  const continued = resolvePointTurn({
-    state: closedState,
+test('the director can close the point at any turn', () => {
+  const state = { startMessageId: 't1', label: '缓存雪崩' };
+  const teacher = message('t2', 'teacher', '回答');
+  const result = resolvePointTurn({
+    state,
     messages: [message('t1', 'teacher'), message('s1', 'lin'), teacher],
     teacherMessage: teacher,
-    decision: { mode: 'continue', pointLabel: null },
+    decision: { pointLabel: '缓存雪崩', done: true },
   });
-  assert.equal(continued.forceClose, true);
+  assert.equal(result.forceClose, true);
+  assert.equal(result.started, false);
+});
 
-  const restarted = resolvePointTurn({
-    state: closedState,
+test('five student turns are the hard cap', () => {
+  const state = { startMessageId: 't1', label: '缓存雪崩' };
+  const messages = [message('t1', 'teacher')];
+  for (let index = 1; index <= MAX_POINT_TURNS; index += 1) {
+    messages.push(message(`s${index}`, index % 2 === 0 ? 'su' : 'lin'));
+    if (index < MAX_POINT_TURNS) {
+      messages.push(message(`t${index + 1}`, 'teacher'));
+    }
+  }
+  const teacher = message('last-teacher', 'teacher', '继续');
+  messages.push(teacher);
+
+  const result = resolvePointTurn({
+    state,
+    messages,
+    teacherMessage: teacher,
+    decision: { pointLabel: '缓存雪崩', done: false },
+  });
+  assert.equal(result.turns, MAX_POINT_TURNS);
+  assert.equal(result.forceClose, true);
+});
+
+test('a changed label starts a new point and ignores done', () => {
+  const state = { startMessageId: 't1', label: '缓存雪崩' };
+  const teacher = message('t2', 'teacher', '接下来讲缓存穿透');
+  const result = resolvePointTurn({
+    state,
     messages: [message('t1', 'teacher'), message('s1', 'lin'), teacher],
     teacherMessage: teacher,
-    decision: { mode: 'new', pointLabel: '新的知识点' },
+    decision: { pointLabel: '缓存穿透', done: true },
   });
-  assert.equal(restarted.started, true);
-  assert.equal(restarted.forceClose, false);
-  assert.equal(restarted.state.startMessageId, 't2');
-  assert.equal(restarted.state.label, '新的知识点');
+  assert.equal(result.started, true);
+  assert.equal(result.forceClose, false);
+  assert.equal(result.turns, 0);
+  assert.equal(result.state.startMessageId, 't2');
+  assert.equal(result.state.label, '缓存穿透');
 });
 
 test('a missing start message restarts the point instead of miscounting', () => {
   const teacher = message('t9', 'teacher', '新的讲解');
   const result = resolvePointTurn({
-    state: { startMessageId: 'gone', label: '旧点', closed: true },
+    state: { startMessageId: 'gone', label: '旧点' },
     messages: [teacher],
     teacherMessage: teacher,
-    decision: { mode: 'continue', pointLabel: null },
+    decision: { pointLabel: '旧点', done: false },
   });
   assert.equal(result.started, true);
   assert.equal(result.forceClose, false);
   assert.equal(result.state.startMessageId, 't9');
 });
 
-test('labels are clipped to 40 code points', () => {
-  const teacher = message('t1', 'teacher', '讲'.repeat(80));
-  const result = resolvePointTurn({
-    state: emptyState,
-    messages: [teacher],
-    teacherMessage: teacher,
-    decision: { mode: 'new', pointLabel: '新'.repeat(80) },
-  });
-  assert.equal(Array.from(result.state.label).length, 41); // 40 + ellipsis
-});
-
-test('the director parser tolerates a missing mode and validates new labels', () => {
+test('the director parser defaults done to false and validates the label', () => {
   assert.deepEqual(parseDirectorDecision('{"student":"lin"}'), {
     student: 'lin',
-    mode: 'continue',
     pointLabel: null,
+    done: false,
+    nextStudent: undefined,
+    nextFocus: null,
   });
   assert.deepEqual(
-    parseDirectorDecision('{"student":"su","mode":"new","pointLabel":" 新点 "}'),
-    { student: 'su', mode: 'new', pointLabel: '新点' },
-  );
-  assert.equal(
-    parseDirectorDecision('{"student":"gu","mode":"other"}').mode,
-    'continue',
+    parseDirectorDecision(
+      '{"student":"su","pointLabel":" 新点 ","done":true,"nextStudent":"lin","nextFocus":" 重试 "}',
+    ),
+    {
+      student: 'su',
+      pointLabel: '新点',
+      done: true,
+      nextStudent: 'lin',
+      nextFocus: '重试',
+    },
   );
   assert.throws(
     () => parseDirectorDecision('not json'),
     /unusable answer/,
+  );
+});
+
+test('per-student counts are derived from the transcript', () => {
+  const messages = [
+    message('t1', 'teacher'),
+    message('s1', 'lin'),
+    message('t2', 'teacher'),
+    message('s2', 'su'),
+    message('s3', 'lin'),
+  ];
+  assert.deepEqual(countPointTurnsByStudent(messages, 't1'), {
+    su: 1,
+    lin: 2,
+    gu: 0,
+  });
+});
+
+test('the director nomination picks the next questioner when valid', () => {
+  const choice = selectNextQuestioner({
+    directorChoice: 'su',
+    closer: 'lin',
+    counts: { su: 2, lin: 2, gu: 0 },
+  });
+  assert.equal(choice, 'su');
+});
+
+test('an invalid or same-student nomination falls back to the fewest turns', () => {
+  const counts = { su: 1, lin: 2, gu: 1 };
+  assert.equal(
+    selectNextQuestioner({
+      directorChoice: 'lin',
+      closer: 'lin',
+      counts,
+      random: () => 0,
+    }),
+    'su',
+  );
+  assert.equal(
+    selectNextQuestioner({
+      directorChoice: 'unknown',
+      closer: 'lin',
+      counts,
+      random: () => 0.99,
+    }),
+    'gu',
   );
 });

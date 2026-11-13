@@ -65,7 +65,7 @@ flowchart LR
 |---|---|
 | `text` | 必填字符串；trim 后 1–20000 字符，超长 400；纯空白 400 |
 
-返回 `200`：与消息列表端点同形（`lessonId/status/integrity/messages`），每条消息带 `speaker/role/name`，前端可直接替换列表，不需要二次请求。
+返回 `200`：与消息列表端点同形（`lessonId/status/integrity/messages`），每条消息带 `speaker/role/name`，前端可直接替换列表；收束轮可能一次返回收束确认 + 新知识点问题两条学生消息。
 
 行为：
 

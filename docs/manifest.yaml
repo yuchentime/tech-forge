@@ -23,7 +23,7 @@ routes:
       - docs/current/domains/artifacts/index.md
     history_on_demand: []
   classroom-simulation:
-    description: "Run one classroom simulation turn end to end: append the teacher message to a per-lesson JSONL transcript, let a tool-less, thinking-off director session pick the next student with JSON, let that student agent reply, and append the reply; SQLite stores only the lesson lifecycle row, message content never enters it; the full desktop flow is implemented: classroom home with active/history/summaries, turn endpoint with a per-lesson lock, message read with degraded corruption handling, lesson creation and idempotent ending, and the SQLite-backed model summary; lesson detail, streaming and the two classroom tools are not"
+    description: "Run one classroom simulation turn end to end: append the teacher message to a per-lesson JSONL transcript, let a tool-less, thinking-off director session pick the next student with JSON, let that student agent reply, and append the reply; SQLite stores only the lesson lifecycle row, message content never enters it; the full desktop flow is implemented: classroom home with active/history/summaries, turn endpoint with a per-lesson lock, message read with degraded corruption handling, lesson creation and idempotent ending, and the SQLite-backed model summary; a closing turn also appends a new-point question from another student; lesson detail, streaming and the two classroom tools are not"
     token_budget: 18000
     code_globs:
       - "apps/backend/src/lessons/**"

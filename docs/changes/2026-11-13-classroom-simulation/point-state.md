@@ -11,11 +11,11 @@ related:
   - docs/current/platform/classroom-mode.md
 ---
 
-# 知识点收束状态
+# 知识点状态栏
 
 ## 问题
 
-课堂里老师回答学生追问后，学生会继续追问同一个知识点，没有停止条件，实测会无限来回。只靠提示词不可行：导演只负责选人，学生只拿到被截断的 12 条记录，数不清已经讨论了几轮。
+课堂里老师回答学生追问后，学生会继续追问同一个知识点，没有停止条件。之前的代码状态机（每人 2 次、收束后换人、探索概率）过于复杂；现在只保留一个状态栏，由导演判断讨论是否足够。
 
 ## 状态
 
@@ -24,53 +24,54 @@ related:
 | 列 | 含义 |
 |---|---|
 | `pointStartMessageId` | 当前知识点第一条老师消息的 id |
-| `pointLabel` | 导演概括的知识点标签（≤40 字符） |
-| `pointClosed` | 是否已收束；收束后学生只确认、不再提问 |
-| `pointUpdatedAt` | 最近一次状态写入时间 |
+| `pointLabel` | 当前知识点的短标签（≤40 字符） |
 
-轮次**不单独存计数器**：`turns = pointStartMessageId 之后的学生消息数`。消息文件是事实源，崩溃只会少算，不会多算。
+- 轮次不存计数器：`turns = 起点之后的学生消息数`，消息文件是事实源，崩溃只会少算。
+- 没有 `closed` 状态：`done` 是导演每轮重新判断的结果，不落库。
 
 ## 每轮流程
 
-```mermaid
-stateDiagram-v2
-  [*] --> NoPoint
-  NoPoint --> Open: 老师首条讲解 / 导演 mode=new
-  Open --> Open: continue 且 turns < 2
-  Open --> Closed: turns >= 2（学生收束）
-  Closed --> Closed: continue（仅确认）
-  Closed --> Open: mode=new
-```
-
 1. 老师消息落盘，记下 `teacherMessage.id`。
-2. 读课堂状态，计算 `turns`。
-3. 导演输出 `{"student":"su","mode":"new|continue","pointLabel":"…"}`：
-   - `new`：老师开启新内容，重置 `pointStartMessageId` 为新消息、`pointClosed=false`。
-   - `continue`：沿用当前点。
-4. 代码计算 `forceClose = pointClosed || turns >= 2`。
-5. 学生提示词带「当前知识点 / 已发言轮次 / 是否收束」。收束时明确要求：不再提问，确认理解并请老师继续下一个知识点。
-6. 学生回复成功后写状态：
-   - 新点 → 写入新起点与标签；
-   - 收束 → `pointClosed=true`；
-   - 普通继续 → 不写（轮次由消息推导）。
+2. 代码带上 `pointLabel`、`turns`、`maxTurns=5` 调导演。
+3. 导演输出 `{"student":"su","pointLabel":"…","done":false,"nextStudent":"lin","nextFocus":"…"}`：
+   - `pointLabel` 变化 → 视为新知识点，起点改为当前老师消息，轮次归零；
+   - `done=true` → 本轮学生只确认，不再提问。
+4. 代码计算 `forceClose = done || turns >= 5`；新知识点首轮不因 `done` 关闭。
+5. 学生 prompt 带 `StudentPointContext`：标签、已发言轮次、是否收束、上限。
+6. 学生回复成功后：
+   - 普通继续：不写状态（轮次由消息推导）；
+   - 新点：写回 label 与起点；
+   - 收束：先落盘收束确认，再委派 `nextStudent` 生成新知识点问题，写回新起点与 label。
+
+## 导演规则
+
+- 老师回答清晰、学生核心疑问解决 → `done=true`；通常在 3 次左右收束。
+- 学生已发言达到 3 次时默认 `done=true`，除非老师最新消息明显没有回应学生。
+- 5 次是硬上限，代码强制收束。
+- 老师开启新讲解时更新 `pointLabel`，不要为了换人而改标签。
+- 每轮都提名 `nextStudent`（不能是 `student`）和可选的 `nextFocus`；代码只在收束时使用。
 
 ## 边界
 
 | 场景 | 行为 |
 |---|---|
 | 旧课堂无状态 | 下一条老师消息视为新点 |
-| 起点消息 id 不在记录中 | 重置为新点，避免误判轮次 |
-| 导演把所有消息标成 new | 提示词明确禁止；日志记录 `classroom.point.started` 便于发现 |
-| 收束后老师继续讲同一点 | `continue` 仍强制收束，学生只确认 |
-| 删除课堂 | 状态列随行删除 |
+| 起点消息不在记录中 | 重置为新点 |
+| 收束后自动提问 | 收束学生确认后，立即用 `nextStudent` 生成新点问题；新起点就是该问题消息 |
+| 提名非法/缺失 | 代码从其余学生中按旧点发言最少 → 随机兜底 |
+| 新问题生成失败 | 保留收束消息并记日志；下一轮老师发言可再次触发收束与重试 |
+| 标签频繁变化 | 每次变化都重置轮次；提示词要求只在老师开启新内容时改 |
+| 收束后老师继续讲同一点 | 导演保持 `done=true`，学生只确认 |
+| 删除课堂 | 状态随行删除 |
 | 崩溃 | 消息已落盘但状态未写时，轮次按 transcript 重算，最多少算一轮 |
 
 ## 配置
 
-- `MAX_POINT_STUDENT_TURNS = 2`（`lessons/lesson-point.ts`）：2 次学生发言后，第 3 次必须收束。
-- 导演上限、学生上限与代码常量共用；调整时无需改提示词。
+- `MAX_POINT_TURNS = 5`（`lessons/lesson-point.ts`）：硬上限；正常退出由导演决定。
+- 导演提示词在 `llm/classroom-simulation.prompt.ts`，演示 3 次左右收束。
 
 ## 验证
 
-- `test:classroom-point`：无状态起点、新点重置、轮次推导、上限、已收束保持、起点缺失、标签截断、导演 JSON 解析。
-- 真实模型 3 轮：第 1/2 轮学生提问，第 3 轮回复不含问号且包含「明白/理解/继续/下一个」；SQLite `pointClosed=1`、`pointStartMessageId` 保持不变。
+- `test:classroom-point` 8/8：起点、状态栏、轮次推导、done、5 次上限、标签重置、起点缺失、导演 JSON 解析。
+- 真实模型 6 轮：老师两次引入新内容导致标签重置；最终知识点在第 3 次学生发言后收束（无问号、请老师继续下一个知识点）。
+- 5 次硬上限由纯函数单测覆盖（真实模型难以稳定让导演连续 5 轮不收束）。

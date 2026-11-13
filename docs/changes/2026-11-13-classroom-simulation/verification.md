@@ -20,14 +20,14 @@ related:
 |---|---|
 | `npx tsc -p tsconfig.build.json --noEmit`（`apps/backend`） | 通过 |
 | `npm run test:rehearsal`（`apps/backend`） | 20/20 通过（验证 `parseJsonObject` 迁移未破坏演练 JSON 解析） |
-| `npm run test:classroom`（`apps/backend`，聚合） | 36/36 通过（下分项合计） |
+| `npm run test:classroom`（`apps/backend`，聚合） | 40/40 通过（下分项合计） |
 | `test:classroom-lessons` | 14/14：说话人身份映射、新建课堂结束旧 active、损坏降级、列表与预览、总结读取、损坏记录生成失败、HTTP 发言成功路径、历史课堂删除（含目录清理与 409）、404/400、token/origin |
 | `test:classroom-turns` | 3/3：同课堂并发拒绝、不同课堂并行、失败释放锁 |
 | `test:classroom-runtime` | 3/3：超时中止、取消中止、已取消信号不启动 provider |
 | `test:classroom-transcript` | 3/3：队列顺序、失败隔离与清理、损坏行读取/严格读取 |
 | `test:classroom-summaries` | 5/5：生成落库、失败可重试、损坏不调模型、并发生成拒绝、启动重置 |
 | `test:classroom-migration` | 1/1：旧库多条 active → 保留最新、其余 ended、唯一索引生效 |
-| `test:classroom-point` | 7/7：知识点起点/新点重置/轮次推导/上限/已收束保持/起点缺失/导演 JSON 解析 |
+| `test:classroom-point` | 11/11：知识点起点/标签状态栏/轮次推导/导演 done/5 次硬上限/标签变化重置/起点缺失/导演 JSON 解析/按学生计数/提名与兜底 |
 | `node --test test/backend-request.test.cjs`（`apps/desktop`） | 6/6 通过：GET 重试一次、POST 不重放、非网络错误不重试、中文错误文案 |
 
 ## 2. 端到端（真实 DeepSeek，临时配置/数据目录）

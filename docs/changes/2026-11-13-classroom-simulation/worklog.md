@@ -168,7 +168,8 @@ R002（CHANGES_REQUESTED）在 R001 基础上指出：开始新课堂语义回�
 - 「结束课堂」改为仅当课堂记录加载成功且状态为 `active` 时渲染；加载中只显示「退出课堂」。
 - 进一步改为草稿课堂：点「开始新课堂」只进入舞台，不创建行；首次发送才创建课堂（并结束旧 active），空草稿退出不留下 active/历史记录。
 - 历史课堂支持删除：行尾垃圾桶 + 确认框；后端 `DELETE /api/lessons/:id` 只允许 ended，删除行、总结与 JSONL 目录，生成中返回 409。
-- 知识点收束：SQLite 保存起点/标签/收束状态，轮次由 transcript 推导；同一知识点最多 2 次学生发言，第 3 次收束；导演 JSON 增加 `mode/pointLabel`，并新增 `test:classroom-point`。
+- 知识点收束（简化版）：SQLite 只保存 `pointLabel` 与起点消息，轮次由 transcript 推导；导演输出 `pointLabel/done` 决定何时结束，代码只保留 5 次硬上限；新增 `test:classroom-point`。
+- 收束后自动提问：导演提名 `nextStudent/nextFocus`，代码在收束轮落盘确认后让另一名学生生成新点问题；提名非法时按旧点发言最少→随机兜底。
 
 ## 11. 未完成与后续
 
