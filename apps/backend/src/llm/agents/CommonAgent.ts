@@ -704,7 +704,7 @@ export class CommonAgent {
         if (identity.trim()) {
           // User-authored context about who they are and what they are working toward. It steers
           // examples and depth without overriding the current request.
-          promptSections.push(`\n\n## User identity and goals:\n${identity.trim()}`);
+          promptSections.push(`\n\n## User identity:\n${identity.trim()}`);
         }
         if (stylePreference.trim()) {
           promptSections.push(`\n\n## User preferences: \n${stylePreference}`);

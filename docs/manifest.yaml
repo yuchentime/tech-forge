@@ -798,3 +798,21 @@ routes:
       - docs/current/domains/rehearsals/index.md
       - docs/current/platform/tech-stack.md
     history_on_demand: []
+  product-introduction:
+    description: "Explain or revise the product's external positioning, demo narrative and marketing claim boundary: which capabilities are implemented and may be advertised, and which live only in design drafts"
+    token_budget: 8000
+    code_globs: []
+    required:
+      - docs/source/产品介绍.md
+      - docs/source/需求文档.md
+      - docs/current/index.md
+    optional:
+      - docs/source/课堂模式功能设计.md
+      - docs/source/学习趣味性设计讨论.md
+      - docs/source/知识画像产品讨论.md
+      - docs/current/platform/classroom-mode.md
+      - docs/current/domains/rehearsals/index.md
+      - docs/current/domains/knowledge-profile/index.md
+      - docs/current/domains/documents/index.md
+      - docs/current/domains/memory/index.md
+    history_on_demand: []

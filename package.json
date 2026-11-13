@@ -14,7 +14,7 @@
     "build": "npm run build:backend && npm run build --workspace @teachforge/desktop",
     "build:backend": "npm run build --workspace @teachforge/backend",
     "start:desktop": "npm run build && npm run start --workspace @teachforge/desktop",
-    "package:win": "npm run build && node scripts/stage-backend.mjs && electron-builder --win nsis --x64 --publish never"
+    "package:win": "node scripts/prepare-release.mjs && npm run build && node scripts/stage-backend.mjs && electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
