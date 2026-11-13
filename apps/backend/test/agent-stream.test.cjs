@@ -733,6 +733,91 @@ test('ChatService stores an aborted assistant row as a cancelled turn', async ()
   assert.deepEqual(finishes, ['cancelled']);
 });
 
+test('a settled turn publishes the assistant rows it persisted, in order', async () => {
+  let nextRowId = 0;
+  const llm = {
+    stream(_prompt, options) {
+      return (async function* () {
+        const assistantMessage = (text) => ({
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text }],
+        });
+        const steps = [
+          { type: 'message_start', message: assistantMessage('先查一下资料') },
+          { type: 'message_end', message: assistantMessage('先查一下资料') },
+          {
+            type: 'tool_execution_start',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            args: { path: 'note.md' },
+          },
+          {
+            type: 'tool_execution_end',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            isError: false,
+            result: { content: [] },
+          },
+          // 工具结果同样落库，但 UI 的助手气泡只能锚定 assistant 行。
+          {
+            type: 'message_end',
+            message: { role: 'toolResult', content: [{ type: 'text', text: '结果' }] },
+          },
+          { type: 'message_start', message: assistantMessage('结论如下') },
+          { type: 'message_end', message: assistantMessage('结论如下') },
+        ];
+        for (const step of steps) {
+          await options.persistConversationEvent(step);
+          yield step;
+        }
+      })();
+    },
+  };
+  const conversations = {
+    beginTurn: async () => ({
+      history: [],
+      userMessageId: 'user-1',
+      assistantTurnId: 'turn-1',
+      loadedChunkIds: [],
+      attachedDocuments: [],
+    }),
+    mergeUserMessageContextRefs: async () => undefined,
+    startPiMessage: async () => `message-${(nextRowId += 1)}`,
+    updatePiMessage: async () => undefined,
+    startToolExecution: async () => 'tool-row-1',
+    updateToolExecution: async () => undefined,
+    finishTurn: async () => undefined,
+  };
+  const rehearsals = {
+    buildConversationDigest: async () => ({ text: '', refsJson: null, rehearsalIds: [] }),
+    markDigestDelivered: async () => undefined,
+  };
+  const service = new ChatService(
+    llm,
+    conversations,
+    undefined,
+    undefined,
+    undefined,
+    rehearsals,
+    memoryStub,
+  );
+
+  const events = await collect(
+    service.stream(
+      '整理知识地图',
+      '11111111-1111-4111-8111-111111111111',
+      new AbortController().signal,
+    ),
+  );
+
+  // message-2 是工具结果行，锚点列表只保留 assistant 行。
+  assert.deepEqual(
+    events.filter((event) => event.type === 'assistant_messages'),
+    [{ type: 'assistant_messages', messageIds: ['message-1', 'message-3'] }],
+  );
+});
+
 test('explicit memory is captured only after this turn retrieves its context', async () => {
   const order = [];
   const memory = {

@@ -32,6 +32,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { agentEventBus } from './agent-event-bus';
+import { assistantMessageAnchorStore } from './assistant-message-anchor-store';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactSidebar } from './ArtifactSidebar';
 import { KeywordSearch } from './KeywordSearch';
@@ -39,6 +40,7 @@ import { ArtifactEntry, ArtifactFileChips } from './ArtifactSidebarParts';
 import { artifactHistoryStore, artifactListStore, artifactTabsStore } from './artifact-store';
 import { ToastHost, showToast } from './toast';
 import { describeFailure } from '../../api/backend-error';
+import { isUuidV4 } from '../../api/uuid';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import {
@@ -436,14 +438,26 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       const range = selection.getRangeAt(0);
       const startMessage = findAssistantMessageNode(range.startContainer);
       const endMessage = findAssistantMessageNode(range.endContainer);
-      const messageId = startMessage?.dataset.messageId;
+      const runtimeMessageId = startMessage?.dataset.messageId;
+      // 流式回复的 DOM ID 由 assistant-ui 生成；重点关注需要 SQLite 行 ID，历史消息本身就是持久化 ID。
+      const messageId = runtimeMessageId
+        ? assistantMessageAnchorStore.resolve(runtimeMessageId) ??
+          (isUuidV4(runtimeMessageId) ? runtimeMessageId : null)
+        : null;
       const conversationId = conversationStore.getSnapshot().activeConversationId;
       const quote = selection.toString().trim();
+      // 取消或中断的轮次不会广播锚点行；此时不能悄悄吞掉选区，要让用户知道原因。
+      if (!messageId && runtimeMessageId && !isUuidV4(runtimeMessageId)) {
+        setFocusSelection(null);
+        showToast('这条回复还没有保存完成，请稍后再试。');
+        return;
+      }
       if (
         !startMessage ||
         startMessage !== endMessage ||
         !viewport.contains(startMessage) ||
         !messageId ||
+        !runtimeMessageId ||
         !conversationId ||
         !quote
       ) {
@@ -460,7 +474,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       const messageIndex =
         threadRuntime
           .getState()
-          .messages.findIndex((message) => message.id === messageId) + 1;
+          .messages.findIndex((message) => message.id === runtimeMessageId) + 1;
       const rect = range.getBoundingClientRect();
       if (messageIndex < 1 || (rect.width === 0 && rect.height === 0)) {
         setFocusSelection(null);

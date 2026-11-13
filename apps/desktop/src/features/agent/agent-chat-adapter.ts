@@ -4,6 +4,7 @@ import type {
 } from '@assistant-ui/react';
 import type { ChatStreamEvent } from '../../types/desktop-bridge';
 import { agentEventBus } from './agent-event-bus';
+import { assistantMessageAnchorStore } from './assistant-message-anchor-store';
 import {
   composerAttachmentStore,
   sentAttachmentStore,
@@ -32,7 +33,12 @@ function getLatestUserMessage(messages: readonly ThreadMessage[]): {
 /** Creates a model adapter whose draft stores are permanently bound to one local thread id. */
 export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter {
   return {
-  async *run({ messages, abortSignal, unstable_threadId }) {
+  async *run({
+    messages,
+    abortSignal,
+    unstable_threadId,
+    unstable_assistantMessageId,
+  }) {
     const userMessage = getLatestUserMessage(messages);
     if (!userMessage?.prompt) throw new Error('请输入文本后再发送。');
     if (abortSignal.aborted) return;
@@ -107,6 +113,17 @@ export function createAgentChatAdapter(localThreadId: string): ChatModelAdapter 
           // away from the thread the user selected while this run was in the background.
           if (typeof window.dispatchEvent === 'function') {
             window.dispatchEvent(new Event('teachforge:conversation-summary-changed'));
+          }
+          continue;
+        }
+
+        if (event.type === 'assistant_messages') {
+          // 重点关注与会话定位都按持久化 ID 走；本轮气泡的 assistant-ui ID 只能在这里换回后端行。
+          if (unstable_assistantMessageId) {
+            assistantMessageAnchorStore.record(
+              unstable_assistantMessageId,
+              event.messageIds,
+            );
           }
           continue;
         }

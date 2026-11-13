@@ -38,6 +38,8 @@ interface ChatTurnPersistenceState {
   messageUpdateCount: number;
   lastMessageProgressLoggedAt: number;
   toolExecutionIds: Map<string, string>;
+  /** 本轮新建的 assistant 消息行；一轮含工具调用时会按顺序出现多行。 */
+  assistantMessageIds: string[];
   toolProgress: Map<
     string,
     { updateCount: number; lastLoggedAt: number; startedAt: number }
@@ -98,6 +100,7 @@ export class ChatService {
       lastMessageProgressLoggedAt: 0,
       toolExecutionIds: new Map(),
       toolProgress: new Map(),
+      assistantMessageIds: [],
     };
     let assistantStatus: 'completed' | 'failed' | 'cancelled' = 'failed';
     // A Pi-internal abort ends the stream without a client abort signal; the turn is still cancelled.
@@ -416,6 +419,16 @@ export class ChatService {
         });
       }
 
+      // 桌面端的流式气泡使用 assistant-ui 自己生成的 ID；重点关注按持久化消息定位，
+      // 因此本轮写入的 assistant 行要在流结束前交给 UI。客户端断开时事件无法送达，
+      // 但 Pi 内部中断的轮次仍会广播，让失败回复也能被关注。
+      if (persistenceState.assistantMessageIds.length > 0) {
+        yield {
+          type: 'assistant_messages',
+          messageIds: persistenceState.assistantMessageIds,
+        };
+      }
+
       assistantStatus =
         signal.aborted || assistantMessageAborted ? 'cancelled' : 'completed';
       writeStructuredEvent(
@@ -530,6 +543,7 @@ export class ChatService {
           event.message,
           state.logContext,
         );
+        this.trackAssistantMessage(state, event.message);
         state.activePiMessageStartedAt = Date.now();
         state.messageUpdateCount = 0;
         state.lastMessageProgressLoggedAt = state.activePiMessageStartedAt;
@@ -548,6 +562,7 @@ export class ChatService {
             event.message,
             state.logContext,
           );
+          this.trackAssistantMessage(state, event.message);
           state.activePiMessageStartedAt = Date.now();
           state.messageUpdateCount = 0;
           state.lastMessageProgressLoggedAt = 0;
@@ -587,6 +602,7 @@ export class ChatService {
             event.message,
             state.logContext,
           );
+          this.trackAssistantMessage(state, event.message);
           state.activePiMessageStartedAt = Date.now();
           writeStructuredEvent(this.logger, 'log', 'chat.message.started', {
             ...state.logContext,
@@ -756,6 +772,20 @@ export class ChatService {
       default:
         return;
     }
+  }
+
+  /**
+   * 记住本轮新建的 assistant 消息行。
+   *
+   * 一轮里出现工具调用时，Pi 会连续产出多条 assistant 消息，因此顺序列表才是完整锚点；
+   * toolResult 行属于工具结果，不参与 UI 的助手气泡定位。
+   */
+  private trackAssistantMessage(
+    state: ChatTurnPersistenceState,
+    message: SessionMessageEntry['message'],
+  ): void {
+    if (message.role !== 'assistant' || !state.activePiMessageId) return;
+    state.assistantMessageIds.push(state.activePiMessageId);
   }
 
   /** Creates a fallback tool row if Pi reports progress without a start event. */

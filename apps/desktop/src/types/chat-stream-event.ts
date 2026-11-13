@@ -1,4 +1,5 @@
 import { isRecord } from '../api/json';
+import { isUuidV4 } from '../api/uuid';
 
 /** Defines the safe conversation metadata and Pi event fields that may cross the desktop bridge. */
 export type ChatStreamEvent =
@@ -25,6 +26,10 @@ export type ChatStreamEvent =
     }
   | { type: 'agent_end' }
   | {
+      type: 'assistant_messages';
+      messageIds: string[];
+    }
+  | {
       type: 'artifact';
       artifact: {
         id: string;
@@ -41,6 +46,9 @@ export type ChatStreamEvent =
   | { type: 'done'; finishReason: 'stop' }
   | { type: 'error'; message: string };
 
+/** Upper bound for one turn's assistant rows; the tool loop is finite and small in practice. */
+const MAX_ASSISTANT_MESSAGES_PER_TURN = 64;
+
 /** 严格校验事件字段，避免完整 Pi payload 越过桌面桥接。 */
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
@@ -50,15 +58,23 @@ export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
       return (
         hasExactKeys(value, ['type', 'conversationId']) &&
         typeof value.conversationId === 'string' &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          value.conversationId,
-        )
+        isUuidV4(value.conversationId)
       );
     case 'agent_start':
     case 'turn_start':
     case 'turn_end':
     case 'agent_end':
       return hasExactKeys(value, ['type']);
+    case 'assistant_messages':
+      return (
+        hasExactKeys(value, ['type', 'messageIds']) &&
+        Array.isArray(value.messageIds) &&
+        value.messageIds.length > 0 &&
+        value.messageIds.length <= MAX_ASSISTANT_MESSAGES_PER_TURN &&
+        value.messageIds.every(
+          (messageId) => typeof messageId === 'string' && isUuidV4(messageId),
+        )
+      );
     case 'tool_execution_start':
       return (
         hasExactKeys(value, ['type', 'toolCallId', 'toolName', 'args']) &&

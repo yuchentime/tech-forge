@@ -6,6 +6,9 @@ const { routeChatStreamEvent } = require('../dist-electron/electron/main/stream-
 const { isChatStreamEvent } = require('../dist-electron/src/types/chat-stream-event.js');
 const { AgentEventBus } = require('../dist-electron/src/features/agent/agent-event-bus.js');
 const { agentChatAdapter } = require('../dist-electron/src/features/agent/agent-chat-adapter.js');
+const {
+  assistantMessageAnchorStore,
+} = require('../dist-electron/src/features/agent/assistant-message-anchor-store.js');
 
 test('SSE parser preserves frames across CRLF and text chunk boundaries', () => {
   const parser = new SseParser();
@@ -97,6 +100,21 @@ test('bridge event validator accepts only exact, safe Pi event projections', () 
       args: { query: 'q' },
     }),
     true,
+  );
+  assert.equal(
+    isChatStreamEvent({
+      type: 'assistant_messages',
+      messageIds: ['11111111-1111-4111-8111-111111111111'],
+    }),
+    true,
+  );
+  // 流式气泡的 assistant-ui ID 不是 UUID，混进来会让重点关注存下无法定位的锚点。
+  assert.equal(
+    isChatStreamEvent({
+      type: 'assistant_messages',
+      messageIds: ['A1b2C3d'],
+    }),
+    false,
   );
 });
 
@@ -303,6 +321,50 @@ test('Assistant adapter shows tool activity separately and streams cumulative Pi
       output.push(state.content[0].text);
     }
     assert.deepEqual(output, ['答', '答案']);
+  } finally {
+    global.window = originalWindow;
+  }
+});
+
+test('Assistant adapter anchors the streamed reply to the persisted assistant rows', async () => {
+  const originalWindow = global.window;
+  const abortController = new AbortController();
+  const persistedIds = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  const events = [
+    {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: '正文' },
+    },
+    { type: 'assistant_messages', messageIds: persistedIds },
+    { type: 'done', finishReason: 'stop' },
+  ];
+  global.window = {
+    teachforge: {
+      streamChat(_prompt, onEvent) {
+        setImmediate(() => events.forEach(onEvent));
+        return 'run-adapter-2';
+      },
+      cancelChatStream() {},
+    },
+  };
+
+  try {
+    for await (const _state of agentChatAdapter.run({
+      messages: [{ role: 'user', content: [{ type: 'text', text: '提问' }] }],
+      abortSignal: abortController.signal,
+      unstable_assistantMessageId: 'live-reply-1',
+    })) {
+      // The rendered text is irrelevant here; only the anchor mapping is under test.
+    }
+    // 一组行对应一轮回复，重点关注跳转到最后一行的最终回答。
+    assert.equal(
+      assistantMessageAnchorStore.resolve('live-reply-1'),
+      persistedIds.at(-1),
+    );
+    assert.equal(assistantMessageAnchorStore.resolve('unknown-reply'), null);
   } finally {
     global.window = originalWindow;
   }

@@ -399,6 +399,8 @@ HTTP 200 返回 `{ "items": FocusItem[] }`。
 #### Notes
 
 - `messageSequenceNo` 由服务端从 `messages` 读取，不接受客户端传入。
+- 定位锚点必须是持久化的 assistant 行 ID：历史消息的 DOM 锚点本身就是该 ID；流式回复的 DOM 锚点由 assistant-ui 生成，不能直接入库。因此每轮结束时后端在 SSE 流中广播 `assistant_messages`（`{ messageIds }`，本轮写入的 assistant 行按顺序排列，不含 `toolResult`），Renderer 记录“气泡 ID → 行列表”，保存时取最后一行（该轮最终回答）作为 `messageId`。
+- 客户端断开（用户取消或退出）的轮次收不到 `assistant_messages`；此时选区不显示浮动按钮，并提示该回复尚未保存完成。
 - 会话标题在读取时派生，不存快照；重命名后列表立即显示新名称。
 - `note` 属于摘录自身，不写回原消息；一条摘录可以有多行备注。清空备注只把 `note` 置为 `null`，摘录仍保留在列表中。
 - 删除会话时在同一事务内删除其 `focus_items`；摘录没有独立于会话的回收站。
