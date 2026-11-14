@@ -157,6 +157,7 @@ async function main() {
   try {
     const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
     const { CommonAgent } = require('../dist/llm/agents/CommonAgent.js');
+    const { PiAgentRuntime } = require('../dist/llm/pi-agent-runtime.js');
 
     // The mock endpoint stands in for the fixed production base URL; the service still sees the
     // DeepSeek provider contract, only the transport target changes.
@@ -193,9 +194,8 @@ async function main() {
       },
     };
 
-    const service = new LearnAgent(
-      new CommonAgent(mockAdapter, settings, snapshotStore),
-    );
+    const runtime = new PiAgentRuntime(mockAdapter, settings, snapshotStore);
+    const service = new LearnAgent(runtime, new CommonAgent(runtime));
 
     const history = createHistory(40, '上下文压缩验证文本。'.repeat(120));
     const events = [];

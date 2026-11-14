@@ -12,7 +12,7 @@ related:
   - docs/current/platform/architecture-and-code-placement.md
   - docs/changes/2026-11-09-rehearsal-mode/design.md
   - docs/changes/2026-11-09-rehearsal-mode/verification.md
-last_verified: 2026-11-12
+last_verified: 2026-11-14
 ---
 
 # 演练模式（Rehearsal）
@@ -72,7 +72,7 @@ stateDiagram-v2
 - 评估完成时写 `rehearsals.overallEvaluationJson` 与各 turn 的 `evaluationJson`，并写 `<configDir>/sessions/<conversationId>/rehearsals/<rehearsalId>.md` transcript。普通对话由 `ChatService` 调用 `RehearsalsService.buildConversationDigest()`，只取 `loadedContext = 0` 的最近 3 次 completed 演练摘要，总长度封顶 6000 字符。
 - 摘要不拼进本轮 user 文本：`LearnAgent.stream()` 在 `session.prompt()` 前用 `appendCustomMessageEntry(..., display: false)` 追加 `rehearsal_digest`，随后 `markDigestDelivered()` 置 `loadedContext = 1`；一次投递后 Pi 快照继续携带，不再重复注入。
 - digest 包含主题、画像、逐题问答摘要/评估、总体薄弱点/建议和 transcript 路径；`contextRefsJson.rehearsals` 记录 `rehearsalIds` 与字符数，并由 `mergeUserMessageContextRefs()` 与 attachments / knowledge 合并。
-- `CommonAgent.saveConversationSnapshot()` 保存快照前用 `replaceInjectedUserText()` 清除本轮和历史的附件/知识块注入；`custom_message` entry 不清除，因此 digest 留存。普通对话继续接收摘要上下文；报告通过演练历史查看，不在普通对话展示卡片。
+- `PiAgentRuntime.saveConversationSnapshot()` 保存快照前用 `replaceInjectedUserText()` 清除本轮和历史的附件/知识块注入；`custom_message` entry 不清除，因此 digest 留存。普通对话继续接收摘要上下文；报告通过演练历史查看，不在普通对话展示卡片。
 
 ### 会话知识掌握事实
 
@@ -121,5 +121,5 @@ stateDiagram-v2
 - 知识事实实体、服务/worker、严格校验、预算与 prompt：`conversation-knowledge-fact.entity.ts`、`conversation-knowledge-facts.service.ts`、`conversation-knowledge-facts.validation.ts`、`conversation-knowledge-facts.budget.ts`、`conversation-knowledge-facts.prompts.ts`
 - 知识事实只读 HTTP：`conversation-knowledge-facts.controller.ts`；演练 HTTP 边界：`rehearsals.controller.ts`
 - 知识掌握视图使用 `GET /api/knowledge-facts` 读取轻量列表，打开详情后使用 `GET /api/conversations/:id/knowledge-facts`；展示契约见[知识掌握](../knowledge-profile/api-contract.md)
-- 非流式模型调用：`apps/backend/src/llm/agents/CommonAgent.ts` 的 `generate()`；普通对话注入：`apps/backend/src/chat/chat.service.ts`；快照清洗：`apps/backend/src/llm/session-entries.ts`
+- 非流式模型调用：`apps/backend/src/llm/agents/CommonAgent.ts` 的 `generate()`；Pi session 与快照：`apps/backend/src/llm/pi-agent-runtime.ts`；普通对话注入：`apps/backend/src/chat/chat.service.ts`
 - 桌面端：`apps/desktop/src/features/rehearsal/`

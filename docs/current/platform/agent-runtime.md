@@ -38,7 +38,7 @@ last_verified: 2026-11-13
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `CommonAgent` / `LearnAgent` | 每次请求创建 Pi session 时重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。聊天与 skill 轮次再注册 `web_search`/`web_fetch`（内部 JSON 调用不注册）。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆，也不启用网页工具。 |
+| `PiAgentRuntime` / `CommonAgent` / `LearnAgent` | `PiAgentRuntime` 负责每次请求创建 Pi session：重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md，确定本会话 workspace，组装系统提示词、工具、扩展钩子和 skill 资源，并恢复/保存 Pi 快照。`LearnAgent` 负责普通对话的 `stream()`；`CommonAgent.generate()` 提供非流式通用调用，供演练等场景复用，默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
 | `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md 等）；知识库目录与其他普通目录同样可读；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
@@ -48,13 +48,13 @@ last_verified: 2026-11-13
 
 Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `ChatController` 生成一个内部 `requestId`，并沿 `ChatService`、`ConversationsService`、`LearnAgent` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
 
-`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`CommonAgent` 与 `LearnAgent` 记录 SDK/session 初始化阶段、模型运行、Pi 自动压缩和持久化钩子失败。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`PiAgentRuntime` 记录 session 初始化、工具注册与持久化钩子失败，`CommonAgent` 与 `LearnAgent` 记录模型调用和流式运行。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
 
 Pi 自动压缩由 SDK 触发，`CommonAgent` 在 `generate()`、`LearnAgent` 在 `stream()` 的事件订阅中记录 `llm.compaction.started`、`llm.compaction.completed`、`llm.compaction.cancelled`、`llm.compaction.failed`。字段包含触发原因（`threshold`、`overflow`、`manual`）、`tokensBefore`、`estimatedTokensAfter`、`summaryChars`、摘要请求的 `summaryUsageTotalTokens` 以及压缩前后的 `contextTokens`/`contextPercent`；失败只记录 `errorMessageChars`，不记录摘要文本或原始异常 message。`llm.session.create.completed` 记录生效的 `compactionEnabled`、`compactionReserveTokens`、`compactionKeepRecentTokens`、`modelContextWindow` 和 `compactionThresholdTokens`；`llm.provider_run.started` 与 `llm.stream.completed` 记录发送前后的上下文占用。
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
-常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。`chat.tool.terminated` 在工具失败时升为 `error` 并附 `failureReason`：`output_limit_truncated`（响应触达输出上限，参数被截断）、`invalid_arguments`、`aborted`、`blocked`、`tool_not_found`、`file_policy_denied`、`tool_error`。前两类由 Pi 在工具代码执行前拒绝（`aborted`、`blocked` 同理），不会产生 `llm.file_tool.operation.failed`，失败原因只能从结果文案分类；文案本身（包含模型原始参数）不进入日志。`chat.message.terminated` 在消息落库为 `failed` 时同为 `error` 并附 `stopReason`（`length` 表示输出上限截断）。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`CommonAgent` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。`chat.tool.terminated` 在工具失败时升为 `error` 并附 `failureReason`：`output_limit_truncated`（响应触达输出上限，参数被截断）、`invalid_arguments`、`aborted`、`blocked`、`tool_not_found`、`file_policy_denied`、`tool_error`。前两类由 Pi 在工具代码执行前拒绝（`aborted`、`blocked` 同理），不会产生 `llm.file_tool.operation.failed`，失败原因只能从结果文案分类；文案本身（包含模型原始参数）不进入日志。`chat.message.terminated` 在消息落库为 `failed` 时同为 `error` 并附 `stopReason`（`length` 表示输出上限截断）。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`PiAgentRuntime` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
 ## 请求与持久化时序
 
@@ -67,7 +67,7 @@ sequenceDiagram
     participant Chat as ChatService
     participant Conv as ConversationsService
     participant DB as SQLite
-    participant LLM as CommonAgent / LearnAgent
+    participant LLM as PiAgentRuntime / CommonAgent / LearnAgent
     participant Pi as Pi SDK
     participant Model as 大模型
     participant Tool as 工具
@@ -117,7 +117,7 @@ sequenceDiagram
     DB-->>Conv: 提交完成
 ```
 
-Session 初始化时，`CommonAgent` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
+Session 初始化时，`PiAgentRuntime` 从 `SettingsService` 单独读取工作空间路径，并将其同时用于 `DefaultResourceLoader.cwd`、`SessionManager.inMemory(cwd, ...)`、`createAgentSession({ cwd })` 和自定义文件工具。Pi 的 `agentDir` 仍由 `sdk.getAgentDir()` 提供。Pi SDK 文档说明 `cwd` 用于项目资源发现、上下文文件、会话分组和内置工具路径；此处保持所有 session 与文件工具同根。配置与风格文件的所有权见[本机 Agent 设置](../domains/system-settings/index.md)。
 
 进程内扩展只走 `DefaultResourceLoader.extensionFactories`（对话持久化钩子与记忆工具）；`customTools` 另注入工作区文件工具与 DeepSeek 网页工具。`noExtensions: true` 关闭包发现，因此不会从 `node_modules` 或用户目录加载任何文件扩展；`additionalExtensionPaths` 也不再使用。记忆工具只在 `loadMemory` 为真时注册，`generate()` 默认不装载；网页工具只在 `webToolsEnabled` 为真时注册，`generate()` 固定关闭。
 
@@ -149,7 +149,7 @@ Session 初始化时，`CommonAgent` 从 `SettingsService` 单独读取工作空
 
 `beginTurn()` 按 `sequenceNo` 读取该对话的全部消息行，对账上次中断的轮次，然后在模型调用前保存新的 `user/completed` 行和 `assistantTurn/pending` 标记。
 
-`CommonAgent` 优先读取 `pi_session_snapshots` 作为模型上下文（含 compaction 等 Pi 条目），仅当快照最后一条持久化消息与 SQLite 最新历史不一致（崩溃或快照未保存）时回退 SQLite 重建；未命中时也走重建。当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
+`PiAgentRuntime` 优先读取 `pi_session_snapshots` 作为模型上下文（含 compaction 等 Pi 条目），仅当快照最后一条持久化消息与 SQLite 最新历史不一致（崩溃或快照未保存）时回退 SQLite 重建；未命中时也走重建。当前 prompt 则单独通过 `session.prompt(prompt)` 发送。
 
 恢复出的条目在交给 Pi 之前先经 `checkSessionEntries()`（`llm/session-entries.ts`）核对工具调用配对，两条恢复路径共用这一步：
 
@@ -173,7 +173,7 @@ Session 初始化时，`CommonAgent` 从 `SettingsService` 单独读取工作空
 
 Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行 start/update/end 事件都会进入异步扩展钩子。钩子调用 `ChatService.persistPiEvent()`，等待 SQLite 写入完成后 Pi 才继续。只有 assistant 和 toolResult 消息事件会保存；用户行已单独提前写入，system prompt 由 session 配置提供。
 
-每次 `stream()` 结束且持久化没有失败时，`LearnAgent` 调用 `CommonAgent.saveConversationSnapshot()`，用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。落库前还会执行 `pruneImageWritePayloads()`：把 `write` 工具调用里图片类产物（`.svg`/`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`/`.avif`）的正文替换为 `[content omitted: <N> B; read <path> to view it]`，只保留 `path`。守卫是"该路径解析后仍在会话工作区内且文件仍在"，文件被移走或删掉时保留原文——那是上下文里唯一的副本；entry id、父链、时间戳、toolResult 与其余内容都不动，重复执行幂等。日志事件 `llm.session_snapshot.image_payload_pruned` 记录 `prunedWrites` 与 `bytesRemoved`。桌面端转录、侧边栏与响应底部文件卡片都读 SQLite 与 `artifacts`，不读快照，所以不受影响。
+每次 `stream()` 结束且持久化没有失败时，`LearnAgent` 调用 `PiAgentRuntime.saveConversationSnapshot()`，用 `replaceInjectedUserText()` 把当前 user 消息还原为纯用户文本，并按历史 user 行 id 与注入标题清理旧快照中的附件/知识块（演练 digest 走独立 `custom_message` entry，不参与剥离），再 upsert 回 `pi_session_snapshots`。该函数同时处理字符串和 Pi text-block 内容；旧快照没有可匹配 id 时，用代码写死的注入标题 + `## 用户输入` 分隔符兜底。落库前还会执行 `pruneImageWritePayloads()`：把 `write` 工具调用里图片类产物（`.svg`/`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`/`.avif`）的正文替换为 `[content omitted: <N> B; read <path> to view it]`，只保留 `path`。守卫是"该路径解析后仍在会话工作区内且文件仍在"，文件被移走或删掉时保留原文——那是上下文里唯一的副本；entry id、父链、时间戳、toolResult 与其余内容都不动，重复执行幂等。日志事件 `llm.session_snapshot.image_payload_pruned` 记录 `prunedWrites` 与 `bytesRemoved`。桌面端转录、侧边栏与响应底部文件卡片都读 SQLite 与 `artifacts`，不读快照，所以不受影响。
 
 每次创建新 session 都从 `~/.tech-forge/config.toml` 读取 DeepSeek 配置，并把非空 `IDENTIFY.md` 身份文本（位于风格偏好之前）与 `PREFERENCE.md` 风格文本追加在固定系统提示词之后。API Key 在 backend 用于 DeepSeek Provider 注册，并由本机设置 API 返回设置页显示；不进入 Agent SSE、普通日志或 SQLite。
 
@@ -196,7 +196,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 - 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml`、`IDENTIFY.md` 与 `PREFERENCE.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
 - Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件，唯一拒绝的是 SettingsService 托管的应用文件；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
-- 知识库目录 `<configDir>/knowledge` 与普通目录同等对待：`read` 可直接读取目录文件与上传原文，没有按轮次要授权的目录守卫；写入仍受工作区边界限制。`DocumentsService.onModuleInit` 在启动时按数据库重建目录文件 `index.md`（缺失才写，空库写成“资料库当前为空”）。`CommonAgent.createSession()` 在 system prompt 中写入该目录文件的绝对路径，并指示模型在需要检索资料库时先读目录、再读必要原文；`/查询资料库`、`/探索主题` 轮仍把检索结果作为会话消息注入。旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
+- 知识库目录 `<configDir>/knowledge` 与普通目录同等对待：`read` 可直接读取目录文件与上传原文，没有按轮次要授权的目录守卫；写入仍受工作区边界限制。`DocumentsService.onModuleInit` 在启动时按数据库重建目录文件 `index.md`（缺失才写，空库写成“资料库当前为空”）。`PiAgentRuntime.createSession()` 在 system prompt 中写入该目录文件的绝对路径，并指示模型在需要检索资料库时先读目录、再读必要原文；`/查询资料库`、`/探索主题` 轮仍把检索结果作为会话消息注入。旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 
@@ -216,7 +216,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 
 演练是独立 Agent，不经过 `ChatService.stream()`，也不写 `messages`：
 
-- `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `CommonAgent.generate()`。该调用可传入父 `conversation`，让 `restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
+- `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `CommonAgent.generate()`。该调用可传入父 `conversation`，由 `PiAgentRuntime.restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
 - `start()` 通过可选的 `onPhase` 回调把 session 引导、provider 调用与 JSON 修复重试写入进程内 `RehearsalPreparingRegistry`，只由只读端点 `GET /api/conversations/:id/rehearsals/preparing` 读取；该登记不参与状态机、不落库，重启即丢失。
 - 后续答题/跳过/报告调用使用新的临时 Pi session，只带 `learningSummary + plan + 已有问答`；不传 `conversation`，不写快照。
 - 演练 system prompt 由代码写死；不加载 IDENTIFY/PREFERENCE 文本、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
@@ -259,21 +259,21 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。
 8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具；普通对话只通过一次性 digest（`custom_message` entry + `loadedContext` 标记）与 `contextRefsJson` 读取演练结果。
-9. 网页搜索与抓取归 `CommonAgent` 与 `llm/tools/web-tools.ts` 所有：只读调用 DeepSeek Search/Fetch，不写文件、不访问 SQLite、不参与消息持久化；仅在已配置 DeepSeek Key 且 `webTools !== false` 时启用，`generate()` 明确关闭。日志与错误结果不得包含 query、URL、正文或 API Key。
+9. 网页搜索与抓取的 session 注册归 `PiAgentRuntime` 与 `llm/tools/web-tools.ts` 所有：只读调用 DeepSeek Search/Fetch，不写文件、不访问 SQLite、不参与消息持久化；仅在已配置 DeepSeek Key 且 `webTools !== false` 时启用，`generate()` 明确关闭。日志与错误结果不得包含 query、URL、正文或 API Key。
 
 10. 每个不同的大模型调用场景必须单独定义 Agent：位于 `apps/backend/src/llm/agents/`，文件名与类名使用 `<Scenario>Agent.ts` / `<Scenario>Agent`，在 `AgentModule` 注册后由领域 Service 注入。通用生成能力复用 `CommonAgent.generate()`；场景 Agent 只承载该场景的提示词、输入编排和结果解析，不复制 session、工具、记忆或配置装配。
 
 ## 技能装载与探索主题
 
-Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<configDir>/skills`（默认 `~/.tech-forge/skills`）和用户 `<workspace>/skills`。内置 skill 的源模板随 backend 分发在 `assets/skills`（由编译产物 `dist/llm` 解析为 `../../assets/skills`）；`CommonAgent` 在首次创建 session 前调用 `installBundledSkills()` 把模板复制到 `<configDir>/skills`，目标目录已有 `SKILL.md` 时不覆盖，因此用户编辑过的 skill 不会被升级静默替换。
+Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<configDir>/skills`（默认 `~/.tech-forge/skills`）和用户 `<workspace>/skills`。内置 skill 的源模板随 backend 分发在 `assets/skills`（由编译产物 `dist/llm` 解析为 `../../assets/skills`）；`PiAgentRuntime` 在首次创建 session 前调用 `installBundledSkills()` 把模板复制到 `<configDir>/skills`，目标目录已有 `SKILL.md` 时不覆盖，因此用户编辑过的 skill 不会被升级静默替换。
 
-`noSkills: true` 只关闭默认目录发现，这两条显式路径仍会加载；每次 `resourceLoader.reload()` 后，`CommonAgent` 用 `getSkills()` 读取名称、描述与路径。`<configDir>/skills` 不随会话工作区删除，用户可直接查看和编辑。
+`noSkills: true` 只关闭默认目录发现，这两条显式路径仍会加载；每次 `resourceLoader.reload()` 后，`PiAgentRuntime` 用 `getSkills()` 读取名称、描述与路径。`<configDir>/skills` 不随会话工作区删除，用户可直接查看和编辑。
 
 探索主题命令（`/探索主题 <主题>`）的链路：
 
 1. `ChatService` 用 `parseTurnCommand()` 剥掉前导命令；`/探索主题` 与 `/查询资料库` 可组合、顺序不限。研究轮次固定先调 `KnowledgeService.buildContext()`，检索预算、范围、重排、去重和 `contextRefsJson` 与 `/查询资料库` 完全一致。
 2. `ChatService` 把资料块放进 `promptContext`，并向 `LearnAgent.stream()` 传 `skillName: 'deep-research'`；不新增 Agent、状态机或表。
-3. `CommonAgent` 在 `createSession()` 中校验 skill 存在（缺失时抛 `Pi skill not found`），然后构造 `/skill:deep-research <promptContext>\n\n## 用户输入\n<主题>` 并传 `expandPromptTemplates: true`。Pi 把 `SKILL.md` 展开为 `<skill>` 块，资料与用户主题成为其参数。
+3. `PiAgentRuntime` 在 `createSession()` 中校验 skill 存在（缺失时抛 `Pi skill not found`）；`LearnAgent` 构造 `/skill:deep-research <promptContext>\n\n## 用户输入\n<主题>` 并传 `expandPromptTemplates: true`。Pi 把 `SKILL.md` 展开为 `<skill>` 块，资料与用户主题成为其参数。
 4. 快照清洗仍以纯主题 `prompt` 为准，因此本轮 skill 正文与资料块不会在下一轮重放；入库消息也只保存主题。
 5. skill 用 `read`/`write`/`edit`/`grep` 写 `deep-research/<slug>/知识文档.md` 与 `知识地图.svg`，并在需要补充外部证据时调用 `web_search`/`web_fetch`；资料库分片仍是主证据，网络结论标 `[网络：<标题> · <URL>]`。写入回调把两个文件登记为会话 artifact，不放开知识库目录直读。
 
@@ -286,7 +286,8 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 - 对话消息行和中断对账：`apps/backend/src/conversations/conversations.service.ts`
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
-- Pi session 创建、历史映射和 awaited 持久化扩展：`apps/backend/src/llm/agents/CommonAgent.ts`、`apps/backend/src/llm/agents/LearnAgent.ts`
+- LLM 请求与会话选项契约：`apps/backend/src/llm/llm-contracts.ts`
+- Pi session 创建、扩展/skill 注册、历史映射和快照恢复：`apps/backend/src/llm/pi-agent-runtime.ts`；通用生成与流式调用：`apps/backend/src/llm/agents/CommonAgent.ts`、`LearnAgent.ts`
 - DeepSeek 网页搜索/抓取工具：`apps/backend/src/llm/tools/web-tools.ts`
 - 斜杠命令解析：`apps/backend/src/knowledge/knowledge-command.ts`、`apps/backend/src/chat/deep-research-command.ts`、`apps/backend/src/chat/turn-command.ts`
 - skill 安装与发现：`apps/backend/src/llm/skills.ts`、`SettingsService.getSkillsDirectory()`

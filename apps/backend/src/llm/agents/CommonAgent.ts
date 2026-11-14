@@ -1,136 +1,28 @@
-import type * as PiSdkModule from "@earendil-works/pi-coding-agent";
 import type {
   AgentSession as PiAgentSession,
   AgentSessionEvent as PiAgentSessionEvent,
-  ExtensionFactory as PiExtensionFactory,
-  ModelRuntime as PiModelRuntime,
-  SessionMessageEntry as PiSessionMessageEntry,
-  SessionEntry,
-} from "@earendil-works/pi-coding-agent";
-import { Injectable, Logger } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
-import { parsePersistedPiMessage } from "../../conversations/conversation-transcript";
-import { PiSessionSnapshotsService } from "../../conversations/pi-session-snapshots.service";
+} from '@earendil-works/pi-coding-agent';
+import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   clipLogText,
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
-} from "../../logging/structured-logger";
+} from '../../logging/structured-logger';
 import {
-  SettingsService,
-  type StoredLlmSettings,
-} from "../../settings/settings.service";
-import { DeepseekLLMAdapter } from "../adapters/deepseek-llm.adapter";
-import { DEEPSEEK_PROVIDER_ID } from "../adapters/llm-adapter";
-import {
-  checkSessionEntries,
-  replaceInjectedUserText,
-} from "../session-entries";
-import {
-  BUNDLED_SKILLS_ASSET_PATH,
-  installBundledSkills,
-} from "../skills";
-import {
-  areWebToolsEnabled,
-  createWebTools,
-  WEB_TOOL_NAMES,
-} from "../tools/web-tools";
-import {
-  createWorkspaceFileTools,
-  prepareWorkspaceDirectory,
-  isPathWithin,
-} from "../tools/workspace-file-tools";
-import { pruneImageWritePayloads } from "../snapshot-image-prune";
-
-type PiSdk = typeof PiSdkModule;
-type PiThinkingLevel = "off" | "low" | "medium" | "high";
-type PiModel = NonNullable<ReturnType<PiModelRuntime["getModel"]>>;
-
-/** Describes one completed chat message used to restore an external transcript. */
-export interface LlmConversationHistoryMessage {
-  id: string;
-  role: string;
-  contentJson: string;
-  status: string;
-  createdAt: Date | string;
-}
-
-/** Supplies SQLite-owned conversation identity and history to a Pi session. */
-export interface LlmConversationContext {
-  id: string;
-  history: readonly LlmConversationHistoryMessage[];
-}
-
-/** One inline image for the current user message, already base64-encoded. */
-export interface LlmInputImage {
-  /** Raw base64 bytes without a data-URL prefix. */
-  data: string;
-  mimeType: string;
-}
-
-export interface LlmRequestOptions {
-  requestId?: string;
-  providerId?: string;
-  modelId?: string;
-  thinkingLevel?: PiThinkingLevel;
-  conversation?: LlmConversationContext;
-  persistConversationEvent?: (event: PiAgentSessionEvent) => Promise<void>;
-  /**
-   * Per-turn reference material (attachment text, knowledge chunks) composed by ChatService.
-   *
-   * It is prepended to the user message sent to the model, never to the system prompt: the system
-   * prompt stays byte-identical across turns so provider prefix caching keeps working, and per-turn
-   * data stays where it belongs. The stored transcript keeps only the user's own text — see
-   * `replaceInjectedUserText`.
-   */
-  promptContext?: string;
-  /**
-   * Images attached to this turn's user message.
-   *
-   * Pi's OpenAI-compatible path serializes each as an `image_url` data URL, so the model receives
-   * them as vision input with the text prompt. They belong to this turn only: the snapshot cleanup
-   * drops them, and later turns can re-open the stored file with `read`.
-   */
-  images?: readonly LlmInputImage[];
-  /**
-   * Durable context appended to the Pi session as its own custom message entry.
-   *
-   * Unlike `promptContext`, this survives the snapshot cleanup: Pi keeps the entry, later turns
-   * restore it, and the model reads it as a regular user message instead of the system prompt.
-   * `display: false` keeps it out of the visible transcript, so callers must send it exactly once.
-   */
-  contextMessage?: { type: string; text: string };
-  /** Ordered durable entries, kept outside the system prompt and visible user text. */
-  contextMessages?: Array<{ type: string; text: string; details?: unknown }>;
-  /**
-   * Called after the Agent created or modified a file, with the resolved absolute path.
-   *
-   * The chat layer uses it to index artifacts; the LLM layer stays unaware of that store. It fires
-   * only for the app-owned file tools built in `createSession()`: Pi's built-in `write`/`edit` do
-   * not report a path, so a session that registers the built-ins keeps this callback silent.
-   */
-  onFileWritten?: (input: {
-    absolutePath: string;
-    tool: "write" | "edit";
-  }) => Promise<void> | void;
-  /**
-   * Pi skill expanded at the start of this turn's model prompt.
-   *
-   * The skill body becomes part of the user message, not the system prompt, so per-turn context
-   * (attachments, knowledge chunks) can still follow it. The stored transcript and snapshot keep
-   * the user's own text: the caller passes that text as `prompt`, while this option only changes
-   * what the model reads. `createSession` fails loudly when the named skill is not discoverable.
-   */
-  skillName?: string;
-}
-
-/** Adds request-scoped cancellation to streamed LLM calls. */
-export interface LlmStreamOptions extends LlmRequestOptions {
-  signal?: AbortSignal;
-}
+  PiAgentRuntime,
+  getRequestLogContext,
+} from '../pi-agent-runtime';
+import type { LlmRequestOptions as CommonLlmRequestOptions } from '../llm-contracts';
+export type {
+  LlmConversationContext,
+  LlmConversationHistoryMessage,
+  LlmInputImage,
+  LlmRequestOptions,
+  LlmStreamOptions,
+  PiThinkingLevel,
+} from '../llm-contracts';
 
 /**
  * Raised when the provider stopped on its output-token limit.
@@ -177,7 +69,7 @@ export type AssistantCompletion =
  * Rehearsal planning, answer decisions and reports are JSON calls, not chat turns. They may read a
  * parent conversation's history, but they never persist a Pi snapshot or a conversation message.
  */
-export interface LlmGenerateOptions extends LlmRequestOptions {
+export interface LlmGenerateOptions extends CommonLlmRequestOptions {
   signal?: AbortSignal;
   /** Replaces the default chat system-prompt append; rehearsal passes its fixed drill prompt. */
   systemPromptAppend?: string;
@@ -187,7 +79,7 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
    * Whether long-term memory is loaded for this call.
    *
    * `generate()` is used for internal JSON work (rehearsal, knowledge facts), so it defaults to
-   * `false`; chat `stream()` defaults to `true` in `createSession()`.
+   * `false`; chat `stream()` defaults to `true` in `PiAgentRuntime.createSession()`.
    */
   loadMemory?: boolean;
   /** Abort the provider call after this many milliseconds. */
@@ -209,115 +101,20 @@ export interface LlmGenerateOptions extends LlmRequestOptions {
   buildPrompt?: (context: { contextWindow: number | null }) => string;
 }
 
-/** Controls how one Pi session is assembled without changing business-level request options. */
-export interface PiSessionBuildOptions {
-  systemPromptAppend?: string;
-  tools?: readonly string[];
-  /** Whether to register long-term memory tools; JSON-only calls pass `false`. */
-  loadMemory?: boolean;
-  /** Whether to register DeepSeek web tools; internal JSON calls pass `false`. */
-  webTools?: boolean;
-  /** Publishes the resolved model's context window to the caller that builds the prompt. */
-  onModelResolved?: (contextWindow: number | null) => void;
-}
-
-const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
-
-// The backend is compiled as CommonJS while Pi publishes an ESM-only entry point.
-const importPiSdk = new Function("specifier", "return import(specifier)") as (
-  specifier: string,
-) => Promise<PiSdk>;
-
-/** Identifies which stored context the Pi session was rebuilt from. */
-type SessionRestoreSource = "session_snapshot" | "rebuilt_history";
-
-/** Supplies a valid zero-usage record for restored assistant text messages. */
-function createEmptyUsage() {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: 0,
-    },
-  };
-}
-
-/** Registers awaited Pi event hooks so database commits precede later Pi work. */
-function createConversationPersistenceExtension(
-  persistEvent: (event: PiAgentSessionEvent) => Promise<void>,
-): PiExtensionFactory {
-  return (pi) => {
-    pi.on("message_start", (event) =>
-      persistEvent(event as PiAgentSessionEvent),
-    );
-    pi.on("message_update", (event) =>
-      persistEvent(event as PiAgentSessionEvent),
-    );
-    pi.on("message_end", (event) => persistEvent(event as PiAgentSessionEvent));
-    pi.on("tool_execution_start", (event) =>
-      persistEvent(event as PiAgentSessionEvent),
-    );
-    pi.on("tool_execution_update", (event) =>
-      persistEvent(event as PiAgentSessionEvent),
-    );
-    pi.on("tool_execution_end", (event) =>
-      persistEvent(event as PiAgentSessionEvent),
-    );
-  };
-}
-
 /**
- * Builds app-owned Pi sessions and runs the non-streamed model call.
+ * Runs non-streamed model calls through the shared Pi runtime.
  *
- * This is the shared base for every Pi call in the app: it owns provider/model resolution,
- * workspace-scoped tools, skills, memory and snapshot restore. `LearnAgent` adds the streaming
- * loop on top; JSON callers (rehearsal, catalog, classroom summary) call `generate()` directly
- * and never persist a snapshot or a visible conversation message.
+ * Session setup, tools, extensions, skills, restoration and snapshots belong to PiAgentRuntime;
+ * this class owns the common generate-call lifecycle and classifies the returned completion.
  */
 @Injectable()
 export class CommonAgent {
   private readonly logger = new Logger(CommonAgent.name);
-  private piSdkPromise?: Promise<PiSdk>;
-  /** One-shot seeding of bundled skills into `<configDir>/skills`; retried after a failure. */
-  private installedSkillsPromise?: Promise<void>;
 
-  /** Injects local settings, the DeepSeek adapter, and the per-conversation Pi snapshot store. */
-  constructor(
-    private readonly deepseekAdapter: DeepseekLLMAdapter,
-    private readonly settings: SettingsService,
-    private readonly piSessionSnapshots: PiSessionSnapshotsService,
-  ) {}
+  /** Injects the Pi runtime used by every common generation call. */
+  constructor(private readonly piAgentRuntime: PiAgentRuntime) {}
 
-  /**
-   * Reads the current model settings and stamps the selected provider/model on one request.
-   *
-   * Both entry points need the same snapshot: `stream()` logs the resolved ids and the session
-   * builder needs the API key and model id. Resolving here keeps the settings read single.
-   */
-  async resolveRequest<T extends LlmRequestOptions>(
-    options: T,
-  ): Promise<{ resolved: T; modelSettings: StoredLlmSettings }> {
-    const modelSettings = await this.settings.getLlmSettings();
-    return {
-      resolved: { ...options, ...getSelectedModelIds(modelSettings) },
-      modelSettings,
-    };
-  }
-
-  /**
-   * Runs one non-streamed model call and returns the assistant text.
-   *
-   * Rehearsal uses this for structured JSON decisions. The call may read a parent conversation's
-   * history through `conversation`, but it never persists a snapshot or a conversation message;
-   * the caller owns the rehearsal state and its own transcript.
-   */
+  /** Runs one non-streamed model call and returns the classified assistant text. */
   async generate(
     prompt: string,
     options: LlmGenerateOptions = {},
@@ -348,18 +145,23 @@ export class CommonAgent {
     try {
       reportPhase("session");
       const { resolved, modelSettings } =
-        await this.resolveRequest(options);
+        await this.piAgentRuntime.resolveRequest(options);
       let resolvedContextWindow: number | null = null;
-      session = await this.createSession(resolved, modelSettings, undefined, {
-        systemPromptAppend: options.systemPromptAppend,
-        tools: options.tools,
-        loadMemory: options.loadMemory ?? false,
-        // Internal JSON calls must never spend Search/Fetch budget.
-        webTools: false,
-        onModelResolved: (contextWindow) => {
-          resolvedContextWindow = contextWindow;
+      session = await this.piAgentRuntime.createSession(
+        resolved,
+        modelSettings,
+        undefined,
+        {
+          systemPromptAppend: options.systemPromptAppend,
+          tools: options.tools,
+          loadMemory: options.loadMemory ?? false,
+          // Internal JSON calls must never spend Search/Fetch budget.
+          webTools: false,
+          onModelResolved: (contextWindow) => {
+            resolvedContextWindow = contextWindow;
+          },
         },
-      });
+      );
       const activeSession = session;
       unsubscribeSessionEvents = activeSession.subscribe((event) =>
         logPiCompactionEvent(this.logger, logContext, activeSession, event),
@@ -483,688 +285,18 @@ export class CommonAgent {
     }
   }
 
-  /**
-   * Creates a request-scoped Pi session rooted in the configured Agent workspace.
-   *
-   * Both agent entry points build sessions here; `currentUserRequest` is the raw current-turn text
-   * that may grant an external write, and `buildOptions` narrows tools, memory and web access.
-   */
-  async createSession(
-    options: LlmRequestOptions,
-    modelSettings: StoredLlmSettings,
-    currentUserRequest?: string,
-    buildOptions: PiSessionBuildOptions = {},
-  ): Promise<PiAgentSession> {
-    const startedAt = Date.now();
-    const requestId = options.requestId ?? randomUUID();
-    const logContext = getRequestLogContext(options, requestId);
-    let phase = "pi_sdk_load";
-    writeStructuredEvent(this.logger, "log", "llm.session.create.started", {
-      ...logContext,
-      phase,
-      providerId: options.providerId,
-      modelId: options.modelId,
-      historyMessageCount: options.conversation?.history.length ?? 0,
-    });
-    try {
-      const sdk = await this.getPiSdk();
-      phase = "model_runtime_load";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      const modelRuntime = await sdk.ModelRuntime.create({
-        refreshOnCreate: false,
-      });
-
-      phase = "model_configuration";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      if (!modelSettings.deepseek.apiKey) {
-        throw new Error(
-          "DeepSeek API Key is missing. Open Settings to configure it.",
-        );
-      }
-      this.deepseekAdapter.register(modelRuntime, modelSettings.deepseek);
-
-      const model =
-        options.providerId && options.modelId
-          ? modelRuntime.getModel(options.providerId, options.modelId)
-          : undefined;
-
-      if (options.providerId && options.modelId && !model) {
-        throw new Error(
-          `Pi SDK model not found: ${options.providerId}/${options.modelId}.`,
-        );
-      }
-      if (options.conversation && !model) {
-        throw new Error(
-          "A configured Pi model is required to restore conversation history.",
-        );
-      }
-      // Hand the already-resolved window to the caller's prompt builder. Reading settings again
-      // there could observe a different model than the session actually uses.
-      buildOptions.onModelResolved?.(model?.contextWindow ?? null);
-
-      const agentDir = sdk.getAgentDir();
-      phase = "workspace_tool_load";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      // SettingsService owns config.toml, PREFERENCE.md and IDENTIFY.md; pass only their paths so
-      // the Agent tools can deny access while SettingsService remains their owner.
-      //
-      // The Agent's working directory is the conversation workspace, so a relative path the model
-      // writes lands in this conversation and disappears with it. Without a conversation the tools
-      // fall back to the configured root, which is the only case that still needs it.
-      const configuredWorkspace = await this.settings.getWorkspacePath();
-      const resourceRoot = resolve(configuredWorkspace);
-      const sessionWorkspace = options.conversation
-        ? this.settings.getSessionWorkspaceDirectory(options.conversation.id)
-        : configuredWorkspace;
-      const cwd = await prepareWorkspaceDirectory(sessionWorkspace);
-      const managedFilePaths = await this.settings.getManagedFilePaths();
-      // App-owned `read`/`edit`/`write` with the same names as Pi's built-ins, so they shadow them
-      // in the session: these carry the workspace boundary, the app-file guard and the artifact
-      // callback. Dropping them from `customTools` below silently falls back to the built-ins, which
-      // enforce nothing and never report a written path — the Agent still says it wrote a file, but
-      // no artifact row exists and the file sidebar stays empty.
-      const workspaceFileTools = await createWorkspaceFileTools(
-        sdk,
-        cwd,
-        undefined,
-        {
-          protectedPaths: managedFilePaths,
-          // Only stream() supplies this raw current-turn text. generate() has no grant.
-          currentUserRequest,
-          ...(options.onFileWritten
-            ? { onFileWritten: options.onFileWritten }
-            : {}),
-          onFileReadResolution: ({
-            outcome,
-            pathScope,
-            protectedPathCount,
-            elapsedMs,
-          }) => {
-            writeStructuredEvent(
-              this.logger,
-              outcome === "resolved" ? "log" : "warn",
-              "llm.file_tool.read.resolution",
-              {
-                ...logContext,
-                outcome,
-                pathScope,
-                protectedPathCount,
-                elapsedMs,
-              },
-            );
-          },
-          onFileOperationFailed: ({
-            toolName,
-            operation,
-            pathScope,
-            elapsedMs,
-            error,
-          }) => {
-            const errorFields = getSafeErrorLogFields(error);
-            const isPolicyDenied = errorFields.errorCode === "EWORKSPACE";
-            writeStructuredEvent(
-              this.logger,
-              isPolicyDenied ? "warn" : "error",
-              "llm.file_tool.operation.failed",
-              {
-                ...logContext,
-                toolName,
-                operation,
-                pathScope,
-                elapsedMs,
-                ...(isPolicyDenied
-                  ? { failureReason: "workspace_policy_denied" }
-                  : {}),
-                ...errorFields,
-              },
-            );
-          },
-        },
-      );
-      // Retrieval is not a model tool: the knowledge command decides, and ChatService passes the
-      // already-built context block into this request.
-      //
-      // Web tools bill the DeepSeek account per successful request. Chat and skill turns get them;
-      // `generate()` opts out. The deep-research skill decides when web evidence is useful.
-      const webToolsEnabled = areWebToolsEnabled(
-        { apiKey: modelSettings.deepseek.apiKey },
-        { enabled: buildOptions.webTools ?? true },
-      );
-      const webTools = webToolsEnabled
-        ? createWebTools({
-            apiKey: modelSettings.deepseek.apiKey,
-            requestId,
-            ...(options.conversation
-              ? { conversationId: options.conversation.id }
-              : {}),
-            ...(currentUserRequest?.trim()
-              ? { originalQuestion: currentUserRequest }
-              : {}),
-            logger: this.logger,
-          })
-        : [];
-      // `workspaceFileTools` must stay in this array: it is the only source of `onFileWritten`, and
-      // `tools:` below is just an allowlist of names — a name without a registered custom tool
-      // resolves to the built-in one instead.
-      const customTools = [...workspaceFileTools, ...webTools];
-      // Chat turns load long-term memory; internal JSON calls (`generate`) opt out.
-      // Extensions are in-process only. `noExtensions` keeps Pi from discovering packages, so a
-      // session registers exactly the persistence hook plus the allowlisted memory tools.
-      const extensionFactories: PiExtensionFactory[] = [];
-      if (options.persistConversationEvent) {
-        extensionFactories.push(
-          createConversationPersistenceExtension(
-            options.persistConversationEvent,
-          ),
-        );
-      }
-
-      const toolAllowlist = buildOptions.tools ?? [
-        "read",
-        "edit",
-        "write",
-        "grep",
-        "find",
-        "ls",
-        ...(webToolsEnabled ? [...WEB_TOOL_NAMES] : []),
-      ];
-      let customSystemPrompt: string;
-      if (buildOptions.systemPromptAppend?.trim()) {
-        // Rehearsal supplies its own fixed prompt; chat rules, identity and style preference would
-        // conflict with the student role and are intentionally skipped.
-        customSystemPrompt = buildOptions.systemPromptAppend;
-      } else {
-        const [stylePreference, identity] = await Promise.all([
-          this.settings.getStylePreference(),
-          this.settings.getIdentitySetting(),
-        ]);
-        const knowledgeBaseIndex = this.settings.getKnowledgeCatalogPath();
-        const promptSections = [
-          "\n\n## Adaptive teaching",
-          "- Infer the user's familiarity with the current concept from conversation context, available memory, and demonstrated understanding. Distinguish exposure from mastery; do not assume expertise without evidence.",
-          "- Adapt teaching to the current concept: favor explanations, examples, and guided steps for beginners; gradually introduce questions and scaffolding as understanding grows; use Socratic questioning, counterexamples, and application challenges when the user shows sufficient foundations.",
-          "- Treat these as flexible preferences, not fixed stages. Reassess understanding as new evidence emerges and reduce question difficulty or explain directly when the user struggles.",
-          "- Respect the user's immediate intent. Answer direct questions directly when appropriate, and avoid unnecessary quizzes or repetitive probing.",
-          "- When knowledge level is uncertain, start accessibly and calibrate through natural interaction rather than mandatory assessments.",
-          "\n\n## Workspace and file rules:",
-          `- Your working directory is: ${cwd}.`,
-          "- Create files only when explicitly requested by the user. Answer ordinary questions directly in chat.",
-          "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
-          "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
-          "- For mind maps, prefer SVG with a left-to-right tree layout.",
-          "\n\n## Knowledge library:",
-          `- The catalog of knowledge base: ${knowledgeBaseIndex}.`,
-          "- When the user needs to search the knowledge base, use the knowledge base catalog to locate and read the relevant original documents.",
-        ];
-        if (identity.trim()) {
-          // User-authored context about who they are and what they are working toward. It steers
-          // examples and depth without overriding the current request.
-          promptSections.push(`\n\n## User identity:\n${identity.trim()}`);
-        }
-        if (stylePreference.trim()) {
-          promptSections.push(`\n\n## User preferences: \n${stylePreference}`);
-        }
-        customSystemPrompt = promptSections.join("\n");
-      }
-
-      // Bundled skill templates are copied into the config root once. The user can then inspect,
-      // edit or replace them without depending on the backend install directory.
-      await this.ensureInstalledSkills();
-
-      const resourceLoader = new sdk.DefaultResourceLoader({
-        cwd,
-        agentDir,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-        // Context discovery stays disabled: every instruction this session needs comes from the
-        // system prompt above, so no workspace or ancestor AGENTS.md can steer a conversation.
-        extensionFactories,
-        // These stay anchored to the configured root instead of the session cwd, so per-session
-        // workspaces never change where user-provided skills and prompt templates are looked up.
-        // `noSkills` only disables discovery, not these explicit paths. The config-root directory
-        // is the installed location (`<configDir>/skills`); the workspace directory remains for
-        // users who keep project-local skills next to their other Agent files.
-        additionalSkillPaths: [
-          this.settings.getSkillsDirectory(),
-          join(resourceRoot, "skills"),
-        ],
-        additionalPromptTemplatePaths: [join(resourceRoot, "prompts")],
-        appendSystemPromptOverride: (base) => [...base, customSystemPrompt],
-      });
-      // The SDK does not reload an explicitly supplied resourceLoader. Load
-      // only these allowlisted extensions before session creation.
-      phase = "resource_loader_reload";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      await resourceLoader.reload();
-
-      // `/skill:name` silently stays literal when the skill is missing. A caller that asked for a
-      // skill must get a real error here instead of a model turn that can no longer follow the
-      // procedure it was promised.
-      if (options.skillName) {
-        const requestedSkill = resourceLoader
-          .getSkills()
-          .skills.find((skill) => skill.name === options.skillName);
-        if (!requestedSkill) {
-          throw new Error(`Pi skill not found: ${options.skillName}.`);
-        }
-      }
-
-      const settingsManager = sdk.SettingsManager.create(
-        cwd,
-        sdk.getAgentDir(),
-      );
-      settingsManager.applyOverrides({
-        retry: {
-          enabled: true,
-          maxRetries: 3,
-        },
-        // Force compaction on for app-owned sessions. `setCompactionEnabled()` also writes the
-        // value into the user's global Pi settings file; overrides stay inside this session.
-        compaction: {
-          enabled: true,
-        },
-      });
-      const compactionSettings = settingsManager.getCompactionSettings(model);
-
-      phase = "history_restore";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-        historyMessageCount: options.conversation?.history.length ?? 0,
-      });
-      // 快照是模型上下文；仅缺失或落后于最新 SQLite 消息时用 UI 历史重建。
-      const restoredEntries = options.conversation
-        ? await this.restoreEntries(options.conversation, model!, logContext)
-        : undefined;
-      const sessionManager = options.conversation
-        ? sdk.SessionManager.inMemory(
-            cwd,
-            { id: options.conversation.id },
-            restoredEntries!,
-          )
-        : sdk.SessionManager.inMemory(cwd);
-
-      phase = "agent_session_create";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      const { session } = await sdk.createAgentSession({
-        cwd,
-        agentDir,
-        modelRuntime,
-        model,
-        thinkingLevel: options.thinkingLevel ?? "high",
-        resourceLoader,
-        sessionManager,
-        settingsManager,
-        // The allowlist covers every registered tool name, so extension tools are listed too.
-        tools: [...toolAllowlist],
-        excludeTools: ["bash"],
-        customTools,
-      });
-
-      // Extensions receive `session_start` only through this binding; the persistence hook relies
-      // on it to attach its awaited event handlers.
-      phase = "extension_bind";
-      writeStructuredEvent(this.logger, "log", "llm.session.create.phase", {
-        ...logContext,
-        phase,
-      });
-      await session.bindExtensions({});
-
-      writeStructuredEvent(this.logger, "log", "llm.session.create.completed", {
-        ...logContext,
-        providerId: options.providerId,
-        modelId: options.modelId,
-        historyMessageCount: options.conversation?.history.length ?? 0,
-        restoredEntryCount: restoredEntries?.length ?? 0,
-        extensionCount: extensionFactories.length,
-        customToolCount: customTools.length,
-        toolCount: toolAllowlist.length,
-        webToolsEnabled,
-        webToolCount: webTools.length,
-        skillsDirectory: this.settings.getSkillsDirectory(),
-        compactionEnabled: compactionSettings.enabled,
-        compactionReserveTokens: compactionSettings.reserveTokens,
-        compactionKeepRecentTokens: compactionSettings.keepRecentTokens,
-        modelContextWindow: model?.contextWindow ?? null,
-        // Pi compacts when contextTokens > contextWindow - reserveTokens.
-        compactionThresholdTokens: model
-          ? Math.max(0, model.contextWindow - compactionSettings.reserveTokens)
-          : null,
-        elapsedMs: Date.now() - startedAt,
-      });
-      return session;
-    } catch (error) {
-      writeStructuredEvent(this.logger, "error", "llm.session.create.failed", {
-        ...logContext,
-        providerId: options.providerId,
-        modelId: options.modelId,
-        phase,
-        historyMessageCount: options.conversation?.history.length ?? 0,
-        elapsedMs: Date.now() - startedAt,
-        ...getSafeErrorLogFields(error),
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Persists the cleaned Pi snapshot of one chat turn.
-   *
-   * The snapshot is the model context for the next turn, so per-turn injected text must be gone:
-   * this turn's prompt and every historical user row map back to their clean stored text. A
-   * skipped or failed save only logs; the stream result is final and the next request rebuilds
-   * from SQLite history.
-   */
-  async saveConversationSnapshot(input: {
-    conversation: LlmConversationContext | undefined;
-    session: PiAgentSession;
-    prompt: string;
-    skip: boolean;
-    logContext: RequestLogContext;
-  }): Promise<void> {
-    if (!input.conversation || input.skip) return;
-    const conversation = input.conversation;
-    // Map every historical user row back to its clean stored text so old injected blocks are
-    // removed too, not only the current turn's.
-    const userTextById = new Map<string, string>();
-    for (const message of conversation.history) {
-      if (message.role !== "user") continue;
-      try {
-        userTextById.set(
-          message.id,
-          this.parseTextBlocks(message.contentJson)
-            .map((block) => block.text)
-            .join("\n"),
-        );
-      } catch {
-        // A malformed historical row is left untouched; the current prompt still gets cleaned.
-      }
-    }
-    const entries: SessionEntry[] = replaceInjectedUserText(
-      input.session.sessionManager.getEntries(),
-      input.prompt,
-      userTextById,
-    );
-    if (entries.length === 0) return;
-    // An image or SVG the model just wrote is already on disk; replaying its body on every later
-    // turn only spends context, so the snapshot keeps a placeholder that still names the path.
-    const pruned = pruneImageWritePayloads(entries, (writtenPath) =>
-      this.isPrunableSessionFile(conversation.id, writtenPath),
-    );
-    if (pruned.prunedWrites > 0) {
-      writeStructuredEvent(
-        this.logger,
-        "log",
-        "llm.session_snapshot.image_payload_pruned",
-        {
-          ...input.logContext,
-          prunedWrites: pruned.prunedWrites,
-          bytesRemoved: pruned.bytesRemoved,
-        },
-      );
-    }
-    try {
-      await this.piSessionSnapshots.saveSnapshot(
-        conversation.id,
-        pruned.entries,
-      );
-    } catch (error) {
-      writeStructuredEvent(
-        this.logger,
-        "error",
-        "llm.session_snapshot.save.failed",
-        {
-          ...input.logContext,
-          entryCount: entries.length,
-          ...getSafeErrorLogFields(error),
-        },
-      );
-    }
-  }
-
-  /**
-   * Reports whether one written path is still a file inside this conversation's workspace.
-   *
-   * The prune guard: a body is only replaced when the file it describes still exists where the
-   * session can read it again. Relative paths resolve against the workspace, which is the working
-   * directory the model writes into.
-   */
-  private isPrunableSessionFile(
-    conversationId: string,
-    writtenPath: string,
-  ): boolean {
-    try {
-      const workspaceRoot = resolve(
-        this.settings.getSessionWorkspaceDirectory(conversationId),
-      );
-      const absolutePath = isAbsolute(writtenPath)
-        ? writtenPath
-        : resolve(workspaceRoot, writtenPath);
-      if (!isPathWithin(workspaceRoot, absolutePath)) return false;
-      return statSync(absolutePath, { throwIfNoEntry: false })?.isFile() ?? false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Restores the model context by preferring the stored Pi snapshot; SQLite
-   * history is rebuilt only when the snapshot is missing or lags behind it.
-   */
-  private async restoreEntries(
-    conversation: LlmConversationContext,
-    model: PiModel,
-    logContext: RequestLogContext,
-  ): Promise<SessionEntry[]> {
-    const rebuiltEntries = this.createSessionEntries(
-      conversation.history,
-      model,
-    );
-    let snapshotEntries: SessionEntry[] | null = null;
-    try {
-      snapshotEntries = await this.piSessionSnapshots.getSnapshot(
-        conversation.id,
-      );
-    } catch (error) {
-      writeStructuredEvent(
-        this.logger,
-        "warn",
-        "llm.session_snapshot.load.failed",
-        {
-          ...logContext,
-          ...getSafeErrorLogFields(error),
-        },
-      );
-    }
-
-    const restored = pickSessionEntries(rebuiltEntries, snapshotEntries);
-    // A broken tool pair makes every later provider call fail, so the restored entries are
-    // checked on both sources, and a repair is persisted before the provider runs.
-    const checked = checkSessionEntries(restored.entries);
-    const changed =
-      checked.removedToolResults + checked.strippedToolCalls + checked.relinkedEntries > 0;
-    if (changed) {
-      writeStructuredEvent(this.logger, "warn", "llm.session_snapshot.repaired", {
-        ...logContext,
-        source: restored.source,
-        removedToolResults: checked.removedToolResults,
-        strippedToolCalls: checked.strippedToolCalls,
-        relinkedEntries: checked.relinkedEntries,
-        restoredEntryCount: checked.entries.length,
-      });
-      try {
-        await this.piSessionSnapshots.saveSnapshot(conversation.id, checked.entries);
-      } catch (error) {
-        writeStructuredEvent(
-          this.logger,
-          "error",
-          "llm.session_snapshot.repair_save.failed",
-          {
-            ...logContext,
-            ...getSafeErrorLogFields(error),
-          },
-        );
-      }
-    }
-    writeStructuredEvent(this.logger, "log", "llm.session.restore.completed", {
-      ...logContext,
-      source: restored.source,
-      rebuiltEntryCount: rebuiltEntries.length,
-      snapshotEntryCount: snapshotEntries?.length ?? 0,
-      restoredEntryCount: checked.entries.length,
-    });
-    return checked.entries;
-  }
-
-  /** Converts persisted plain-text turns into the Pi SDK's authoritative entry tree. */
-  private createSessionEntries(
-    history: readonly LlmConversationHistoryMessage[],
-    model: PiModel,
-  ): PiSessionMessageEntry[] {
-    let parentId: string | null = null;
-    const entries: PiSessionMessageEntry[] = [];
-
-    for (const storedMessage of history) {
-      const createdAt = new Date(storedMessage.createdAt);
-      const timestamp = createdAt.getTime();
-      const persistedPiMessage = parsePersistedPiMessage(
-        storedMessage.contentJson,
-      );
-      if (persistedPiMessage) {
-        const nestedTimestamp = persistedPiMessage.message.timestamp;
-        const entryTimestamp = Number.isFinite(nestedTimestamp)
-          ? new Date(nestedTimestamp).toISOString()
-          : createdAt.toISOString();
-        const piEntry: PiSessionMessageEntry = {
-          type: "message",
-          id: storedMessage.id,
-          parentId,
-          timestamp: entryTimestamp,
-          message: persistedPiMessage.message,
-        };
-        entries.push(piEntry);
-        parentId = piEntry.id;
-        continue;
-      }
-
-      if (storedMessage.role === "user") {
-        const userMessage: PiSessionMessageEntry["message"] = {
-          role: "user",
-          content: this.parseTextBlocks(storedMessage.contentJson),
-          timestamp,
-        };
-        const userEntry: PiSessionMessageEntry = {
-          type: "message",
-          id: storedMessage.id,
-          parentId,
-          timestamp: createdAt.toISOString(),
-          message: userMessage,
-        };
-        entries.push(userEntry);
-        parentId = userEntry.id;
-        continue;
-      }
-      if (storedMessage.role !== "assistant") continue;
-
-      const content = this.parseTextBlocks(storedMessage.contentJson);
-      if (content.length === 0) continue;
-      const assistantMessage: PiSessionMessageEntry["message"] = {
-        role: "assistant",
-        content,
-        api: model.api,
-        provider: model.provider,
-        model: model.id,
-        usage: createEmptyUsage(),
-        stopReason:
-          storedMessage.status === "completed"
-            ? "stop"
-            : storedMessage.status === "cancelled"
-              ? "aborted"
-              : "error",
-        timestamp,
-      };
-      const assistantEntry: PiSessionMessageEntry = {
-        type: "message",
-        id: storedMessage.id,
-        parentId,
-        timestamp: createdAt.toISOString(),
-        message: assistantMessage,
-      };
-      entries.push(assistantEntry);
-      parentId = assistantEntry.id;
-    }
-
-    return entries;
-  }
-
-  /** Parses the stored text-block format and rejects content Pi history cannot restore. */
-  private parseTextBlocks(
-    contentJson: string,
-  ): Array<{ type: "text"; text: string }> {
-    const value: unknown = JSON.parse(contentJson);
-    if (!Array.isArray(value) || !value.every(isStoredTextBlock)) {
-      throw new Error("Stored conversation content is not valid text blocks.");
-    }
-    return value;
-  }
-
-  /**
-   * Seeds bundled skill templates into `<configDir>/skills` once per process.
-   *
-   * The promise is retained so concurrent sessions do not race the same copies; a failure clears
-   * it so the next session retries instead of permanently disabling skills.
-   */
-  private ensureInstalledSkills(): Promise<void> {
-    this.installedSkillsPromise ??= Promise.resolve()
-      .then(() =>
-        installBundledSkills(
-          BUNDLED_SKILLS_ASSET_PATH,
-          this.settings.getSkillsDirectory(),
-        ),
-      )
-      .catch((error: unknown) => {
-        this.installedSkillsPromise = undefined;
-        throw error;
-      });
-    return this.installedSkillsPromise;
-  }
-
-  /** Loads and caches the Pi SDK module. */
-  private getPiSdk(): Promise<PiSdk> {
-    this.piSdkPromise ??= importPiSdk(PI_SDK_PACKAGE);
-    return this.piSdkPromise;
-  }
-
-  /** Turns a settled completion into text, naming truncation and legitimately empty runs. */
+  /** Turns a settled completion into text and preserves useful provider failure types. */
   readAssistantText(
-    completion: Exclude<AssistantCompletion, { kind: "cancelled" }>,
+    completion: Exclude<AssistantCompletion, { kind: 'cancelled' }>,
   ): string {
-    if (completion.kind === "truncated") {
+    if (completion.kind === 'truncated') {
       throw new LlmResponseTruncatedError();
     }
-    if (completion.kind === "rejected") {
+    if (completion.kind === 'rejected') {
       throw new LlmProviderRejectedError(completion.providerMessage);
     }
-    if (completion.kind === "empty") {
-      throw new Error("Pi SDK completed without returning assistant text.");
+    if (completion.kind === 'empty') {
+      throw new Error('Pi SDK completed without returning assistant text.');
     }
     return completion.text;
   }
@@ -1204,66 +336,6 @@ export function getProviderRejectionLogFields(
 ): Record<string, unknown> {
   if (!(error instanceof LlmProviderRejectedError)) return {};
   return { providerErrorMessage: clipLogText(error.providerMessage, 600) };
-}
-
-/** One persisted content block, narrowed from the stored JSON before Pi restores it. */
-function isStoredTextBlock(
-  block: unknown,
-): block is { type: "text"; text: string } {
-  if (typeof block !== "object" || block === null || Array.isArray(block)) {
-    return false;
-  }
-  if (!("type" in block) || !("text" in block)) return false;
-  return block.type === "text" && typeof block.text === "string";
-}
-
-/** Identifies one Pi message independently of SQLite row and Pi entry IDs. */
-function getPiMessageSignature(
-  message: PiSessionMessageEntry["message"],
-): string {
-  return JSON.stringify({
-    role: message.role,
-    content: "content" in message ? message.content : undefined,
-    ...("toolCallId" in message ? { toolCallId: message.toolCallId } : {}),
-  });
-}
-
-/**
- * Picks the last message that corresponds to a persisted transcript row,
- * skipping Pi-only entries such as compaction or system context messages.
- */
-function findLastRestorableMessageSignature(
-  entries: readonly SessionEntry[],
-): string | undefined {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry.type !== "message") continue;
-    const { role } = entry.message;
-    if (role === "user" || role === "assistant" || role === "toolResult") {
-      return getPiMessageSignature(entry.message);
-    }
-  }
-  return undefined;
-}
-
-/**
- * Prefers the stored model-context snapshot. It is rejected only when its last
- * persisted message lags behind SQLite, which means the previous run crashed or
- * could not save the snapshot; SQLite history then rebuilds the context.
- */
-function pickSessionEntries(
-  rebuilt: PiSessionMessageEntry[],
-  snapshot: SessionEntry[] | null,
-): { entries: SessionEntry[]; source: SessionRestoreSource } {
-  if (!snapshot || rebuilt.length === 0) {
-    return { entries: rebuilt, source: "rebuilt_history" };
-  }
-  const latestRebuilt = rebuilt[rebuilt.length - 1];
-  const snapshotTail = findLastRestorableMessageSignature(snapshot);
-  if (snapshotTail === getPiMessageSignature(latestRebuilt.message)) {
-    return { entries: snapshot, source: "session_snapshot" };
-  }
-  return { entries: rebuilt, source: "rebuilt_history" };
 }
 
 /**
@@ -1320,29 +392,6 @@ export function logPiCompactionEvent(
     ...fields,
     errorMessageChars: event.errorMessage?.length ?? 0,
   });
-}
-
-/** Builds the shared internal request correlation fields for LLM logs. */
-export function getRequestLogContext(
-  options: LlmRequestOptions,
-  requestId: string,
-): RequestLogContext {
-  return {
-    requestId,
-    ...(options.conversation
-      ? { conversationId: options.conversation.id }
-      : {}),
-  };
-}
-
-/** Resolves the safe provider/model identifiers for one settings snapshot. */
-function getSelectedModelIds(
-  settings: StoredLlmSettings,
-): Pick<LlmRequestOptions, "providerId" | "modelId"> {
-  return {
-    providerId: DEEPSEEK_PROVIDER_ID,
-    modelId: settings.deepseek.modelId,
-  };
 }
 
 /**

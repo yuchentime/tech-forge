@@ -13,24 +13,27 @@ import {
   classifyAssistantCompletion,
   composeModelPrompt,
   getProviderRejectionLogFields,
-  getRequestLogContext,
   logPiCompactionEvent,
   type LlmStreamOptions,
 } from "./CommonAgent";
+import { PiAgentRuntime, getRequestLogContext } from "../pi-agent-runtime";
 
 /**
  * Streams one chat turn as ordered Pi events.
  *
- * `CommonAgent` builds the session; this class owns only the streaming loop: queueing Pi events,
- * bridging request cancellation, and saving the cleaned per-turn snapshot. It keeps no message
- * state: the durable transcript stays in SQLite and the model context in the Pi snapshot.
+ * `PiAgentRuntime` builds the session and owns its snapshot; this class owns the streaming loop,
+ * event queue and request cancellation. It keeps no message state: the durable transcript stays
+ * in SQLite and the model context in the Pi snapshot.
  */
 @Injectable()
 export class LearnAgent {
   private readonly logger = new Logger(LearnAgent.name);
 
-  /** Injects the shared session builder and the non-streamed call. */
-  constructor(private readonly commonAgent: CommonAgent) {}
+  /** Injects the Pi session runtime and common response classifier. */
+  constructor(
+    private readonly piAgentRuntime: PiAgentRuntime,
+    private readonly commonAgent: CommonAgent,
+  ) {}
 
   /**
    * 按序产出 Pi session 事件，并在请求取消时中止底层 Pi run。
@@ -117,9 +120,9 @@ export class LearnAgent {
     let session: PiAgentSession;
     try {
       const { resolved, modelSettings } =
-        await this.commonAgent.resolveRequest(options);
+        await this.piAgentRuntime.resolveRequest(options);
       options = resolved;
-      session = await this.commonAgent.createSession(
+      session = await this.piAgentRuntime.createSession(
         {
           ...options,
           requestId,
@@ -350,7 +353,7 @@ export class LearnAgent {
       if (persistenceAbortPromise) await persistenceAbortPromise;
 
       // The snapshot must not keep the per-turn context: the next request restores from it.
-      await this.commonAgent.saveConversationSnapshot({
+      await this.piAgentRuntime.saveConversationSnapshot({
         conversation: options.conversation,
         session,
         prompt,

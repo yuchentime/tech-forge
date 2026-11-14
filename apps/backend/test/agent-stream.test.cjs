@@ -30,6 +30,32 @@ async function collect(generator) {
   return values;
 }
 
+/** Builds the common classifier and a stub runtime for one LearnAgent test. */
+function createTestHarness() {
+  const runtime = {
+    resolveRequest: async (options) => ({
+      resolved: {
+        ...options,
+        providerId: 'deepseek',
+        modelId: 'deepseek-flash',
+      },
+      modelSettings: {
+        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
+      },
+    }),
+    createSession: async () => {
+      throw new Error('The test must provide a Pi session.');
+    },
+    saveConversationSnapshot: async () => undefined,
+  };
+  const commonAgent = new CommonAgent(runtime);
+  return {
+    runtime,
+    commonAgent,
+    service: new LearnAgent(runtime, commonAgent),
+  };
+}
+
 test('ChatService delegates the prompt and request signal to the configured model', async () => {
   const signal = new AbortController().signal;
   const calls = [];
@@ -344,17 +370,8 @@ test('LearnAgent queues Pi session events in subscription order', async () => {
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const commonAgent = new CommonAgent(
-    {},
-    {
-      getLlmSettings: async () => ({
-        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-      }),
-    },
-    {},
-  );
-  commonAgent.createSession = async () => session;
-  const service = new LearnAgent(commonAgent);
+  const { runtime, service } = createTestHarness();
+  runtime.createSession = async () => session;
 
   assert.deepEqual(await collect(service.stream('prompt')), [
     { type: 'turn_start' },
@@ -401,17 +418,8 @@ test('LearnAgent aborts the Pi session and removes its listener on cancellation'
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const commonAgent = new CommonAgent(
-    {},
-    {
-      getLlmSettings: async () => ({
-        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-      }),
-    },
-    {},
-  );
-  commonAgent.createSession = async () => session;
-  const service = new LearnAgent(commonAgent);
+  const { runtime, service } = createTestHarness();
+  runtime.createSession = async () => session;
   const controller = new AbortController();
   const iterator = service.stream('prompt', { signal: controller.signal });
 
@@ -453,17 +461,8 @@ test('durable context is appended as its own Pi message entry before prompting',
       },
     },
   };
-  const commonAgent = new CommonAgent(
-    {},
-    {
-      getLlmSettings: async () => ({
-        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-      }),
-    },
-    {},
-  );
-  commonAgent.createSession = async () => session;
-  const service = new LearnAgent(commonAgent);
+  const { runtime, service } = createTestHarness();
+  runtime.createSession = async () => session;
 
   await collect(service.stream('问题'));
   await collect(
@@ -503,17 +502,8 @@ test('a requested skill becomes the first token of the model prompt', async () =
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const commonAgent = new CommonAgent(
-    {},
-    {
-      getLlmSettings: async () => ({
-        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-      }),
-    },
-    {},
-  );
-  commonAgent.createSession = async () => session;
-  const service = new LearnAgent(commonAgent);
+  const { runtime, service } = createTestHarness();
+  runtime.createSession = async () => session;
 
   await collect(
     service.stream('光合作用', {
@@ -620,8 +610,8 @@ test('an output-limit stop is reported as truncation, not as an empty completion
     getContextUsage: () => undefined,
     sessionManager: { getEntries: () => [] },
   };
-  const { service, commonAgent } = createLearnAgent();
-  commonAgent.createSession = async () => session;
+  const { service, runtime } = createLearnAgent();
+  runtime.createSession = async () => session;
 
   await assert.rejects(collect(service.stream('画一张逻辑思考知识地图')), (error) => {
     assert.ok(error instanceof LlmResponseTruncatedError);
@@ -670,8 +660,8 @@ test('an aborted thinking-only turn does not break the next turn', async () => {
     sessionManager: { getEntries: () => [] },
   };
   const sessions = [abortedSession, answeredSession];
-  const { service, commonAgent } = createLearnAgent();
-  commonAgent.createSession = async () => sessions.shift();
+  const { service, runtime } = createLearnAgent();
+  runtime.createSession = async () => sessions.shift();
 
   assert.deepEqual(await collect(service.stream('确认')), [
     { type: 'message_end', message: thinkingOnlyMessage('aborted') },
@@ -1021,16 +1011,7 @@ function thinkingOnlyMessage(stopReason) {
   };
 }
 
-/** Builds a LearnAgent plus its session double; each test replaces `createSession`. */
+/** Builds a LearnAgent plus its session double; each test replaces the runtime session factory. */
 function createLearnAgent() {
-  const commonAgent = new CommonAgent(
-    {},
-    {
-      getLlmSettings: async () => ({
-        deepseek: { apiKey: 'test', modelId: 'deepseek-flash' },
-      }),
-    },
-    {},
-  );
-  return { service: new LearnAgent(commonAgent), commonAgent };
+  return createTestHarness();
 }
