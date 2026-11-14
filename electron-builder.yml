@@ -41,3 +41,13 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: TeachForge
   artifactName: "TeachForge-${version}-setup.${ext}"
+mac:
+  icon: "build/icon-mac.png"
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # Building a local DMG must not upload the app to Apple's notarization service implicitly.
+  notarize: false
+dmg:
+  artifactName: "TeachForge-${version}-mac-arm64.${ext}"

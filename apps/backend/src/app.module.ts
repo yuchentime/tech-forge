@@ -13,7 +13,6 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 import { LessonsModule } from './lessons/lessons.module';
 import { AgentModule } from './llm/agents/AgentModule';
 import { MemoryModule } from './memory/memory.module';
-import { PlatformModule } from './platform/platform.module';
 import { RehearsalsModule } from './rehearsals/rehearsals.module';
 import { RetrievalModule } from './retrieval/retrieval.module';
 import { SettingsModule } from './settings/settings.module';
@@ -23,7 +22,6 @@ import { StudyNotesModule } from './study-notes/study-notes.module';
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({ useFactory: buildDatabaseOptions }),
-    PlatformModule,
     DocumentsModule,
     KnowledgeModule,
     RetrievalModule,

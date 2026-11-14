@@ -12,7 +12,7 @@ related:
   - docs/current/domains/retrieval/index.md
   - docs/current/domains/system-settings/index.md
   - docs/source/后端架构设计.md
-last_verified: 2026-11-11
+last_verified: 2026-11-14
 ---
 
 # 技术栈当前事实
@@ -26,7 +26,7 @@ last_verified: 2026-11-11
 | Node.js | `engines.node >= 22.19.0`（本机运行 25.9.0）；后端已按 CommonJS 编译，Pi SDK 等 ESM 包经 `new Function("import")` 动态加载 |
 | 包管理 | npm workspaces（`apps/backend`、`apps/desktop`），单一根 `package-lock.json` |
 | TypeScript | 5.9.3（根声明，`@types/node` 24.19.2） |
-| 构建工具链 | Nest CLI 11.0.24；桌面端 Electron 主进程用 `tsc`，渲染层用 Vite；Windows 安装包由 electron-builder 26.18.0（根 `devDependencies`）生成 |
+| 构建工具链 | Nest CLI 11.0.24；桌面端 Electron 主进程用 `tsc`，渲染层用 Vite；Windows x64 与 macOS arm64 安装包由 electron-builder 26.18.0（根 `devDependencies`）生成 |
 | 开发编排 | `concurrently` 10.0.6、`wait-on` 9.5.1、`cross-env` 10.1.0（根 `package.json` 脚本） |
 
 ## 2. 进程与构建产物
@@ -100,7 +100,7 @@ last_verified: 2026-11-11
 
 ## 8. 升级与兼容约束
 
-- `better-sqlite3` 13 与 `onnxruntime-node` 1.30 都是 N-API 预编译依赖（`prebuilds/win32-x64.node`、`bin/napi-v6/win32`），安装包设置 `npmRebuild: false`，打包不需要 C++ 工具链；布局与运行时路径见 [Windows 安装包](packaging.md)。
+- `better-sqlite3` 13 与 `onnxruntime-node` 1.30 都是 N-API 预编译依赖；Windows x64 包保留 Win32 x64 文件，macOS Apple Silicon 包保留 Darwin arm64 文件。安装包设置 `npmRebuild: false`；布局与运行时路径见[桌面安装包](packaging.md)。
 - 渲染层与主进程共享的类型放在 `apps/desktop/src/types/`，主进程编译目标固定 CommonJS；引入仅 ESM 的包需沿用后端的动态导入做法。
 
 ## 代码入口

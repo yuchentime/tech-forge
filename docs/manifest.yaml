@@ -1,4 +1,25 @@
 routes:
+  macos-arm64-package:
+    description: "Build a macOS Apple Silicon DMG on darwin arm64, stage only Darwin arm64 better-sqlite3 and ONNX Runtime binaries, retain the resources/backend layout, and keep public signing/notarization out of scope"
+    token_budget: 10000
+    code_globs:
+      - "build/icon-mac.png"
+      - "electron-builder.yml"
+      - "package.json"
+      - "scripts/prepare-release.mjs"
+      - "scripts/stage-backend.mjs"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/packaging.md
+      - docs/current/platform/tech-stack.md
+      - docs/changes/2026-11-14-macos-arm64-package/brief.md
+      - docs/changes/2026-11-14-macos-arm64-package/design.md
+      - docs/changes/2026-11-14-macos-arm64-package/verification.md
+    optional:
+      - docs/changes/2026-11-14-macos-arm64-package/worklog.md
+      - docs/changes/2026-11-14-macos-arm64-package/reviews/design-review.md
+    history_on_demand:
+      - docs/changes/2026-11-11-windows-installer/verification.md
   classroom-mode:
     description: "Add or change the classroom mode: a 16:9 immersive classroom stage with a lecture composer, student questions and a collapsible message sidebar, plus the distinction between temporarily leaving and ending a classroom session"
     token_budget: 20000

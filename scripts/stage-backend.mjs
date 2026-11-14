@@ -54,24 +54,51 @@ function stagedPathFor(relativePath) {
   return undefined;
 }
 
-/** Removes binaries that can never load on win32 to keep the installer small. */
-function pruneOtherPlatforms(stage) {
-  const sqlitePrebuilds = path.join(stage, files.nodeModules, 'better-sqlite3', 'prebuilds');
-  if (existsSync(sqlitePrebuilds)) {
-    for (const entry of readdirSync(sqlitePrebuilds)) {
-      if (entry !== 'win32-x64.node') rmSync(path.join(sqlitePrebuilds, entry), { force: true });
-    }
+/** Accepts only native package targets that have a supported installer command. */
+function parseTarget(args) {
+  const [platform, arch, ...extra] = args;
+  const targetKey = `${platform}-${arch}`;
+  const supportedTargets = new Set(['win32-x64', 'darwin-arm64']);
+  if (extra.length > 0 || !supportedTargets.has(targetKey)) {
+    throw new Error(
+      `Unsupported staging target ${targetKey}; expected one of: ${[...supportedTargets].join(', ')}`,
+    );
   }
+  return { platform, arch, key: targetKey };
+}
+
+/** Keeps only the selected platform's prebuilt files for backend native dependencies. */
+function pruneOtherPlatforms(stage, target) {
+  const sqlitePrebuilds = path.join(stage, files.nodeModules, 'better-sqlite3', 'prebuilds');
+  const sqliteTarget = `${target.key}.node`;
+  const sqliteTargetPath = path.join(sqlitePrebuilds, sqliteTarget);
+  if (!existsSync(sqliteTargetPath)) {
+    throw new Error(`Missing ${target.key} prebuild for better-sqlite3 at ${sqliteTargetPath}`);
+  }
+  for (const entry of readdirSync(sqlitePrebuilds)) {
+    if (entry !== sqliteTarget) rmSync(path.join(sqlitePrebuilds, entry), { force: true });
+  }
+
   const ortPlatforms = path.join(stage, files.nodeModules, 'onnxruntime-node', 'bin', 'napi-v6');
-  if (existsSync(ortPlatforms)) {
-    for (const entry of readdirSync(ortPlatforms)) {
-      if (entry !== 'win32') rmSync(path.join(ortPlatforms, entry), { recursive: true, force: true });
+  const ortTarget = path.join(ortPlatforms, target.platform, target.arch);
+  const ortBinding = path.join(ortTarget, 'onnxruntime_binding.node');
+  if (!existsSync(ortBinding)) {
+    throw new Error(`Missing ${target.key} ONNX Runtime binding at ${ortBinding}`);
+  }
+  for (const platform of readdirSync(ortPlatforms)) {
+    const platformPath = path.join(ortPlatforms, platform);
+    if (platform !== target.platform) {
+      rmSync(platformPath, { recursive: true, force: true });
+      continue;
+    }
+    for (const arch of readdirSync(platformPath)) {
+      if (arch !== target.arch) rmSync(path.join(platformPath, arch), { recursive: true, force: true });
     }
   }
 }
 
-/** Copies the backend build output, runtime assets and production dependencies into the stage. */
-function stageBackend() {
+/** Copies backend output and the production dependencies for one supported native package target. */
+function stageBackend(target) {
   rmSync(stageDir, { recursive: true, force: true });
   mkdirSync(stageDir, { recursive: true });
 
@@ -112,7 +139,7 @@ function stageBackend() {
     copied += 1;
   }
 
-  pruneOtherPlatforms(stageDir);
+  pruneOtherPlatforms(stageDir, target);
 
   const bytes = directorySize(stageDir);
   console.log(
@@ -132,4 +159,4 @@ function directorySize(directory) {
   return total;
 }
 
-stageBackend();
+stageBackend(parseTarget(process.argv.slice(2)));

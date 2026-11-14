@@ -1,13 +1,11 @@
 /**
- * Clears the previous electron-builder output before a packaging run and names the process that
- * holds it when Windows refuses.
+ * Clears the selected electron-builder output before a packaging run and explains how to recover
+ * when Windows or macOS refuses to remove a file.
  *
- * electron-builder deletes `release/win-unpacked` at the very end of `package:win`, after the full
- * Nest/tsc/Vite build and the ~650 MB backend staging. When an editor extension previewed
- * `resources/app.asar`, or a packaged `TeachForge.exe` is still running, that delete fails with a
- * bare `EBUSY: resource busy or locked, unlink ...\release\win-unpacked\resources\app.asar` and the
- * whole run is lost. Removing the same directory up front turns that into a one-second failure with
- * the owning process listed, and leaves nothing for electron-builder to delete afterwards.
+ * electron-builder normally cleans unpacked app output at the end of a packaging run. If an app or
+ * editor still holds a file, that late cleanup can fail after the full build and backend staging.
+ * Removing the target directory first moves that failure before expensive work; on Windows it also
+ * reports the process holding the file.
  *
  * The tree is removed bottom-up instead of through `fs.rmSync(..., { recursive: true })`: the
  * recursive variant reports the directory (which the Restart Manager cannot resolve) and its retry
@@ -20,8 +18,17 @@ import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const releaseDir = path.join(root, 'release');
-/** electron-builder's unpacked app plus the temp copy it keeps while copying the Electron dist. */
-const staleDirs = ['win-unpacked.tmp', 'win-unpacked'].map((name) => path.join(releaseDir, name));
+const targetName = process.argv[2] ?? 'win';
+const staleNamesByTarget = {
+  win: ['win-unpacked.tmp', 'win-unpacked'],
+  'mac-arm64': ['mac-arm64.tmp', 'mac-arm64'],
+};
+const staleNames = staleNamesByTarget[targetName];
+if (staleNames === undefined) {
+  throw new Error(`Unsupported release cleanup target ${targetName}; expected win or mac-arm64`);
+}
+/** electron-builder's platform output plus the temporary copy it keeps while preparing artifacts. */
+const staleDirs = staleNames.map((name) => path.join(releaseDir, name));
 const lockReportScript = path.join(import.meta.dirname, 'release-lock-report.ps1');
 const busyCodes = new Set(['EBUSY', 'EPERM', 'EACCES']);
 /** Indexer and antivirus handles clear within a few hundred milliseconds; anything longer is a user. */
@@ -82,27 +89,28 @@ function busyReleaseError(directory, blocked) {
   const lines = [
     `cannot remove ${path.relative(root, directory)}: ${lock.code} on ${lock.target}`,
   ];
-  let lockers = [];
-  try {
-    lockers = findLockers(lock.target);
-  } catch (reportError) {
-    lines.push(`lock lookup failed: ${reportError.message.split('\n')[0]}`);
-  }
-  if (lockers.length === 0) {
-    lines.push(
-      'no owning process reported; an antivirus scan or a permission problem is the remaining cause',
-    );
-  } else {
-    lines.push('held open by:');
-    for (const { pid, image, app } of lockers) {
-      lines.push(`  pid ${pid}  ${app && app !== image ? `${image} (${app})` : image}`);
+  if (process.platform === 'win32') {
+    let lockers = [];
+    try {
+      lockers = findLockers(lock.target);
+    } catch (reportError) {
+      lines.push(`lock lookup failed: ${reportError.message.split('\n')[0]}`);
     }
+    if (lockers.length === 0) {
+      lines.push(
+        'no owning process reported; an antivirus scan or a permission problem is the remaining cause',
+      );
+    } else {
+      lines.push('held open by:');
+      for (const { pid, image, app } of lockers) {
+        lines.push(`  pid ${pid}  ${app && app !== image ? `${image} (${app})` : image}`);
+      }
+    }
+  } else {
+    lines.push('close TeachForge.app or any process using this build output, then retry');
   }
-  lines.push(
-    'close the holder and run `npm run package:win` again:',
-    '  - a TeachForge.exe started from release/win-unpacked',
-    '  - an editor that previewed or indexed the packaged output (in VS Code: "Developer: Reload Window")',
-  );
+  const command = `package:${targetName === 'win' ? 'win' : 'mac-arm64'}`;
+  lines.push(`rerun npm run ${command} after closing the holder`);
   const error = new Error(lines.join('\n'));
   error.name = 'BusyReleaseDirectory';
   return error;

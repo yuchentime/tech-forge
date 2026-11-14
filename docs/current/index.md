@@ -14,7 +14,7 @@ last_verified: 2026-11-12
 
 - [平台索引](platform/index.md)：Electron、React、NestJS 运行架构和代码放置指南。
 - [技术栈](platform/tech-stack.md)：运行链路实际使用的依赖、声明与安装版本、存储/嵌入/解析选型，以及声明但未接入的遗留项与升级约束。
-- [Windows 安装包](platform/packaging.md)：`npm run package:win` 的构建链、`resources/` 布局、原生依赖解包与运行时路径约束。
+- [桌面安装包](platform/packaging.md)：Windows x64 NSIS 与 macOS Apple Silicon DMG 的构建链、`resources/` 布局、原生依赖筛选与运行时路径约束。
 - [桌面端皮肤](platform/desktop-skin.md)：`brand`/`ink`/`honey` 语义色阶、画布渐变与装饰组件，以及"只用 token 类"的界面约束。
 - [课堂模式](platform/classroom-mode.md)：课堂首页（进行中/历史总结/开始新课堂）、16:9 舞台、一轮对话与消息侧栏、结束后的模型总结，以及窗口比例的实现边界。
 - [Agent Runtime](platform/agent-runtime.md)：Agent、Pi SDK、SQLite 持久化与恢复流程、扩展与 skill 装载（进程内扩展、内置 `deep-research` skill、记忆工具与 DeepSeek 网页搜索/抓取工具）、结构化诊断日志，以及 Agent 文件读写的安全边界。
