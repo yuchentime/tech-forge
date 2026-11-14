@@ -257,11 +257,23 @@ export function ClassroomHome({
 
               {listStatus === 'loading' ? (
                 <p className="py-16 text-center text-sm text-ink-500">正在加载课堂…</p>
+              ) : listStatus === 'error' ? (
+                /* The banner above already explains the failure; claiming "empty" would be a guess. */
+                null
+              ) : !activeLesson && history.length === 0 ? (
+                /* Nothing recorded yet: no sections, only the first-run placeholder. */
+                <EmptyState
+                  className="my-auto"
+                  description="把它照实讲清楚，越具体越好；发送后，学生会从不同角度提问，看你这一遍讲不讲得通。"
+                  hint="点右上角「开始新课堂」。讲不清、被问住的地方，正好是回去备课和演练的线索。"
+                  icon={Chalkboard}
+                  title="想一个真要讲给别人的课题"
+                />
               ) : (
                 <>
-                  <section aria-label="进行中的课堂">
-                    <h2 className="mb-3 text-sm font-semibold text-ink-700">进行中的课堂</h2>
-                    {activeLesson ? (
+                  {activeLesson && (
+                    <section aria-label="进行中的课堂">
+                      <h2 className="mb-3 text-sm font-semibold text-ink-700">进行中的课堂</h2>
                       <div className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
                           <p className="text-base font-semibold text-ink-900">
@@ -290,27 +302,12 @@ export function ClassroomHome({
                           </button>
                         </div>
                       </div>
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-ink-300 bg-white/70 px-5 py-8 text-center">
-                        <p className="text-sm font-medium text-ink-700">现在没有进行中的课堂</p>
-                        <p className="mt-1 text-xs text-ink-500">
-                          点击右上角「开始新课堂」，写下要讲给学生的内容。
-                        </p>
-                      </div>
-                    )}
-                  </section>
+                    </section>
+                  )}
 
-                  <section aria-label="历史课堂">
-                    <h2 className="mb-3 text-sm font-semibold text-ink-700">历史课堂</h2>
-                    {history.length === 0 ? (
-                      <EmptyState
-                        className="my-10"
-                        description="结束一节课后，课堂总结会出现在这里，方便你回看学生关注过什么。"
-                        hint="课堂记录只保存在本机。"
-                        icon={Chalkboard}
-                        title="还没有历史课堂"
-                      />
-                    ) : (
+                  {history.length > 0 && (
+                    <section aria-label="历史课堂">
+                      <h2 className="mb-3 text-sm font-semibold text-ink-700">历史课堂</h2>
                       <ul className="flex flex-col gap-2">
                         {history.map((lesson) => (
                           <li
@@ -352,8 +349,8 @@ export function ClassroomHome({
                           </li>
                         ))}
                       </ul>
-                    )}
-                  </section>
+                    </section>
+                  )}
                 </>
               )}
             </div>

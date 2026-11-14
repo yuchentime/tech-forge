@@ -24,10 +24,10 @@ last_verified: 2026-11-13
 | 项 | 当前事实 |
 |---|---|
 | 入口 | 侧栏「知识掌握」下方的「课堂模式」（`SidebarView = 'classroom'`） |
-| 首页布局 | 与「知识掌握」同构：保留侧栏，右上「开始新课堂」，主体分「进行中的课堂」与「历史课堂」 |
+| 首页布局 | 与「知识掌握」同构：保留侧栏，右上「开始新课堂」；「进行中的课堂」与「历史课堂」只在各自有记录时出现 |
 | 进行中 | 最近一条 `active` 课堂：开始时间 +「结束课堂」/「继续上课」 |
 | 历史 | `ended` 按结束时间倒序：日期、总结状态、摘要预览（已去掉 Markdown 符号）；点击进入只读详情（「课堂总结」标题 + Markdown 渲染的完整总结 + 消息记录，可重新生成总结）；行尾垃圾桶确认后删除课堂行、总结与记录目录 |
-| 空态 | 无进行中课堂时显示说明文案；「开始新课堂」进入草稿舞台，不发消息不创建课堂 |
+| 空态 | 一条记录都没有时不出分组、不出虚线框，只剩页头 + `EmptyState`（`Chalkboard` 图标，垂直居中）：标题「想一个真要讲给别人的课题」，说明「把它照实讲清楚，越具体越好；发送后，学生会从不同角度提问，看你这一遍讲不讲得通。」，提示「点右上角「开始新课堂」。讲不清、被问住的地方，正好是回去备课和演练的线索。」；列表请求失败时只留错误条，不显示空态 |
 | 数据 | `GET /api/lessons?status=active|ended`、`POST /api/lessons`（草稿首次发送时）、`POST /api/lessons/:id/end`、`GET /api/lessons/:id/summary`、`DELETE /api/lessons/:id` |
 | 组件 | [ClassroomHome.tsx](../../../apps/desktop/src/features/classroom/ClassroomHome.tsx) 负责首页与详情；[classroom-api.ts](../../../apps/desktop/src/features/classroom/classroom-api.ts) 封装请求与运行时校验 |
 
