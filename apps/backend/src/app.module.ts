@@ -18,6 +18,7 @@ import { PlatformModule } from './platform/platform.module';
 import { RehearsalsModule } from './rehearsals/rehearsals.module';
 import { RetrievalModule } from './retrieval/retrieval.module';
 import { SettingsModule } from './settings/settings.module';
+import { StudyNotesModule } from './study-notes/study-notes.module';
 import { TeachingModule } from './teaching/teaching.module';
 
 /** Composes the active backend platform and domain modules. */
@@ -41,6 +42,7 @@ import { TeachingModule } from './teaching/teaching.module';
     ChatModule,
     AgentModule,
     FocusItemsModule,
+    StudyNotesModule,
     JobsModule,
   ],
 })

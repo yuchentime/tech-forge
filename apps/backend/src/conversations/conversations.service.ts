@@ -990,6 +990,11 @@ export class ConversationsService {
         await manager.query('DELETE FROM "focus_items" WHERE "conversationId" = ?', [
           conversationId,
         ]);
+        // 自行写的笔记只把会话当作可选的上下文；会话没了，笔记本身仍然保留。
+        await manager.query(
+          'UPDATE "study_notes" SET "conversationId" = NULL WHERE "conversationId" = ?',
+          [conversationId],
+        );
         await manager.query('DELETE FROM "messages" WHERE "conversationId" = ?', [
           conversationId,
         ]);

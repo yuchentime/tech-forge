@@ -707,6 +707,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
             />
           ) : activeView === 'focus' ? (
             <FocusPointsPage
+              conversations={conversationState.conversations}
               onOpenConversation={(conversationId, messageId) => {
                 setActiveView('chat');
                 setConversationDisplayMode('conversation');

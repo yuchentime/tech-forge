@@ -19,6 +19,7 @@ const { buildDatabaseOptions } = load('database/database.options.js');
 const { ConversationsModule } = load('conversations/conversations.module.js');
 const { ConversationsService } = load('conversations/conversations.service.js');
 const { FocusItemEntity } = load('focus-items/focus-item.entity.js');
+const { StudyNoteEntity } = load('study-notes/study-note.entity.js');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-conversation-delete-'));
 
@@ -75,6 +76,11 @@ test('deleting a conversation removes its rows, children and session files', asy
       quote: '保存的摘录',
       quoteKey: 'test-quote-key',
     });
+    await ctx.dataSource.getRepository(StudyNoteEntity).save({
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      conversationId,
+      content: '自行写的笔记',
+    });
     const attachmentDirectory = join(sessionDirectory, 'attachments', 'att-1');
     mkdirSync(attachmentDirectory, { recursive: true });
     writeFileSync(join(attachmentDirectory, 'lecture.md'), '# 讲义', 'utf8');
@@ -101,6 +107,14 @@ test('deleting a conversation removes its rows, children and session files', asy
     assert.deepEqual(
       counts.map((rows) => Number(rows[0].total)),
       [0, 0, 0, 0],
+    );
+    // 自行写的笔记不属于会话的派生子表：会话没了，笔记仍保留，只是丢掉可选的跳转目标。
+    const notes = await ctx.dataSource.query(
+      'SELECT "conversationId", "content" FROM study_notes',
+    );
+    assert.deepEqual(
+      notes.map((row) => [row.conversationId, row.content]),
+      [[null, '自行写的笔记']],
     );
     assert.equal(existsSync(sessionDirectory), false, 'session files must be removed');
   } finally {

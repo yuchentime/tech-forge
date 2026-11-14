@@ -5,6 +5,7 @@ import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { resolveTeachForgeDatabasePath } from '../platform/local-paths';
 import { ArtifactEntity } from '../artifacts/artifact.entity';
 import { FocusItemEntity } from '../focus-items/focus-item.entity';
+import { StudyNoteEntity } from '../study-notes/study-note.entity';
 import { ConversationEntity } from '../conversations/conversation.entity';
 import { MessageEntity } from '../conversations/message.entity';
 import { PiSessionSnapshotEntity } from '../conversations/pi-session-snapshot.entity';
@@ -40,6 +41,7 @@ export function buildDatabaseOptions(): TypeOrmModuleOptions {
       ArtifactEntity,
       LessonEntity,
       FocusItemEntity,
+      StudyNoteEntity,
     ],
     migrations: [join(__dirname, 'migrations/*{.js,.ts}')],
     migrationsRun: true,

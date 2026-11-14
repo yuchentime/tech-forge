@@ -1,6 +1,6 @@
+import { requestBackend } from '../../api/backend-request';
 import { readBackendErrorMessage } from '../../api/backend-error';
 import { isRecord } from '../../api/json';
-import { hasDesktopBridge } from '../../types/desktop-bridge';
 
 /** One saved assistant-message excerpt as the 学习笔记 page renders it. */
 export interface FocusItemView {
@@ -25,7 +25,7 @@ export class FocusApiError extends Error {
 
 /** Lists saved excerpts newest first. */
 export async function listFocusItems(): Promise<FocusItemView[]> {
-  const response = await request('/api/focus-items');
+  const response = await requestBackend('/api/focus-items');
   if (
     response.status !== 200 ||
     !isRecord(response.data) ||
@@ -48,7 +48,7 @@ export async function createFocusItem(input: {
   /** Optional study note typed in the add dialog; omitted means "no note". */
   note?: string;
 }): Promise<FocusItemView> {
-  const response = await request('/api/focus-items', 'POST', input);
+  const response = await requestBackend('/api/focus-items', 'POST', input);
   if (response.status !== 201 || !isFocusItemView(response.data)) {
     throw new FocusApiError(
       readBackendErrorMessage(response.data, '添加学习笔记失败，请重试。'),
@@ -62,7 +62,7 @@ export async function updateFocusItemNote(
   id: string,
   note: string,
 ): Promise<FocusItemView> {
-  const response = await request(
+  const response = await requestBackend(
     `/api/focus-items/${encodeURIComponent(id)}`,
     'PATCH',
     { note },
@@ -77,7 +77,7 @@ export async function updateFocusItemNote(
 
 /** Deletes one saved excerpt. */
 export async function deleteFocusItem(id: string): Promise<void> {
-  const response = await request(
+  const response = await requestBackend(
     `/api/focus-items/${encodeURIComponent(id)}`,
     'DELETE',
   );
@@ -86,20 +86,6 @@ export async function deleteFocusItem(id: string): Promise<void> {
       readBackendErrorMessage(response.data, '删除学习笔记失败，请重试。'),
     );
   }
-}
-
-/** Sends one request through the desktop bridge; browser previews cannot reach the backend. */
-async function request(
-  path: string,
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
-  body?: unknown,
-) {
-  if (!hasDesktopBridge()) {
-    throw new FocusApiError('请通过 TeachForge 桌面应用使用学习笔记。');
-  }
-  return window.teachforge.request<unknown>(
-    body === undefined ? { method, path } : { method, path, body },
-  );
 }
 
 /** Validates one saved excerpt before it reaches the page. */

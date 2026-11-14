@@ -335,6 +335,7 @@ HTTP 200 返回被删除的会话 ID 与本地文件清理结果。
 #### Notes
 
 - 删除在一个事务内完成，子表优先：`rehearsal_turns` → `rehearsals` → `artifacts` → `conversation_documents` → `focus_items` → `messages` → `pi_session_snapshots` → `conversations`（全部外键为 `NO ACTION`，顺序不可调换）。
+- `study_notes` 不随会话删除：同事务把其 `conversationId` 置为 `NULL`，笔记正文保留，只是失去「进入会话」入口。
 - 本地 session 目录在事务提交后删除：文件清理失败不会回滚数据库结论，只返回 `sessionCleanup: "partial"` 并记录结构化日志。
 - 桌面端在会话行悬停时显示「…」，菜单包含「重命名」和「删除会话」；重命名打开输入弹窗（下方为「取消」「保存」），删除点击即执行，没有二次确认；被删除的正是当前会话时，Renderer 同时清空线程与输入区状态。
 
@@ -408,3 +409,64 @@ HTTP 200 返回 `{ "items": FocusItem[] }`。
 - `note` 属于摘录自身，不写回原消息；一条摘录可以有多行备注。清空备注只把 `note` 置为 `null`，摘录仍保留在列表中。
 - 删除会话时在同一事务内删除其 `focus_items`；摘录没有独立于会话的回收站。
 - 桌面端只在单条助手消息内显示“添加到学习笔记”浮动按钮；跨消息选区、流式生成中的选区、超过 1000 码点的选区不触发保存。点击浮动按钮不会立即写库，而是先打开备注弹窗：备注可选，输入框初始单行、按 Enter 换行并随内容增高到上限后内部滚动；点「保存备注」或按 Ctrl/⌘+Enter 才提交（空备注也提交，保存为无备注），「取消」、Esc 或点击遮罩放弃且不写库。保存失败时弹窗保持打开、就地显示错误并保留已输入的备注；成功后提示「已添加到学习笔记」。
+
+## Study Note API
+
+“学习笔记”页同时接受用户自己写的笔记（`study_notes` 表）。与摘录不同，笔记没有引用文本、没有 `messageId`/`messageIndex`；会话只是可选上下文：关联了会话时列表显示会话名与「进入会话」，否则只显示正文和添加时间。
+
+### List study notes
+
+- **方法**：`GET`
+- **路径**：`/api/study-notes`
+- **功能职责**：按添加时间倒序返回全部自写笔记，关联会话的笔记带上当前会话标题。
+- **鉴权/归属**：经 Electron 本地认证桥接调用；读取当前本机全部笔记。
+
+#### Response Schema
+
+HTTP 200 返回 `{ "items": StudyNote[] }`。
+
+```json
+{
+  "items": [
+    {
+      "id": "2efd30b5-6e6f-487e-a3ea-1594a8012ddc",
+      "conversationId": "8e8fc70f-6035-4376-86ad-c06c94d05670",
+      "conversationTitle": "RabbitMQ",
+      "content": "幂等键要覆盖重试与重复投递",
+      "createdAt": "2026-11-14T05:10:00.000Z"
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 来源 | 含义 | 允许值/格式 |
+|---|---|---|---|---|---|
+| `id` | `String` | 是 | `StudyNoteEntity.id` | 笔记 ID | UUIDv4 |
+| `conversationId` | `String \| null` | 是 | `StudyNoteEntity.conversationId` | 关联会话；未关联为 `null` | UUIDv4 |
+| `conversationTitle` | `String \| null` | 是 | 会话标题或首条 user 消息投影 | 列表显示的会话名 | 有会话时为非空文本 |
+| `content` | `String` | 是 | `StudyNoteEntity.content` | 笔记正文 | 1–2000 个码点 |
+| `createdAt` | `String` | 是 | `StudyNoteEntity.createdAt` | 添加时间 | ISO 8601 |
+
+### Create a study note
+
+- **方法**：`POST`
+- **路径**：`/api/study-notes`
+- **功能职责**：保存一条自写笔记；会话可选。
+- **请求体**：`{ content, conversationId? }`。`content` 统一换行并 trim 外侧，最大 2000 个 Unicode 码点；省略 `conversationId` 表示不关联会话，给定时必须指向存在的会话。
+- **响应**：HTTP 201，`StudyNote`。
+- **错误**：`content` 为空或过长、`content` 不是字符串、出现未声明字段为 400；`conversationId` 不是 UUIDv4 为 400；会话不存在为 404。
+
+### Delete a study note
+
+- **方法**：`DELETE`
+- **路径**：`/api/study-notes/:id`
+- **功能职责**：删除一条笔记。
+- **响应**：HTTP 200，`{ "id": "..." }`。
+- **错误**：笔记不存在为 404；`id` 不是 UUIDv4 为 400。
+
+#### Notes
+
+- 笔记正文按纯文本渲染，不做 Markdown；因为没有消息锚点，列表不显示「第 N 条」，也没有摘录的引用竖线样式。
+- 摘录与自写笔记的正文最多显示 4 行，超出部分折叠并显示「查看」，展开后可「收起」；折叠判定基于渲染后的实际行高，窗口变窄重新换行仍会重新判断。
+- 桌面端「学习笔记」页把 `focus_items` 与 `study_notes` 合并成一条按 `createdAt` 倒序的时间线：摘录卡片保留引用样式、「第 N 条」与「编辑备注」，自写笔记卡片只显示正文与时间，有会话时额外显示会话名和「进入会话」。
+- 点右上角「添加笔记」打开弹窗：会话下拉默认「不关联会话」，正文框初始 3 行、空白内容不能保存；「保存笔记」或 Ctrl/⌘+Enter 提交（成功后提示「笔记已保存」），「取消」、Esc 或点击遮罩放弃且不写库。保存失败时弹窗保持打开、就地显示错误并保留已输入内容。
