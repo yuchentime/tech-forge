@@ -9,14 +9,15 @@ import {
   writeStructuredEvent,
 } from "../../logging/structured-logger";
 import {
-  CommonAgent,
   classifyAssistantCompletion,
   composeModelPrompt,
   getProviderRejectionLogFields,
   logPiCompactionEvent,
+  PiAgentRuntime,
+  getRequestLogContext,
+  readClassifiedAssistantText,
   type LlmStreamOptions,
-} from "./CommonAgent";
-import { PiAgentRuntime, getRequestLogContext } from "../pi-agent-runtime";
+} from "../pi-agent-runtime";
 
 /**
  * Streams one chat turn as ordered Pi events.
@@ -29,11 +30,8 @@ import { PiAgentRuntime, getRequestLogContext } from "../pi-agent-runtime";
 export class LearnAgent {
   private readonly logger = new Logger(LearnAgent.name);
 
-  /** Injects the Pi session runtime and common response classifier. */
-  constructor(
-    private readonly piAgentRuntime: PiAgentRuntime,
-    private readonly commonAgent: CommonAgent,
-  ) {}
+  /** Injects the Pi session runtime used to prepare sessions and persist snapshots. */
+  constructor(private readonly piAgentRuntime: PiAgentRuntime) {}
 
   /**
    * 按序产出 Pi session 事件，并在请求取消时中止底层 Pi run。
@@ -316,7 +314,7 @@ export class LearnAgent {
         });
         return;
       }
-      const responseText = this.commonAgent.readAssistantText(completion);
+      const responseText = readClassifiedAssistantText(completion);
       outcome = "completed";
       const finishedContextUsage = session.getContextUsage();
       writeStructuredEvent(this.logger, "log", "llm.stream.completed", {

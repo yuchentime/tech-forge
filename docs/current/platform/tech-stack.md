@@ -109,5 +109,5 @@ last_verified: 2026-11-11
 - SQLite 连接与 pragma：`apps/backend/src/database/database.options.ts`、`database/migrations/`
 - 文档解析适配器：`apps/backend/src/platform/document-parser/parsers/`
 - 本地嵌入：`apps/backend/src/embedding/embedding.service.ts`
-- Agent 与扩展装载：`apps/backend/src/llm/agents/CommonAgent.ts`、`apps/backend/src/llm/agents/LearnAgent.ts`
+- Agent 与扩展装载：`apps/backend/src/llm/agents/OneShotLlmAgent.ts`、`apps/backend/src/llm/agents/LearnAgent.ts`
 - 桌面进程管理：`apps/desktop/electron/main/main.ts`

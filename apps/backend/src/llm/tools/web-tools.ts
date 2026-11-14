@@ -4,6 +4,7 @@ import type {
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { defineCustomTool } from './custom-tool';
 import { DEEPSEEK_BASE_URL } from '../adapters/llm-adapter';
 import {
   getSafeErrorLogFields,
@@ -212,7 +213,8 @@ export function createWebTools(options: WebToolsOptions): ToolDefinition[] {
     execute: async (_toolCallId, params, signal) =>
       runFetch(context, params, signal),
   };
-  return [searchTool, fetchTool];
+  // Keep each schema while widening callback types for Pi's heterogeneous customTools array.
+  return [defineCustomTool(searchTool), defineCustomTool(fetchTool)];
 }
 
 /** Runs one Search call and formats the documented response for the model. */

@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import type { ServerResponse } from 'node:http';
 import { getSafeErrorLogFields, writeStructuredEvent } from '../logging/structured-logger';
-import { LlmResponseTruncatedError } from '../llm/agents/CommonAgent';
+import { LlmResponseTruncatedError } from '../llm/pi-agent-runtime';
 import { ChatPromptDto } from './dto/chat-prompt.dto';
 import { ChatService } from './chat.service';
 import { encodeChatSseEvent } from './chat-sse';

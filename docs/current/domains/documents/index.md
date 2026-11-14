@@ -36,7 +36,7 @@ last_verified: 2026-11-12
 
 ## 3. 目录摘要
 
-- `DocumentCatalogService.summarize(title, joinParsedPages(pages))` 用无工具、无 memory 的 `CommonAgent.generate()` 生成结构化元数据。
+- `DocumentCatalogService.summarize(title, joinParsedPages(pages))` 用无工具、无 memory 的 `OneShotLlmAgent.generate()` 生成结构化元数据。
 - 预算：输入取开头 45%、结尾 25% 与中段均匀采样，合计 12 000 字符。
 - 长度只是提示词里的**软上限**（`CATALOG_SUMMARY_SOFT_LIMIT = 200`，措辞为“尽量不超过”）：校验器只检查 JSON 形状、`summary` 非空、`keywords` 3–8 个非空短语、`documentType` 非空，**不因摘要偏长拒绝**。硬上限曾把 Provider 正常返回的 260 / 397 字符摘要判成失败，使整份资料变成 `failed`。
 - 校验失败抛 `DocumentCatalogError('INVALID_SUMMARY')`，message 只含长度/数量，不回显模型输出或正文；非 JSON 的解析错误被替换为固定文案，避免把原文片段写进日志或数据库。

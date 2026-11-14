@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ConversationEntity } from '../conversations/conversation.entity';
-import { CommonAgent } from '../llm/agents/CommonAgent';
+import { OneShotLlmAgent } from '../llm/agents/OneShotLlmAgent';
 import {
   getSafeErrorLogFields,
   writeStructuredEvent,
@@ -139,7 +139,7 @@ export class ConversationKnowledgeFactsService
   /** Injects persistence and the shared non-streamed model boundary. */
   constructor(
     private readonly dataSource: DataSource,
-    private readonly commonAgent: CommonAgent,
+    private readonly oneShotLlmAgent: OneShotLlmAgent,
   ) {}
 
   /** Recovers interrupted runs before accepting work, then starts the compensation scan. */
@@ -743,7 +743,7 @@ export class ConversationKnowledgeFactsService
 
     for (let attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt += 1) {
       let selection: FactPromptSelection | null = null;
-      const text = await this.commonAgent.generate('', {
+      const text = await this.oneShotLlmAgent.generate('', {
         systemPromptAppend: KNOWLEDGE_FACTS_SYSTEM_PROMPT,
         tools: [],
         timeoutMs: GENERATE_TIMEOUT_MS,

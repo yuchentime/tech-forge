@@ -12,10 +12,7 @@ const {
   getToolFailureReason,
 } = require('../dist/conversations/conversation-transcript.js');
 const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
-const {
-  CommonAgent,
-  LlmResponseTruncatedError,
-} = require('../dist/llm/agents/CommonAgent.js');
+const { LlmResponseTruncatedError } = require('../dist/llm/pi-agent-runtime.js');
 
 /** Minimal long-term memory double; the chat suite does not exercise storage. */
 const memoryStub = {
@@ -30,7 +27,7 @@ async function collect(generator) {
   return values;
 }
 
-/** Builds the common classifier and a stub runtime for one LearnAgent test. */
+/** Builds a stub runtime for one LearnAgent test. */
 function createTestHarness() {
   const runtime = {
     resolveRequest: async (options) => ({
@@ -48,11 +45,9 @@ function createTestHarness() {
     },
     saveConversationSnapshot: async () => undefined,
   };
-  const commonAgent = new CommonAgent(runtime);
   return {
     runtime,
-    commonAgent,
-    service: new LearnAgent(runtime, commonAgent),
+    service: new LearnAgent(runtime),
   };
 }
 

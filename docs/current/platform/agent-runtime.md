@@ -38,7 +38,7 @@ last_verified: 2026-11-14
 | `ChatController` | 校验并流式处理 `POST /api/chat/stream`；客户端断开时中止请求。 |
 | `ChatService` | 在当前 backend 进程内按 conversation 串行化请求，编排持久化和 Pi 流，并投影允许传出的事件。 |
 | `ConversationsService` | 管理有序 SQLite 消息行，保存用户、Pi 消息和工具状态，并在下一请求前对账中断状态。 |
-| `PiAgentRuntime` / `CommonAgent` / `LearnAgent` | `PiAgentRuntime` 负责每次请求创建 Pi session：重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md，确定本会话 workspace，组装系统提示词、工具、扩展钩子和 skill 资源，并恢复/保存 Pi 快照。`LearnAgent` 负责普通对话的 `stream()`；`CommonAgent.generate()` 提供非流式通用调用，供演练等场景复用，默认不装载记忆，也不启用网页工具。 |
+| `PiAgentRuntime` / `OneShotLlmAgent` / `LearnAgent` | `PiAgentRuntime` 负责 Pi session 装配：重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md，确定本会话 workspace，组装系统提示词、工具、扩展钩子和 skill 资源，并恢复/保存 Pi 快照。`OneShotLlmAgent.generate()` 拥有一次性非流式调用的编排、取消和终态处理；`LearnAgent` 负责普通对话的 `stream()`。非流式调用默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
 | `workspace-file-tools.ts`、`workspace-file-operations.ts`、`workspace-file-policy.ts`、`external-write-grant.ts` | 入口负责组装 Pi 原生文件工具；操作适配层接管 `access`/`readFile`/`writeFile`/`mkdir`；路径策略在实际 I/O 前检查工作区边界、符号链接和应用托管文件；外部授权模块只从当前用户请求推导一个临时目标。读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md 等）；写入默认限制在当前会话工作区。 |
@@ -48,9 +48,9 @@ last_verified: 2026-11-14
 
 Backend 使用 Nest `Logger` 输出单行 JSON 事件。Agent stream 请求由 `ChatController` 生成一个内部 `requestId`，并沿 `ChatService`、`ConversationsService`、`LearnAgent` 传递；会话列表和历史查询各自生成 requestId。日志常用 `requestId` 和 `conversationId` 串联阶段。
 
-`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`PiAgentRuntime` 记录 session 初始化、工具注册与持久化钩子失败，`CommonAgent` 与 `LearnAgent` 记录模型调用和流式运行。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
+`ChatController` 记录 HTTP 接收、SSE 终态和客户端断开；`ChatService` 记录队列等待、轮次状态、Pi 消息/工具生命周期与锁释放；`ConversationsService` 记录恢复、消息/工具持久化及查询结果；`PiAgentRuntime` 记录 session 初始化、工具注册与持久化钩子失败；`OneShotLlmAgent` 记录非流式生成，`LearnAgent` 记录流式运行。终态和操作失败带耗时、状态及安全错误类型；持久化失败在所属 Service 记录，Agent/LLM 层再记录传播后的失败阶段。
 
-Pi 自动压缩由 SDK 触发，`CommonAgent` 在 `generate()`、`LearnAgent` 在 `stream()` 的事件订阅中记录 `llm.compaction.started`、`llm.compaction.completed`、`llm.compaction.cancelled`、`llm.compaction.failed`。字段包含触发原因（`threshold`、`overflow`、`manual`）、`tokensBefore`、`estimatedTokensAfter`、`summaryChars`、摘要请求的 `summaryUsageTotalTokens` 以及压缩前后的 `contextTokens`/`contextPercent`；失败只记录 `errorMessageChars`，不记录摘要文本或原始异常 message。`llm.session.create.completed` 记录生效的 `compactionEnabled`、`compactionReserveTokens`、`compactionKeepRecentTokens`、`modelContextWindow` 和 `compactionThresholdTokens`；`llm.provider_run.started` 与 `llm.stream.completed` 记录发送前后的上下文占用。
+Pi 自动压缩由 SDK 触发，`OneShotLlmAgent` 在 `generate()`、`LearnAgent` 在 `stream()` 的事件订阅中记录 `llm.compaction.started`、`llm.compaction.completed`、`llm.compaction.cancelled`、`llm.compaction.failed`。字段包含触发原因（`threshold`、`overflow`、`manual`）、`tokensBefore`、`estimatedTokensAfter`、`summaryChars`、摘要请求的 `summaryUsageTotalTokens` 以及压缩前后的 `contextTokens`/`contextPercent`；失败只记录 `errorMessageChars`，不记录摘要文本或原始异常 message。`llm.session.create.completed` 记录生效的 `compactionEnabled`、`compactionReserveTokens`、`compactionKeepRecentTokens`、`modelContextWindow` 和 `compactionThresholdTokens`；`llm.provider_run.started` 与 `llm.stream.completed` 记录发送前后的上下文占用。
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
@@ -67,7 +67,7 @@ sequenceDiagram
     participant Chat as ChatService
     participant Conv as ConversationsService
     participant DB as SQLite
-    participant LLM as PiAgentRuntime / CommonAgent / LearnAgent
+    participant LLM as PiAgentRuntime / OneShotLlmAgent / LearnAgent
     participant Pi as Pi SDK
     participant Model as 大模型
     participant Tool as 工具
@@ -190,7 +190,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 7. 附件正文和图片只注入承载它的那一轮。之后每次请求都会追加一段"本会话可读取的附件"指针：每份附件的可读文件绝对路径（PDF/DOCX 为同名 `.md`，Markdown/TXT/图片为原文件）、总字数或"图片"标记、已注入字数，并提示用 `read`（文本可带 offset/limit；图片只会返回"存在但无法加载"的说明，不会读入内容）或 `grep` 继续读取。附件目录不在受保护目录内，工具都能读；模型因此可以回到原文，而不是凭记忆补全。
 8. 指针不重复注入正文，只提供路径与规模，成本约每附件两行。图片只出现在承载它的那一轮：快照保存前 `replaceInjectedUserText()` 会丢弃 user entry 里的 `image` 块，避免每轮重复计费。
 
-已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`，Pi 把 provider 的拒绝记成 `stopReason: "error"` 的 assistant 消息，`CommonAgent` 据此抛 `LlmProviderRejectedError` 并在日志里带 `providerErrorMessage`（截断 600 字符，不进 UI），因为 Pi 压缩无法压缩本轮新注入的正文。图片走 DeepSeek 兼容的内联 `image_url` 输入：单张上限 32 MiB，单轮所有图片原始字节上限 32 MiB（base64 后约 42.7 MiB，仍在 48 MiB 请求体限制内）。DeepSeek Files API 的 `file_id` 引用需要 `file` 内容块，而 Pi 的 OpenAI 兼容 provider 只序列化 `image_url`；附件只在一轮使用，因此不引入 Files API。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
+已知限制：40000 字符仍是经验值，长对话叠加长附件时可能仍超出模型上下文——那种情况表现为 `llm.stream.failed`，Pi 把 provider 的拒绝记成 `stopReason: "error"` 的 assistant 消息，`OneShotLlmAgent` 据此抛 `LlmProviderRejectedError` 并在日志里带 `providerErrorMessage`（截断 600 字符，不进 UI），因为 Pi 压缩无法压缩本轮新注入的正文。图片走 DeepSeek 兼容的内联 `image_url` 输入：单张上限 32 MiB，单轮所有图片原始字节上限 32 MiB（base64 后约 42.7 MiB，仍在 48 MiB 请求体限制内）。DeepSeek Files API 的 `file_id` 引用需要 `file` 内容块，而 Pi 的 OpenAI 兼容 provider 只序列化 `image_url`；附件只在一轮使用，因此不引入 Files API。附件文件按会话存放，删除会话时随 `sessions/<id>/` 一起清理。
 
 ## 文件读写边界
 
@@ -216,7 +216,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 
 演练是独立 Agent，不经过 `ChatService.stream()`，也不写 `messages`：
 
-- `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `CommonAgent.generate()`。该调用可传入父 `conversation`，由 `PiAgentRuntime.restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
+- `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `OneShotLlmAgent.generate()`。该调用可传入父 `conversation`，由 `PiAgentRuntime.restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
 - `start()` 通过可选的 `onPhase` 回调把 session 引导、provider 调用与 JSON 修复重试写入进程内 `RehearsalPreparingRegistry`，只由只读端点 `GET /api/conversations/:id/rehearsals/preparing` 读取；该登记不参与状态机、不落库，重启即丢失。
 - 后续答题/跳过/报告调用使用新的临时 Pi session，只带 `learningSummary + plan + 已有问答`；不传 `conversation`，不写快照。
 - 演练 system prompt 由代码写死；不加载 IDENTIFY/PREFERENCE 文本、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
@@ -239,7 +239,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 - `lessons/` 根加入 `SettingsService.getManagedFilePaths()`，普通对话的文件工具不能读写课堂记录。
 - 课堂 HTTP 目前有列表、消息、建/发言/结束与总结读写（`GET /api/lessons`、`POST /api/lessons/:lessonId/turns`、`GET/POST /api/lessons/:lessonId/summary` 等）；每课堂用 `ClassroomTurnsService` 拒绝并发轮次；详情端点、SSE 与 `random_dispatcher`/`dispatch_to_student` 工具仍未实现。
 - 桌面端 `ClassroomHome` 负责进行中/历史/总结详情与新建；`ClassroomMode` 进入时加载记录、发送走 `/turns`、结束时后台生成总结，只有舞台挂载时才锁 16:9。
-- 课堂总结由 `ClassroomSummariesAgent` 通过 `CommonAgent.generate()` 生成：固定 `systemPromptAppend`、`tools: []`、无记忆、120 秒超时；结果存 `lessons` 表，不在 JSONL；失败/损坏/并发都落在 `summaryStatus`，启动时重置遗留的 `generating`。
+- 课堂总结由 `ClassroomSummariesAgent` 通过 `OneShotLlmAgent.generate()` 生成：固定 `systemPromptAppend`、`tools: []`、无记忆、120 秒超时；结果存 `lessons` 表，不在 JSONL；失败/损坏/并发都落在 `summaryStatus`，启动时重置遗留的 `generating`。
 - 记录损坏时读接口返回 `integrity: degraded` 与行号，`appendMessage()` 拒绝写入坏文件；恢复手段是新建课堂，旧文件保留不修复。
 - 每课堂只串行化“追加”，尚未串行化整轮。
 
@@ -261,7 +261,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 8. 演练状态归 `RehearsalsService` 所有，不得写入 `messages` 或复用父 `pi_session_snapshots`。新增演练模型调用时必须走 `generate()`，保持不写快照、无工具；普通对话只通过一次性 digest（`custom_message` entry + `loadedContext` 标记）与 `contextRefsJson` 读取演练结果。
 9. 网页搜索与抓取的 session 注册归 `PiAgentRuntime` 与 `llm/tools/web-tools.ts` 所有：只读调用 DeepSeek Search/Fetch，不写文件、不访问 SQLite、不参与消息持久化；仅在已配置 DeepSeek Key 且 `webTools !== false` 时启用，`generate()` 明确关闭。日志与错误结果不得包含 query、URL、正文或 API Key。
 
-10. 每个不同的大模型调用场景必须单独定义 Agent：位于 `apps/backend/src/llm/agents/`，文件名与类名使用 `<Scenario>Agent.ts` / `<Scenario>Agent`，在 `AgentModule` 注册后由领域 Service 注入。通用生成能力复用 `CommonAgent.generate()`；场景 Agent 只承载该场景的提示词、输入编排和结果解析，不复制 session、工具、记忆或配置装配。
+10. 每个不同的大模型调用场景必须单独定义 Agent：位于 `apps/backend/src/llm/agents/`，文件名与类名使用 `<Scenario>Agent.ts` / `<Scenario>Agent`，在 `AgentModule` 注册后由领域 Service 注入。通用生成能力复用 `OneShotLlmAgent.generate()`；场景 Agent 只承载该场景的提示词、输入编排和结果解析，不复制 session、工具、记忆或配置装配。
 
 ## 技能装载与探索主题
 
@@ -287,7 +287,7 @@ Pi skill 是提示词包，不是新 Agent：`additionalSkillPaths` 指向 `<con
 - 历史查询 Controller 与 DTO：`apps/backend/src/conversations/conversations.controller.ts`、`conversation-query.dto.ts`
 - 结构化日志与安全错误字段：`apps/backend/src/logging/structured-logger.ts`
 - LLM 请求与会话选项契约：`apps/backend/src/llm/llm-contracts.ts`
-- Pi session 创建、扩展/skill 注册、历史映射和快照恢复：`apps/backend/src/llm/pi-agent-runtime.ts`；通用生成与流式调用：`apps/backend/src/llm/agents/CommonAgent.ts`、`LearnAgent.ts`
+- Pi session 创建、扩展/skill 注册、历史映射和快照恢复：`apps/backend/src/llm/pi-agent-runtime.ts`；一次性非流式生成：`apps/backend/src/llm/agents/OneShotLlmAgent.ts`；流式调用：`apps/backend/src/llm/agents/LearnAgent.ts`
 - DeepSeek 网页搜索/抓取工具：`apps/backend/src/llm/tools/web-tools.ts`
 - 斜杠命令解析：`apps/backend/src/knowledge/knowledge-command.ts`、`apps/backend/src/chat/deep-research-command.ts`、`apps/backend/src/chat/turn-command.ts`
 - skill 安装与发现：`apps/backend/src/llm/skills.ts`、`SettingsService.getSkillsDirectory()`

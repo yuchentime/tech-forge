@@ -4,6 +4,7 @@
  */
 import * as fs from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { defineCustomTool } from './custom-tool';
 import { deriveExternalWriteGrant } from './external-write-grant';
 import {
   createEditOperations,
@@ -71,13 +72,18 @@ export async function createWorkspaceFileTools(
     ],
   };
 
+  // Keep each schema while widening callback types for Pi's heterogeneous customTools array.
   return [
-    readTool,
-    sdk.createEditToolDefinition(workspaceRoot, {
-      operations: createEditOperations(context),
-    }),
-    sdk.createWriteToolDefinition(workspaceRoot, {
-      operations: createWriteOperations(context),
-    }),
+    defineCustomTool(readTool),
+    defineCustomTool(
+      sdk.createEditToolDefinition(workspaceRoot, {
+        operations: createEditOperations(context),
+      }),
+    ),
+    defineCustomTool(
+      sdk.createWriteToolDefinition(workspaceRoot, {
+        operations: createWriteOperations(context),
+      }),
+    ),
   ];
 }

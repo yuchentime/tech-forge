@@ -17,6 +17,7 @@ import { parsePersistedPiMessage } from '../conversations/conversation-transcrip
 import { PiSessionSnapshotsService } from '../conversations/pi-session-snapshots.service';
 import { SettingsService, type StoredLlmSettings } from '../settings/settings.service';
 import {
+  clipLogText,
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
@@ -37,9 +38,61 @@ import type {
   PiThinkingLevel as ContractPiThinkingLevel,
 } from './llm-contracts';
 
+export type {
+  LlmConversationContext,
+  LlmConversationHistoryMessage,
+  LlmInputImage,
+  LlmRequestOptions,
+  LlmStreamOptions,
+} from './llm-contracts';
+
 export type PiSdk = typeof PiSdkModule;
 export type PiThinkingLevel = ContractPiThinkingLevel;
 type SessionRestoreSource = 'session_snapshot' | 'rebuilt_history';
+
+/** Raised when the provider stopped on its output-token limit before returning assistant text. */
+export class LlmResponseTruncatedError extends Error {
+  constructor() {
+    super('Provider stopped at the output token limit before returning assistant text.');
+    this.name = 'LlmResponseTruncatedError';
+  }
+}
+
+/** Raised when Pi settled an assistant message with the provider's rejection. */
+export class LlmProviderRejectedError extends Error {
+  constructor(readonly providerMessage: string) {
+    super(
+      providerMessage.trim() ||
+        'Provider rejected the request without an error message.',
+    );
+    this.name = 'LlmProviderRejectedError';
+  }
+}
+
+/** Terminal interpretation of the latest assistant message in a settled Pi run. */
+export type AssistantCompletion =
+  | { kind: 'text'; text: string }
+  | { kind: 'truncated' }
+  | { kind: 'cancelled' }
+  | { kind: 'rejected'; providerMessage: string }
+  | { kind: 'empty' };
+
+/** Options for one non-streamed generation that does not persist a Pi snapshot. */
+export interface LlmGenerateOptions extends LlmRequestOptions {
+  signal?: AbortSignal;
+  /** Replaces the default chat system-prompt append; rehearsal passes its fixed drill prompt. */
+  systemPromptAppend?: string;
+  /** Explicit tool allowlist; rehearsal passes an empty array. */
+  tools?: readonly string[];
+  /** Internal JSON calls default to no long-term-memory tools. */
+  loadMemory?: boolean;
+  /** Abort the provider call after this many milliseconds. */
+  timeoutMs?: number;
+  /** Reports the coarse phase before session setup and provider execution. */
+  onPhase?: (phase: 'session' | 'provider') => void;
+  /** Builds a prompt using the context window of the already-resolved model. */
+  buildPrompt?: (context: { contextWindow: number | null }) => string;
+}
 
 /** The concrete model resolved from the user's local DeepSeek settings. */
 export type PiModel = NonNullable<ReturnType<PiModelRuntime['getModel']>>;
@@ -178,6 +231,109 @@ export function getRequestLogContext(
       ? { conversationId: options.conversation.id }
       : {}),
   };
+}
+
+/** Classifies the latest assistant message by its terminal stop reason before reading its text. */
+export function classifyAssistantCompletion(
+  messages: PiAgentSession['messages'],
+  text: string | undefined,
+): AssistantCompletion {
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant');
+  if (lastAssistant?.role === 'assistant') {
+    if (lastAssistant.stopReason === 'aborted') return { kind: 'cancelled' };
+    if (lastAssistant.stopReason === 'length') return { kind: 'truncated' };
+    if (lastAssistant.stopReason === 'error') {
+      return {
+        kind: 'rejected',
+        providerMessage: lastAssistant.errorMessage ?? '',
+      };
+    }
+  }
+  if (!text?.trim()) return { kind: 'empty' };
+  return { kind: 'text', text };
+}
+
+/** Converts a settled completion to text while preserving provider failure types. */
+export function readClassifiedAssistantText(
+  completion: Exclude<AssistantCompletion, { kind: 'cancelled' }>,
+): string {
+  if (completion.kind === 'truncated') {
+    throw new LlmResponseTruncatedError();
+  }
+  if (completion.kind === 'rejected') {
+    throw new LlmProviderRejectedError(completion.providerMessage);
+  }
+  if (completion.kind === 'empty') {
+    throw new Error('Pi SDK completed without returning assistant text.');
+  }
+  return completion.text;
+}
+
+/** Adds a bounded provider rejection detail to safe model-call logs. */
+export function getProviderRejectionLogFields(
+  error: unknown,
+): Record<string, unknown> {
+  if (!(error instanceof LlmProviderRejectedError)) return {};
+  return { providerErrorMessage: clipLogText(error.providerMessage, 600) };
+}
+
+/** Logs Pi's compaction lifecycle with token metrics and without provider payloads. */
+export function logPiCompactionEvent(
+  logger: Logger,
+  logContext: RequestLogContext,
+  session: PiAgentSession,
+  event: PiAgentSessionEvent,
+): void {
+  if (event.type === 'compaction_start') {
+    const usage = session.getContextUsage();
+    writeStructuredEvent(logger, 'log', 'llm.compaction.started', {
+      ...logContext,
+      reason: event.reason,
+      contextTokens: usage?.tokens ?? null,
+      contextWindow: usage?.contextWindow ?? null,
+      contextPercent: usage?.percent ?? null,
+    });
+    return;
+  }
+  if (event.type !== 'compaction_end') return;
+
+  const usage = session.getContextUsage();
+  const fields = {
+    ...logContext,
+    reason: event.reason,
+    aborted: event.aborted,
+    willRetry: event.willRetry,
+    tokensBefore: event.result?.tokensBefore ?? null,
+    estimatedTokensAfter: event.result?.estimatedTokensAfter ?? null,
+    summaryChars: event.result
+      ? Array.from(event.result.summary).length
+      : null,
+    summaryUsageTotalTokens: event.result?.usage?.totalTokens ?? null,
+    contextTokens: usage?.tokens ?? null,
+    contextPercent: usage?.percent ?? null,
+  };
+  if (event.result) {
+    writeStructuredEvent(logger, 'log', 'llm.compaction.completed', fields);
+    return;
+  }
+  if (event.aborted) {
+    writeStructuredEvent(logger, 'warn', 'llm.compaction.cancelled', fields);
+    return;
+  }
+  // The raw provider message may echo payloads; only its size is safe to log.
+  writeStructuredEvent(logger, 'error', 'llm.compaction.failed', {
+    ...fields,
+    errorMessageChars: event.errorMessage?.length ?? 0,
+  });
+}
+
+/** Prepends request-scoped reference material while keeping the user question last. */
+export function composeModelPrompt(prompt: string, context?: string): string {
+  const material = context?.trim();
+  if (!material) return prompt;
+  return `${material}\n\n## 用户输入\n${prompt}`;
 }
 
 /** Resolves the safe provider/model identifiers for one settings snapshot. */

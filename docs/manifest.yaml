@@ -388,7 +388,7 @@ routes:
       - docs/source/后端架构设计.md
     history_on_demand: []
   agent-runtime:
-    description: "Change the Pi Agent runtime boundary: PiAgentRuntime owns session creation, tool/extension/skill registration and snapshot restore; CommonAgent provides shared generation and LearnAgent streams chat"
+    description: "Change the Pi Agent runtime boundary: PiAgentRuntime owns session creation, tool/extension/skill registration and snapshot restore; OneShotLlmAgent owns one-shot non-streamed generation and LearnAgent streams chat"
     token_budget: 14000
     code_globs:
       - "apps/backend/src/chat/**"

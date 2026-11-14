@@ -11,7 +11,7 @@ import {
   SUMMARY_MESSAGE_LIMIT,
   SUMMARY_TIMEOUT_MS,
 } from '../prompts/classroom-summary.prompt';
-import { CommonAgent } from './CommonAgent';
+import { OneShotLlmAgent } from './OneShotLlmAgent';
 
 /** Raised when a second generation is requested while one is still running. */
 export class LessonSummaryBusyError extends Error {
@@ -24,7 +24,7 @@ export class LessonSummaryBusyError extends Error {
 /**
  * Generates and stores one ended lesson's summary.
  *
- * The model call goes through `CommonAgent.generate()`: no conversation, no snapshot, no tools
+ * The model call goes through `OneShotLlmAgent.generate()`: no conversation, no snapshot, no tools
  * and no memory. Failure is a stored status (`failed` + user-safe reason) rather than an HTTP
  * error — the classroom remains readable and the UI can offer a retry.
  */
@@ -36,7 +36,7 @@ export class ClassroomSummariesAgent implements OnModuleInit {
 
   constructor(
     private readonly lessons: LessonsService,
-    private readonly commonAgent: CommonAgent,
+    private readonly oneShotLlmAgent: OneShotLlmAgent,
   ) {}
 
   /** Fails summaries orphaned by a previous process so the UI never spins forever. */
@@ -92,7 +92,7 @@ export class ClassroomSummariesAgent implements OnModuleInit {
 
       try {
         const markdown = (
-          await this.commonAgent.generate(buildSummaryPrompt(transcript), {
+          await this.oneShotLlmAgent.generate(buildSummaryPrompt(transcript), {
             requestId,
             systemPromptAppend: CLASSROOM_SUMMARY_SYSTEM_PROMPT,
             tools: [],

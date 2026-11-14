@@ -91,7 +91,7 @@ function startMockProvider() {
   });
 }
 
-/** Builds stored history rows in the text-block JSON shape CommonAgent restores. */
+/** Builds stored history rows in the text-block JSON shape the Pi runtime restores. */
 function createHistory(messageCount, text) {
   const startedAt = Date.now() - messageCount * 1000;
   return Array.from({ length: messageCount }, (_, index) => ({
@@ -156,7 +156,6 @@ async function main() {
   const snapshots = [];
   try {
     const { LearnAgent } = require('../dist/llm/agents/LearnAgent.js');
-    const { CommonAgent } = require('../dist/llm/agents/CommonAgent.js');
     const { PiAgentRuntime } = require('../dist/llm/pi-agent-runtime.js');
 
     // The mock endpoint stands in for the fixed production base URL; the service still sees the
@@ -195,7 +194,7 @@ async function main() {
     };
 
     const runtime = new PiAgentRuntime(mockAdapter, settings, snapshotStore);
-    const service = new LearnAgent(runtime, new CommonAgent(runtime));
+    const service = new LearnAgent(runtime);
 
     const history = createHistory(40, '上下文压缩验证文本。'.repeat(120));
     const events = [];

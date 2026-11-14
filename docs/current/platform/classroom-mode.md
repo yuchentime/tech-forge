@@ -68,7 +68,7 @@ last_verified: 2026-11-13
 
 1. 确认结束 → `ended`，回到首页。
 2. 首页在后台调用 `POST /api/lessons/:id/summary`，期间每 3 秒轮询列表；完成显示摘要预览，失败可「重新生成」。
-3. 总结存于 SQLite `lessons`（`summaryStatus/summaryMarkdown/summaryError/summaryGeneratedAt`），由一次 `CommonAgent.generate()` 生成四节 Markdown；消息仍在 JSONL。
+3. 总结存于 SQLite `lessons`（`summaryStatus/summaryMarkdown/summaryError/summaryGeneratedAt`），由一次 `OneShotLlmAgent.generate()` 生成四节 Markdown；消息仍在 JSONL。
 4. 只有 `ended` 课堂能生成总结；`active` 请求返回 409。
 
 ## 记录与恢复
