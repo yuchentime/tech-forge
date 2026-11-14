@@ -568,22 +568,16 @@ export class CommonAgent {
       const cwd = await prepareWorkspaceDirectory(sessionWorkspace);
       const managedFilePaths = await this.settings.getManagedFilePaths();
       // App-owned `read`/`edit`/`write` with the same names as Pi's built-ins, so they shadow them
-      // in the session: these carry the workspace boundary, the app-file/knowledge guards and the
-      // artifact callback. Dropping them from `customTools` below silently falls back to the
-      // built-ins, which enforce nothing and never report a written path — the Agent still says it
-      // wrote a file, but no artifact row exists and the file sidebar stays empty.
+      // in the session: these carry the workspace boundary, the app-file guard and the artifact
+      // callback. Dropping them from `customTools` below silently falls back to the built-ins, which
+      // enforce nothing and never report a written path — the Agent still says it wrote a file, but
+      // no artifact row exists and the file sidebar stays empty.
       const workspaceFileTools = await createWorkspaceFileTools(
         sdk,
         cwd,
         undefined,
         {
           protectedPaths: managedFilePaths,
-          // Reads are allowed by default everywhere except this guarded subtree, which needs an
-          // explicit path in the current user request (same shape as the external write grant).
-          guardedDirectories: [this.settings.getKnowledgeDirectory()],
-          // The catalog is app-generated and the session policy tells the model to read it; the
-          // uploaded originals beside it stay denied.
-          readableGuardedPaths: [this.settings.getKnowledgeCatalogPath()],
           // Only stream() supplies this raw current-turn text. generate() has no grant.
           currentUserRequest,
           ...(options.onFileWritten
@@ -593,9 +587,6 @@ export class CommonAgent {
             outcome,
             pathScope,
             protectedPathCount,
-            guardedDirectoryCount,
-            readGrantKind,
-            grantLiftedGuard,
             elapsedMs,
           }) => {
             writeStructuredEvent(
@@ -607,9 +598,6 @@ export class CommonAgent {
                 outcome,
                 pathScope,
                 protectedPathCount,
-                guardedDirectoryCount,
-                readGrantKind,
-                grantLiftedGuard,
                 elapsedMs,
               },
             );

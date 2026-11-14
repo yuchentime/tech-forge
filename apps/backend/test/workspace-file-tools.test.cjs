@@ -103,85 +103,79 @@ test('reads external files but rejects ungranted external writes and edits', asy
   assert.equal(existsSync(path.join(workspace, 'outside.txt')), false);
 });
 
-test('guards a directory by default but honours an explicit user request', async (t) => {
+test('reads knowledge-library originals without a per-turn grant but keeps them unwritable', async (t) => {
   const { parent, workspace } = await createWorkspace(t);
   const knowledge = path.join(parent, 'knowledge');
   await fs.mkdir(knowledge);
   const original = path.join(knowledge, 'origin.md');
   await fs.writeFile(original, 'uploaded original bytes');
   const sdk = await piSdkPromise;
-  const guardedReports = [];
+  const reports = [];
 
-  // The model naming a path on its own is not permission: default deny.
-  const guarded = await createWorkspaceFileTools(sdk, workspace, undefined, {
-    guardedDirectories: [knowledge],
-    onFileReadResolution: (report) => guardedReports.push(report),
+  const tools = await createWorkspaceFileTools(sdk, workspace, undefined, {
+    onFileReadResolution: (report) => reports.push(report),
   });
-  const guardedRead = guarded.find((tool) => tool.name === 'read');
-  await assert.rejects(executeTool(guardedRead, { path: original }, workspace));
-  await assert.rejects(
-    executeTool(guardedRead, { path: path.join('..', 'knowledge', 'origin.md') }, workspace),
+  const readTool = tools.find((tool) => tool.name === 'read');
+  const editTool = tools.find((tool) => tool.name === 'edit');
+  const writeTool = tools.find((tool) => tool.name === 'write');
+
+  // The user never names the path: reading the library is still allowed, by absolute and `..` alias.
+  const absoluteResult = await executeTool(readTool, { path: original }, workspace);
+  assert.match(JSON.stringify(absoluteResult), /uploaded original bytes/);
+  const relativeResult = await executeTool(
+    readTool,
+    { path: path.join('..', 'knowledge', 'origin.md') },
+    workspace,
   );
+  assert.match(JSON.stringify(relativeResult), /uploaded original bytes/);
   assert.deepEqual(
-    guardedReports.map(({ outcome, grantLiftedGuard, readGrantKind }) => ({
-      outcome,
-      grantLiftedGuard,
-      readGrantKind,
-    })),
-    [
-      { outcome: 'guarded_directory_denied', grantLiftedGuard: false, readGrantKind: 'none' },
-    ],
+    reports.map(({ outcome, pathScope }) => ({ outcome, pathScope })),
+    [{ outcome: 'resolved', pathScope: 'external' }],
   );
 
-  // The user asking for that exact file in this turn lifts the default.
-  const grantedReports = [];
-  const granted = await createWorkspaceFileTools(sdk, workspace, undefined, {
-    guardedDirectories: [knowledge],
-    currentUserRequest: `请读一下 ${original}`,
-    onFileReadResolution: (report) => grantedReports.push(report),
-  });
-  const grantedRead = granted.find((tool) => tool.name === 'read');
-  const result = await executeTool(grantedRead, { path: original }, workspace);
-  assert.match(JSON.stringify(result), /uploaded original bytes/);
-  assert.deepEqual(grantedReports.map(({ outcome, grantLiftedGuard }) => ({
-    outcome,
-    grantLiftedGuard,
-  })), [{ outcome: 'resolved', grantLiftedGuard: true }]);
-
-  // A contradictory request ("don't read ...") must not grant anything.
-  const negated = await createWorkspaceFileTools(sdk, workspace, undefined, {
-    guardedDirectories: [knowledge],
-    currentUserRequest: `不要读 ${original}`,
-  });
-  const negatedRead = negated.find((tool) => tool.name === 'read');
-  await assert.rejects(executeTool(negatedRead, { path: original }, workspace));
-
+  // Opening reads does not open writes: mutation stays inside the workspace.
+  await assert.rejects(
+    executeTool(writeTool, { path: original, content: 'changed' }, workspace),
+    (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
+  );
+  await assert.rejects(
+    executeTool(
+      editTool,
+      { path: original, edits: [{ oldText: 'uploaded', newText: 'changed' }] },
+      workspace,
+    ),
+    (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
+  );
   assert.equal(await fs.readFile(original, 'utf8'), 'uploaded original bytes');
 });
 
-test('reads the generated catalog inside a guarded directory but keeps its siblings denied', async (t) => {
+test('denies app-owned settings reads while allowing ordinary files beside them', async (t) => {
   const { parent, workspace } = await createWorkspace(t);
-  const knowledge = path.join(parent, 'knowledge');
-  await fs.mkdir(knowledge);
-  const catalog = path.join(knowledge, 'index.md');
-  const original = path.join(knowledge, 'origin.md');
-  const sibling = path.join(knowledge, 'other.md');
-  await fs.writeFile(catalog, '## 资料目录\n\n（资料库当前为空，尚未导入任何资料。）');
-  await fs.writeFile(original, 'uploaded original bytes');
-  await fs.writeFile(sibling, 'sibling bytes');
+  const config = path.join(parent, 'config.toml');
+  const identify = path.join(parent, 'IDENTIFY.md');
+  const notes = path.join(parent, 'notes');
+  const note = path.join(notes, 'lesson.md');
+  await fs.writeFile(config, 'apiKey = "secret"');
+  await fs.writeFile(identify, 'who the user is');
+  await fs.mkdir(notes);
+  await fs.writeFile(note, 'ordinary note bytes');
   const sdk = await piSdkPromise;
 
   const tools = await createWorkspaceFileTools(sdk, workspace, undefined, {
-    guardedDirectories: [knowledge],
-    readableGuardedPaths: [catalog],
+    protectedPaths: [config, identify],
   });
   const readTool = tools.find((tool) => tool.name === 'read');
 
-  const result = await executeTool(readTool, { path: catalog }, workspace);
-  assert.match(JSON.stringify(result), /资料库当前为空/);
-  await assert.rejects(executeTool(readTool, { path: original }, workspace));
-  // The exemption names one file, so it never widens to the directory.
-  await assert.rejects(executeTool(readTool, { path: sibling }, workspace));
+  await assert.rejects(
+    executeTool(readTool, { path: config }, workspace),
+    (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
+  );
+  await assert.rejects(
+    executeTool(readTool, { path: identify }, workspace),
+    (error) => error.code === 'EWORKSPACE' || error.message.includes('EWORKSPACE'),
+  );
+  const result = await executeTool(readTool, { path: note }, workspace);
+  assert.match(JSON.stringify(result), /ordinary note bytes/);
 });
 
 /**

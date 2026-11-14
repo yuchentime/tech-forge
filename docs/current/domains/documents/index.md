@@ -102,9 +102,9 @@ last_verified: 2026-11-12
 | 非阻断失败 | 删除后文件清理失败 → `fileCleanup: 'partial'`；转换 Markdown 写入失败 → `warnings[]` 追加 `CONVERTED_MARKDOWN_FAILED` |
 
 - 渲染层把 `status: 'failed'` 的导入结果显示为失败：状态文案为“摘要未生成”，提示可点「重试摘要」；不会把摘要失败显示成导入成功。
-- 目录文件 `<configDir>/knowledge/index.md`：`DocumentCatalogIndexService.rebuild()` 按数据库最新 `catalogStatus = 'ready'` 版本整体重写（临时文件 + rename），导入、重试或删除后触发；`DocumentsService.onModuleInit` 在启动时检查，文件缺失就按数据库重建一次（空库写成 `## 资料目录` + “资料库当前为空”，不是空文件）。路径只在 `SettingsService.getKnowledgeCatalogPath()` 定义一次，写入、读取与文件工具豁免共用。它是知识库根里唯一可被 `read` 读取的文件，上传原文仍是 guarded。
+- 目录文件 `<configDir>/knowledge/index.md`：`DocumentCatalogIndexService.rebuild()` 按数据库最新 `catalogStatus = 'ready'` 版本整体重写（临时文件 + rename），导入、重试或删除后触发；`DocumentsService.onModuleInit` 在启动时检查，文件缺失就按数据库重建一次（空库写成 `## 资料目录` + “资料库当前为空”，不是空文件）。路径只在 `SettingsService.getKnowledgeCatalogPath()` 定义一次，写入与读取共用；它和同目录上传原文一样可被 Agent 的 `read` 直接读取。
 
-隔离：知识库根**不放在 Agent workspace 下**，避免默认 `grep` 扫到上传原文；`SettingsService.getKnowledgeDirectory()` 把它作为 guarded directory 交给 `workspace-file-tools.ts`，**默认拒绝**该子树内的读取（含绝对路径与 `..` 别名），只有当前用户请求里明确点名该路径并表达读取意图时才放行。写入本就限制在 workspace 内，因此知识库目录不可被 Agent 改写。旧安装的 `<workspace>/knowledge` 在启动时由 `DocumentsService.onModuleInit` 一次性移动到新位置，目标已存在时不动。
+隔离：知识库根**不放在 Agent workspace 下**，避免默认 `grep` 扫到上传原文；`read` 不按目录设防，目录文件与上传原文都可直接读取，写入本就限制在 workspace 内，因此知识库目录不可被 Agent 改写。旧安装的 `<workspace>/knowledge` 在启动时由 `DocumentsService.onModuleInit` 一次性移动到新位置，目标已存在时不动。
 
 ## 8. 未实现
 

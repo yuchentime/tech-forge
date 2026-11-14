@@ -41,7 +41,7 @@ last_verified: 2026-11-13
 | `CommonAgent` / `LearnAgent` | 每次请求创建 Pi session 时重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md；Pi cwd 取本会话工作区 `<configDir>/sessions/<conversationId>/workspace`，组合系统提示词，注册持久化扩展钩子，并按 `loadMemory` 注册记忆工具。聊天与 skill 轮次再注册 `web_search`/`web_fetch`（内部 JSON 调用不注册）。Pi skill 从 `<configDir>/skills`（内置模板首次安装于此）与 `<workspace>/skills` 装载；带 `skillName` 的请求把 `/skill:<name>` 放在模型 prompt 首位，并在发送前确认 skill 已发现。另提供非流式 `generate()` 供演练使用，默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
-| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md）；受保护目录（知识库根）默认拒绝读取，仅当当前用户请求明确点名其中路径并表达读取意图时放行；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
+| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md 等）；知识库目录与其他普通目录同样可读；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
 ## 运行日志
@@ -195,8 +195,8 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 ## 文件读写边界
 
 - 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml`、`IDENTIFY.md` 与 `PREFERENCE.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
-- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件；知识库根（`<configDir>/knowledge`）默认拒绝，用户在该轮明确点名路径时放行（config/IDENTIFY/PREFERENCE 无此例外）；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
-- 知识库根里唯一的读取例外是生成的目录文件 `<configDir>/knowledge/index.md`：`CommonAgent` 把它交给 `workspace-file-tools.ts` 的 `readableGuardedPaths`，按精确路径放行，同目录上传原文仍被拒绝，且豁免不会扩展到父目录。`DocumentsService.onModuleInit` 在启动时按数据库重建该文件（缺失才写，空库写成“资料库当前为空”）。资料库规则不经过 `AGENTS.md`：`CommonAgent.createSession()` 在 system prompt 的 `promptSections` 中声明目录只在显式 `/查询资料库`、`/探索主题` 轮作为会话消息注入，普通提问不得主动搜索资料库；旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
+- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件，唯一拒绝的是 SettingsService 托管的应用文件；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
+- 知识库目录 `<configDir>/knowledge` 与普通目录同等对待：`read` 可直接读取目录文件与上传原文，没有按轮次要授权的目录守卫；写入仍受工作区边界限制。`DocumentsService.onModuleInit` 在启动时按数据库重建目录文件 `index.md`（缺失才写，空库写成“资料库当前为空”）。`CommonAgent.createSession()` 在 system prompt 中写入该目录文件的绝对路径，并指示模型在需要检索资料库时先读目录、再读必要原文；`/查询资料库`、`/探索主题` 轮仍把检索结果作为会话消息注入。旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 
@@ -254,7 +254,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
 2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
 3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `ChatStreamEvent`、桥接校验和 adapter。
-4. 文件读写分离授权：读取可访问任意普通文件但不得读取 SettingsService 托管的 config/IDENTIFY/PREFERENCE；知识库根（`knowledge/`）默认拒绝读取，只有当前用户请求明确点名该路径时才建立一次性读取许可；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
+4. 文件读写分离授权：读取可访问任意普通文件，唯一拒绝的是 SettingsService 托管的 config/IDENTIFY/PREFERENCE 等应用文件；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。
