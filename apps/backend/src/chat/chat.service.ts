@@ -1,14 +1,8 @@
+import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent';
-import {
-  ConversationsService,
-  type ConversationAttachmentRef,
-} from '../conversations/conversations.service';
-import {
-  getToolDisplayFields,
-  getToolFailureReason,
-} from '../conversations/conversation-transcript';
+import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
+import { ArtifactsService } from '../artifacts/artifacts.service';
 import {
   AttachmentsService,
   type AttachmentFailure,
@@ -16,22 +10,28 @@ import {
   type ChatAttachmentInput,
   type StoredAttachments,
 } from '../attachments/attachments.service';
+import { ConversationRunRegistry } from '../conversations/conversation-run-registry';
+import {
+  getToolDisplayFields,
+  getToolFailureReason,
+} from '../conversations/conversation-transcript';
+import {
+  ConversationsService,
+  type ConversationAttachmentRef,
+} from '../conversations/conversations.service';
 import { KnowledgeDirectoryService } from '../documents/knowledge-directory.service';
 import { LearnAgent } from '../llm/agents/LearnAgent';
-import { MemoryService } from '../memory/memory.service';
-import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
-import { parseTurnCommand } from './turn-command';
-import { RehearsalsService } from '../rehearsals/rehearsals.service';
-import { ArtifactsService } from '../artifacts/artifacts.service';
-import { ConversationRunRegistry } from '../conversations/conversation-run-registry';
-import type { ArtifactSummaryDto } from '../artifacts/artifacts.dto';
 import {
   getSafeErrorLogFields,
   writeStructuredEvent,
   type RequestLogContext,
 } from '../logging/structured-logger';
-import { projectChatSessionEvent } from './chat-events';
+import { MemoryService } from '../memory/memory.service';
+import { RehearsalsService } from '../rehearsals/rehearsals.service';
 import type { ChatStreamEvent } from './chat-events';
+import { projectChatSessionEvent } from './chat-events';
+import { DEEP_RESEARCH_SKILL_NAME } from './deep-research-command';
+import { parseTurnCommand } from './turn-command';
 
 /** Tracks one active Pi message and durable tool rows during a streamed turn. */
 interface ChatTurnPersistenceState {
@@ -334,8 +334,7 @@ export class ChatService {
       // the system prompt must stay identical across turns for provider prefix caching, and the
       // snapshot is cleaned of this block before it is stored. The rehearsal digest is not part of
       // it: it is appended once as a durable Pi message entry (see `contextMessage` below).
-      const memoryContext = await this.memory.buildChatContext(userPrompt);
-      const promptContext = [attachmentContext, memoryContext]
+      const promptContext = [attachmentContext]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
 
@@ -349,7 +348,6 @@ export class ChatService {
         injectedTokens: 0,
         researchCommand: turnCommand.research,
         rehearsalDigestCharacters: rehearsalDigest.text.length,
-        memoryContextCharacters: memoryContext.length,
         promptContextCharacters: promptContext.length,
       });
       const piEvents = this.llm.stream(userPrompt, {
