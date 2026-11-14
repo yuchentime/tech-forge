@@ -21,7 +21,7 @@ Agent 在一次会话里写出的文件被登记为 `artifacts` 行，供会话�
 ## 当前行为
 
 - **工作目录即会话工作区**：每个会话的 Agent cwd 是 `<configDir>/sessions/<conversationId>/workspace`，与同级的 `attachments/` 分开；相对路径写入落在这一层，删除会话时整目录一并删除。
-- **登记时机**：`write` / `edit` 工具的成功写入回调（`createWorkspaceFileTools` 的 `onFileWritten`）把已解析的绝对路径交给 `ArtifactsService.registerArtifact()`；同一路径重复写入按唯一键更新同一行，保持 `id` 稳定，因此已打开的标签页不会失效。
+- **登记时机**：`write` / `edit` 工具的成功写入回调（`createWorkspaceFileTools` 的 `onFileWritten`）把已解析的绝对路径交给 `ArtifactsService.registerArtifact()`；同一路径重复写入按唯一键更新同一行，保持 `id` 稳定，因此已打开的标签页不会失效。这条链依赖 `CommonAgent.createSession()` 把 `workspaceFileTools` 留在 `customTools` 里：应用自己的同名工具会遮蔽 Pi 内置的 `read`/`edit`/`write`，而内置工具不回调、也不做路径守卫。缺了这一项时 Agent 仍会显示"已写入 xxx"，但 `artifacts` 表没有行，侧边栏与响应底部文件列表同时为空——症状是"文件只在消息里出现"。
 - **路径存储**：会话内文件存 `pathKind='session'` + 相对工作区的 POSIX 路径；两个路径列都以空串占位而不是 NULL（SQLite 唯一索引把 NULL 视为互不相等，会让重复写入插入多行）。用户明确指定绝对路径时存 `pathKind='external'` + 绝对路径，便于后续预览与会话删除时区分。
 - **缺失检测**：列表与预览接口现算 `missing`；文件被移走或改名后行仍保留，行名置灰并加删除线，点击提示"文件不存在"。删除线替代了普通下划线，是"这条记录指向的文件已不在"的唯一视觉信号。
 - **预览格式**：按扩展名判定 `markdown`（含 ` ```mermaid ` 块时渲染图表）、`mermaid`、`svg`、`json`（≤256 KiB 且可解析则美化）、`jsonl`、`text`；正文读取上限 512 KiB，超出返回 `truncated`。
