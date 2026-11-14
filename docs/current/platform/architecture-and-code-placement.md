@@ -36,6 +36,7 @@ last_verified: 2026-11-14
 | 大模型场景 Agent | `apps/backend/src/llm/agents/<Scenario>Agent.ts` | 每个不同的大模型调用场景必须单独定义 Agent；文件名和类名统一为 `<Scenario>Agent.ts` / `<Scenario>Agent`。通用生成能力复用 `CommonAgent.generate()`，Agent 只负责该场景的提示词、输入编排和输出解析 |
 | Backend 业务流程诊断日志 | `apps/backend/src/logging/structured-logger.ts` 与各领域 Controller/Service | 通过 Nest Logger 输出带 requestId 的 JSON 事件；由所属边界记录阶段与失败，不输出业务正文或工具 payload |
 | 文件系统、向量索引等底层能力 | 现有领域 Service 的依赖；需要复用时再新增 `platform` adapter | 业务规则归领域，通用 I/O 适配归基础设施 |
+| 提示词 | `apps/backend/src/llm/prompts` | Agent 提示词统一存放位置 |
 
 简单功能可继续使用现有领域文件；当组件变多时再按页面、组件、hooks 和类型拆分，不先创建空目录或通用框架。
 

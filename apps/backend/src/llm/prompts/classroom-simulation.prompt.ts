@@ -1,9 +1,9 @@
 import {
   CLASSROOM_STUDENT_IDS,
   CLASSROOM_STUDENTS,
-} from '../lessons/classroom-students';
-import { truncateChars } from '../lessons/transcript-format';
-import { parseJsonObject } from './model-json';
+} from '../../lessons/classroom-students';
+import { truncateChars } from '../../lessons/transcript-format';
+import { parseJsonObject } from '../model-json';
 
 /** Most recent transcript lines given to the director and the student. */
 export const CLASSROOM_TRANSCRIPT_MESSAGE_LIMIT = 12;

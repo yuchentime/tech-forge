@@ -46,7 +46,7 @@ import {
   type DirectorDecision,
   type DirectorPointContext,
   type StudentPointContext,
-} from '../classroom-simulation.prompt';
+} from '../prompts/classroom-simulation.prompt';
 import { ClassroomTurnError, isLessonError } from '../turn-errors';
 
 /** Director picks one student; it must never hang the turn (and the lesson lock) forever. */

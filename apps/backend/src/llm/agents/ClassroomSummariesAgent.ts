@@ -10,7 +10,7 @@ import {
   SUMMARY_CHAR_LIMIT,
   SUMMARY_MESSAGE_LIMIT,
   SUMMARY_TIMEOUT_MS,
-} from '../../classroom/classroom-summary.prompt';
+} from '../prompts/classroom-summary.prompt';
 import { CommonAgent } from './CommonAgent';
 
 /** Raised when a second generation is requested while one is still running. */
