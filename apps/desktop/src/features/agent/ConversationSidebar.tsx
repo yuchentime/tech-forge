@@ -21,7 +21,7 @@ export type SidebarView =
   | 'settings'
   | 'knowledge'
   | 'knowledgeProfile'
-  | 'focus'
+  | 'learn-notes'
   | 'classroom';
 
 /** Renders the conversation list and actions without owning API or runtime state. */
@@ -117,13 +117,13 @@ export function ConversationSidebar({
           <span className="truncate">课堂模式</span>
         </button>
         <button
-          aria-pressed={activeView === 'focus'}
+          aria-pressed={activeView === 'learn-notes'}
           className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30 ${
-            activeView === 'focus'
+            activeView === 'learn-notes'
               ? 'bg-brand-100 text-brand-800'
               : 'text-ink-600 hover:bg-white/70 hover:text-ink-900'
           }`}
-          onClick={() => onSelectView('focus')}
+          onClick={() => onSelectView('learn-notes')}
           title="学习笔记"
           type="button"
         >

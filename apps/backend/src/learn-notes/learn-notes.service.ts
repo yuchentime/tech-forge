@@ -7,10 +7,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { ConversationsService } from '../conversations/conversations.service';
 import { MessageEntity } from '../conversations/message.entity';
-import type { CreateFocusItemDto, FocusItemDto } from './focus-items.dto';
-import { FocusItemEntity } from './focus-item.entity';
+import type { CreateLearnNoteDto, LearnNoteDto } from './learn-notes.dto';
+import { LearnNoteEntity } from './learn-note.entity';
 
-/** Longest excerpt the focus list accepts; counted in Unicode code points. */
+/** Longest saved excerpt accepted by Learn Notes; counted in Unicode code points. */
 const MAX_QUOTE_CHARACTERS = 1000;
 
 /** Longest study note accepted for one excerpt; counted in Unicode code points. */
@@ -24,14 +24,14 @@ const MAX_NOTE_CHARACTERS = 2000;
  * rendered as Markdown.
  */
 @Injectable()
-export class FocusItemsService {
+export class LearnNotesService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly conversations: ConversationsService,
   ) {}
 
   /** Saves one excerpt, returning the existing row when the same quote was already saved. */
-  async create(input: CreateFocusItemDto): Promise<FocusItemDto> {
+  async create(input: CreateLearnNoteDto): Promise<LearnNoteDto> {
     const quote = normalizeQuote(input.quote);
     if (!quote) {
       throw new BadRequestException('选中的内容不能为空。');
@@ -54,7 +54,7 @@ export class FocusItemsService {
       throw new BadRequestException('只能关注助手回复中的内容。');
     }
 
-    const repository = this.dataSource.getRepository(FocusItemEntity);
+    const repository = this.dataSource.getRepository(LearnNoteEntity);
     const quoteKey = createHash('sha256').update(quote, 'utf8').digest('hex');
     const existing = await repository.findOneBy({
       messageId: input.messageId,
@@ -101,21 +101,21 @@ export class FocusItemsService {
   }
 
   /** Returns every saved excerpt newest first, with the current conversation titles. */
-  async list(): Promise<FocusItemDto[]> {
-    const items = await this.dataSource.getRepository(FocusItemEntity).find({
+  async list(): Promise<LearnNoteDto[]> {
+    const items = await this.dataSource.getRepository(LearnNoteEntity).find({
       order: { createdAt: 'DESC' },
     });
     return this.toDtos(items);
   }
 
   /** Replaces the study note; an empty note clears it without deleting the excerpt. */
-  async updateNote(id: string, rawNote: string): Promise<FocusItemDto> {
+  async updateNote(id: string, rawNote: string): Promise<LearnNoteDto> {
     const note = normalizeNote(rawNote);
     if (note !== null && Array.from(note).length > MAX_NOTE_CHARACTERS) {
       throw new BadRequestException('备注过长，请控制在 2000 字以内。');
     }
 
-    const repository = this.dataSource.getRepository(FocusItemEntity);
+    const repository = this.dataSource.getRepository(LearnNoteEntity);
     const item = await repository.findOneBy({ id });
     if (!item) {
       throw new NotFoundException('这条学习笔记不存在，可能已被删除。');
@@ -128,7 +128,7 @@ export class FocusItemsService {
   /** Deletes one saved excerpt; a missing row is reported so the UI can refresh. */
   async remove(id: string): Promise<{ id: string }> {
     const result = await this.dataSource
-      .getRepository(FocusItemEntity)
+      .getRepository(LearnNoteEntity)
       .delete({ id });
     if (!result.affected) {
       throw new NotFoundException('这条学习笔记不存在，可能已被删除。');
@@ -137,7 +137,7 @@ export class FocusItemsService {
   }
 
   /** Maps rows to the wire shape, resolving conversation titles in one query. */
-  private async toDtos(items: FocusItemEntity[]): Promise<FocusItemDto[]> {
+  private async toDtos(items: LearnNoteEntity[]): Promise<LearnNoteDto[]> {
     const titles = await this.conversations.getConversationDisplayTitles(
       items.map((item) => item.conversationId),
     );

@@ -69,9 +69,9 @@ import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage'
 import { ClassroomHome } from '../classroom/ClassroomHome';
 import { ClassroomMode } from '../classroom/ClassroomMode';
 import { generateLessonSummary } from '../classroom/classroom-api';
-import { FocusPointsPage } from '../focus/FocusPointsPage';
-import { AddFocusNoteDialog } from '../focus/AddFocusNoteDialog';
-import { createFocusItem } from '../focus/focus-api';
+import { LearnNotesPage } from '../learn-notes/LearnNotesPage';
+import { AddLearnNoteDialog } from '../learn-notes/AddLearnNoteDialog';
+import { createLearnNote } from '../learn-notes/learn-notes-api';
 import {
   REHEARSAL_REQUIRES_ROUND_HINT,
   hasCompletedConversationRound,
@@ -160,7 +160,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyErrorConversationId, setHistoryErrorConversationId] = useState<string | null>(null);
   /** Selection inside one assistant reply, with the viewport position of the action button. */
-  const [focusSelection, setFocusSelection] = useState<{
+  const [learnNoteSelection, setLearnNoteSelection] = useState<{
     conversationId: string;
     messageId: string;
     messageIndex: number;
@@ -169,10 +169,10 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     left: number;
   } | null>(null);
   /**
-   * Excerpt waiting for its optional note. A snapshot, not `focusSelection`: clicking inside the
+   * Excerpt waiting for its optional note. A snapshot, not `learnNoteSelection`: clicking inside the
    * dialog collapses the page selection, which would otherwise hide the action mid-edit.
    */
-  const [pendingFocus, setPendingFocus] = useState<{
+  const [pendingLearnNote, setPendingLearnNote] = useState<{
     conversationId: string;
     messageId: string;
     messageIndex: number;
@@ -231,7 +231,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     window.requestAnimationFrame(tryScroll);
   }, []);
 
-  /** Fetches the complete history and optionally scrolls to a saved focus message. */
+  /** Fetches the complete history and optionally scrolls to a saved Learn Note message. */
   const loadConversation = useCallback(async (
     conversationId: string,
     anchorMessageId?: string,
@@ -429,7 +429,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
   /** Captures a selection inside one assistant reply and anchors the action button to it. */
   useEffect(() => {
     if (activeView !== 'chat' || conversationDisplayMode !== 'conversation') {
-      setFocusSelection(null);
+      setLearnNoteSelection(null);
       return;
     }
 
@@ -447,7 +447,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
         return;
       }
 
@@ -464,7 +464,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
       const quote = selection.toString().trim();
       // 取消或中断的轮次不会广播锚点行；此时不能悄悄吞掉选区，要让用户知道原因。
       if (!messageId && runtimeMessageId && !isUuidV4(runtimeMessageId)) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
         showToast('这条回复还没有保存完成，请稍后再试。');
         return;
       }
@@ -477,11 +477,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
         !conversationId ||
         !quote
       ) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
         return;
       }
       if (Array.from(quote).length > 1000) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
         showToast('选中内容过长，请分次添加。');
         return;
       }
@@ -493,7 +493,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           .messages.findIndex((message) => message.id === runtimeMessageId) + 1;
       const rect = range.getBoundingClientRect();
       if (messageIndex < 1 || (rect.width === 0 && rect.height === 0)) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
         return;
       }
 
@@ -505,7 +505,7 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
           ? firstLine
           : rect;
       const aboveTop = startRect.top - 48;
-      setFocusSelection({
+      setLearnNoteSelection({
         conversationId,
         messageId,
         messageIndex,
@@ -523,13 +523,13 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
     const handleSelectionChange = (): void => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
       }
     };
 
     const handleScroll = (event: Event): void => {
       if (event.target === messageViewportRef.current) {
-        setFocusSelection(null);
+        setLearnNoteSelection(null);
       }
     };
 
@@ -545,40 +545,40 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
 
   /** Clears the action when the conversation or the view changes. */
   useEffect(() => {
-    setFocusSelection(null);
+    setLearnNoteSelection(null);
   }, [activeView, conversationState.activeConversationId]);
 
   /** Opens the note dialog for the current selection; nothing is saved until the dialog submits. */
-  const openFocusNoteDialog = useCallback((): void => {
-    if (!focusSelection) return;
-    setPendingFocus({
-      conversationId: focusSelection.conversationId,
-      messageId: focusSelection.messageId,
-      messageIndex: focusSelection.messageIndex,
-      quote: focusSelection.quote,
+  const openLearnNoteDialog = useCallback((): void => {
+    if (!learnNoteSelection) return;
+    setPendingLearnNote({
+      conversationId: learnNoteSelection.conversationId,
+      messageId: learnNoteSelection.messageId,
+      messageIndex: learnNoteSelection.messageIndex,
+      quote: learnNoteSelection.quote,
     });
-    setFocusSelection(null);
-  }, [focusSelection]);
+    setLearnNoteSelection(null);
+  }, [learnNoteSelection]);
 
   /** Drops the draft excerpt and the page selection without saving anything. */
-  const cancelFocusNote = useCallback((): void => {
-    setPendingFocus(null);
+  const cancelLearnNote = useCallback((): void => {
+    setPendingLearnNote(null);
     window.getSelection()?.removeAllRanges();
   }, []);
 
   /** Saves the pending excerpt with the dialog's note (empty means "no note"). */
-  const saveFocusWithNote = useCallback(
+  const saveLearnNoteWithNote = useCallback(
     async (note: string): Promise<void> => {
-      if (!pendingFocus) return;
-      await createFocusItem({
-        ...pendingFocus,
+      if (!pendingLearnNote) return;
+      await createLearnNote({
+        ...pendingLearnNote,
         ...(note ? { note } : {}),
       });
       showToast('已添加到学习笔记');
       window.getSelection()?.removeAllRanges();
-      setPendingFocus(null);
+      setPendingLearnNote(null);
     },
-    [pendingFocus],
+    [pendingLearnNote],
   );
 
   const isHistoryLoading = loadingConversationId !== null;
@@ -705,8 +705,8 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                 void loadConversation(conversationId);
               }}
             />
-          ) : activeView === 'focus' ? (
-            <FocusPointsPage
+          ) : activeView === 'learn-notes' ? (
+            <LearnNotesPage
               conversations={conversationState.conversations}
               onOpenConversation={(conversationId, messageId) => {
                 setActiveView('chat');
@@ -794,14 +794,14 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 </PageHeader>
 
-                {focusSelection && !pendingFocus && !isRehearsalMode && (
+                {learnNoteSelection && !pendingLearnNote && !isRehearsalMode && (
                   <div
                     className="fixed z-50"
-                    style={{ top: focusSelection.top, left: focusSelection.left }}
+                    style={{ top: learnNoteSelection.top, left: learnNoteSelection.left }}
                   >
                     <button
                       className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-float transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-                      onClick={openFocusNoteDialog}
+                      onClick={openLearnNoteDialog}
                       // Keep the text selected until the click handler reads it.
                       onMouseDown={(event) => event.preventDefault()}
                       type="button"
@@ -816,11 +816,11 @@ export function AgentChatPage({ runtime }: { runtime: AssistantRuntime }) {
                   </div>
                 )}
 
-                {pendingFocus && (
-                  <AddFocusNoteDialog
-                    onCancel={cancelFocusNote}
-                    onSave={saveFocusWithNote}
-                    quote={pendingFocus.quote}
+                {pendingLearnNote && (
+                  <AddLearnNoteDialog
+                    onCancel={cancelLearnNote}
+                    onSave={saveLearnNoteWithNote}
+                    quote={pendingLearnNote.quote}
                   />
                 )}
 

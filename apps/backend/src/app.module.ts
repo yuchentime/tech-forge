@@ -8,8 +8,7 @@ import { ClassroomModule } from './classroom/classroom.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { DocumentsModule } from './documents/documents.module';
 import { EmbeddingModule } from './embedding/embedding.module';
-import { FocusItemsModule } from './focus-items/focus-items.module';
-import { JobsModule } from './jobs/jobs.module';
+import { LearnNotesModule } from './learn-notes/learn-notes.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { LessonsModule } from './lessons/lessons.module';
 import { AgentModule } from './llm/agents/AgentModule';
@@ -19,14 +18,12 @@ import { RehearsalsModule } from './rehearsals/rehearsals.module';
 import { RetrievalModule } from './retrieval/retrieval.module';
 import { SettingsModule } from './settings/settings.module';
 import { StudyNotesModule } from './study-notes/study-notes.module';
-import { TeachingModule } from './teaching/teaching.module';
 
 /** Composes the active backend platform and domain modules. */
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({ useFactory: buildDatabaseOptions }),
     PlatformModule,
-    TeachingModule,
     DocumentsModule,
     KnowledgeModule,
     RetrievalModule,
@@ -41,9 +38,8 @@ import { TeachingModule } from './teaching/teaching.module';
     MemoryModule,
     ChatModule,
     AgentModule,
-    FocusItemsModule,
+    LearnNotesModule,
     StudyNotesModule,
-    JobsModule,
   ],
 })
 export class AppModule {}

@@ -180,6 +180,33 @@ routes:
       - docs/current/domains/conversations/backend-behavior.md
       - docs/current/platform/agent-runtime.md
     history_on_demand: []
+  learn-notes:
+    description: "Rename saved assistant excerpts from focus_items to learn_notes: data-preserving SQLite migration, LearnNotes backend module and /api/learn-notes contract, synchronized desktop feature/API names, and unchanged independent study_notes lifecycle"
+    token_budget: 18000
+    code_globs:
+      - "apps/backend/src/learn-notes/**"
+      - "apps/backend/src/database/migrations/**"
+      - "apps/backend/src/database/database.options.ts"
+      - "apps/backend/src/app.module.ts"
+      - "apps/backend/src/conversations/conversations.service.ts"
+      - "apps/backend/test/learn-notes.test.cjs"
+      - "apps/backend/test/conversation-delete.test.cjs"
+      - "apps/backend/package.json"
+      - "apps/desktop/src/features/learn-notes/**"
+      - "apps/desktop/src/features/agent/AgentChatPage.tsx"
+      - "apps/desktop/src/features/agent/ConversationSidebar.tsx"
+    required:
+      - docs/current/index.md
+      - docs/current/domains/conversations/index.md
+      - docs/current/domains/conversations/api-contract.md
+      - docs/changes/2026-11-14-learn-notes-rename/brief.md
+      - docs/changes/2026-11-14-learn-notes-rename/design.md
+      - docs/changes/2026-11-14-learn-notes-rename/verification.md
+    optional:
+      - docs/changes/2026-11-14-learn-notes-rename/worklog.md
+      - docs/changes/2026-11-14-learn-notes-rename/reviews/design-review.md
+      - docs/current/domains/conversations/backend-behavior.md
+    history_on_demand: []
   conversation-renaming:
     description: "Rename a conversation from the sidebar row menu: a bounded 1-20 code-point title persisted on conversations.title, edited in a modal with 取消/保存, with the stored title outranking the derived first-prompt title"
     token_budget: 10000

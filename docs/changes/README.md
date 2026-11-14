@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/README.md
   - docs/manifest.yaml
-last_verified: 2026-11-11
+last_verified: 2026-11-14
 ---
 
 # 变更记录
@@ -20,6 +20,7 @@ last_verified: 2026-11-11
 
 | 变更 | 责任单元 | 设计 |
 |---|---|---|
+| 学习笔记数据模型更名（已实施，未提交） | `focus_items` 迁移为 `learn_notes`；同步后端包、桌面端 feature/API 名称与 `/api/learn-notes`；保留独立的 `study_notes` | [简报](2026-11-14-learn-notes-rename/brief.md) · [设计](2026-11-14-learn-notes-rename/design.md) · [验收](2026-11-14-learn-notes-rename/verification.md) · [工作记录](2026-11-14-learn-notes-rename/worklog.md) · [设计评审 PASS](2026-11-14-learn-notes-rename/reviews/design-review.md) |
 | 上下文载荷裁剪（已实施 v1） | 图片类产物（`.svg`/`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`/`.avif`）的 `write` 正文在保存快照时换成 `[content omitted: N B; read <path> to view it]`（工作区内 + 文件存在才裁，幂等）；`read` 对图片不再返回 `image` 块，只回一行"存在但无法加载"的说明，**不做视觉调用通道**；图片字节永不进入上下文；`read` 文本裁剪、`edit` 入参、哈希守卫留待下一版 | [简报](2026-11-14-context-payload-trimming/brief.md) · [设计](2026-11-14-context-payload-trimming/design.md) |
 | 课堂模拟 Agent 轮次（已实现，R002 修复后） | 每轮把老师消息追加到 `<configDir>/lessons/<id>/messages.jsonl`，无工具、关闭思考的导演会话返回 JSON 选学生，学生 Agent 生成回复后追加；SQLite 只存课堂生命周期，消息不落库；`GET /api/lessons/:id/messages` 只读返回带 `speaker/role/name` 与 `integrity` 的消息列表；`POST /api/lessons`、`POST /:id/end` 支撑损坏记录换新课堂；`GET /api/lessons` 供历史首页，`POST /:id/summary` 用一次 `generate()` 生成四段总结并存入 `lessons`；`POST /:id/turns` 完成一轮发言，收束轮再由另一名学生生成新点问题，桌面端课堂首页与舞台已接入 | [简报](2026-11-13-classroom-simulation/brief.md) · [设计](2026-11-13-classroom-simulation/design.md) · [任务](2026-11-13-classroom-simulation/tasks.md) · [API 契约](2026-11-13-classroom-simulation/api-contract.md) · [验收](2026-11-13-classroom-simulation/verification.md) · [实施记录](2026-11-13-classroom-simulation/worklog.md) · [实施评审 R001：CHANGES_REQUESTED](2026-11-13-classroom-simulation/reviews/R001.md) · [R001 处理](2026-11-13-classroom-simulation/reviews/R001-response.md) · [修复验收 + 可读性评审 R002](2026-11-13-classroom-simulation/reviews/R002.md) · [R002 处理](2026-11-13-classroom-simulation/reviews/R002-response.md) · [验收](2026-11-13-classroom-simulation/acceptance.md) · [知识点收束](2026-11-13-classroom-simulation/point-state.md) |
 | 桌面端皮肤与演练准备等待体验（已实施） | `brand`/`ink`/`honey` 语义 token 替换全部原始色板；画布渐变、侧栏山景、玻璃态页头与胶囊模式切换；准备画面拆成动图（情绪）、五段真实 phase 清单（进度）与封顶 90% 的进度条（节奏），动图自带 alpha 故不加框 | [简报](2026-11-12-desktop-skin/brief.md) · [设计](2026-11-12-desktop-skin/design.md) · [验收](2026-11-12-desktop-skin/verification.md) |

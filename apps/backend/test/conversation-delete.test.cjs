@@ -18,7 +18,7 @@ const load = (modulePath) => require(join(buildDirectory, modulePath));
 const { buildDatabaseOptions } = load('database/database.options.js');
 const { ConversationsModule } = load('conversations/conversations.module.js');
 const { ConversationsService } = load('conversations/conversations.service.js');
-const { FocusItemEntity } = load('focus-items/focus-item.entity.js');
+const { LearnNoteEntity } = load('learn-notes/learn-note.entity.js');
 const { StudyNoteEntity } = load('study-notes/study-note.entity.js');
 
 const scratchRoot = mkdtempSync(join(tmpdir(), 'teachforge-conversation-delete-'));
@@ -67,7 +67,7 @@ test('deleting a conversation removes its rows, children and session files', asy
       'INSERT INTO pi_session_snapshots (conversation_id, entries_json) VALUES (?, ?)',
       [conversationId, '[]'],
     );
-    await ctx.dataSource.getRepository(FocusItemEntity).save({
+    await ctx.dataSource.getRepository(LearnNoteEntity).save({
       id: '99999999-9999-4999-8999-999999999999',
       conversationId,
       messageId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -100,7 +100,7 @@ test('deleting a conversation removes its rows, children and session files', asy
         [conversationId],
       ),
       ctx.dataSource.query(
-        'SELECT COUNT(*) AS total FROM focus_items WHERE "conversationId" = ?',
+        'SELECT COUNT(*) AS total FROM learn_notes WHERE "conversationId" = ?',
         [conversationId],
       ),
     ]);

@@ -241,7 +241,7 @@ export class ConversationsService {
    * Resolves the displayed sidebar title for a small set of conversations.
    *
    * The 学习笔记 list uses this to reflect renames and the first-prompt fallback without storing a
-   * stale title snapshot on every focus row.
+   * stale title snapshot on every learn-note row.
    */
   async getConversationDisplayTitles(
     conversationIds: readonly string[],
@@ -268,7 +268,7 @@ export class ConversationsService {
   /**
    * Derives first-prompt titles, optionally restricted to the given conversations.
    *
-   * Omitting the ids keeps the sidebar's original one-query behavior; the focus list passes only the
+   * Omitting the ids keeps the sidebar's original one-query behavior; the Learn Notes list passes only the
    * conversations it renders.
    */
   private async loadDerivedTitles(
@@ -987,7 +987,7 @@ export class ConversationsService {
           conversationId,
         ]);
         // 学习笔记引用会话与消息；会话删除后这些摘录没有可定位的目标。
-        await manager.query('DELETE FROM "focus_items" WHERE "conversationId" = ?', [
+        await manager.query('DELETE FROM "learn_notes" WHERE "conversationId" = ?', [
           conversationId,
         ]);
         // 自行写的笔记只把会话当作可选的上下文；会话没了，笔记本身仍然保留。

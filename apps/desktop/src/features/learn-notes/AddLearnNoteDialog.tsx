@@ -11,7 +11,7 @@ const NOTE_MAX_CHARACTERS = 2000;
  * does the same from the keyboard. The field starts as one line and grows on every Enter or wrap;
  * Enter itself inserts a newline so multi-line notes never submit by accident.
  */
-export function AddFocusNoteDialog({
+export function AddLearnNoteDialog({
   quote,
   onCancel,
   onSave,

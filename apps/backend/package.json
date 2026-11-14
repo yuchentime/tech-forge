@@ -27,7 +27,7 @@
     "test:chat-attachments": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/chat-attachments.test.cjs",
     "test:conversation-delete": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-delete.test.cjs",
     "test:conversation-rename": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/conversation-rename.test.cjs",
-    "test:focus-items": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/focus-items.test.cjs",
+    "test:learn-notes": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/learn-notes.test.cjs",
     "test:study-notes": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/study-notes.test.cjs",
     "test:image-context": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/snapshot-image-prune.test.cjs",
     "test:classroom-turns": "tsc --project tsconfig.build.json --outDir .test-dist && node --test test/classroom-turns.test.cjs",

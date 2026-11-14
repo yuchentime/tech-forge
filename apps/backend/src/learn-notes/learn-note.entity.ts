@@ -17,11 +17,11 @@ import { ConversationEntity } from '../conversations/conversation.entity';
  * list can stay ordered without joining transcripts, and `messageIndex` is the visible 1-based
  * ordinal used only for display.
  */
-@Entity({ name: 'focus_items' })
-@Index('UQ_focus_items_message_quote', ['messageId', 'quoteKey'], { unique: true })
-@Index('IDX_focus_items_createdAt', ['createdAt'])
-@Index('IDX_focus_items_conversation', ['conversationId'])
-export class FocusItemEntity {
+@Entity({ name: 'learn_notes' })
+@Index('UQ_learn_notes_message_quote', ['messageId', 'quoteKey'], { unique: true })
+@Index('IDX_learn_notes_createdAt', ['createdAt'])
+@Index('IDX_learn_notes_conversation', ['conversationId'])
+export class LearnNoteEntity {
   @PrimaryColumn({ type: 'varchar' })
   id!: string;
 

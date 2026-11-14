@@ -1,7 +1,7 @@
 import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 /** One saved excerpt as the 学习笔记 page renders it. */
-export interface FocusItemDto {
+export interface LearnNoteDto {
   id: string;
   conversationId: string;
   conversationTitle: string;
@@ -15,7 +15,7 @@ export interface FocusItemDto {
 }
 
 /** Validates one save request from the chat selection action. */
-export class CreateFocusItemDto {
+export class CreateLearnNoteDto {
   @IsUUID('4')
   conversationId!: string;
 
@@ -36,7 +36,7 @@ export class CreateFocusItemDto {
 }
 
 /** Validates one note replacement; emptiness and length are enforced in the service. */
-export class UpdateFocusItemNoteDto {
+export class UpdateLearnNoteDto {
   @IsString()
   note!: string;
 }

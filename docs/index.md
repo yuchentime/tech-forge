@@ -7,7 +7,7 @@ canonical_for:
 related:
   - docs/current/platform/index.md
   - docs/source/index.md
-last_verified: 2026-11-10
+last_verified: 2026-11-14
 ---
 
 # TeachForge 工程文档入口
@@ -26,6 +26,7 @@ last_verified: 2026-11-10
 - [已接受决策索引](decisions/index.md)：长期有效的已接受权衡。
 - [故障复盘与复用经验](postmortems/index.md)：运行失败的证据、根因及防复发验收。
 
+- [学习笔记数据模型更名](changes/2026-11-14-learn-notes-rename/design.md)：将 `focus_items` 迁移为 `learn_notes`，同步本地 API、前后端模块命名，并保留独立自写笔记数据。
 - [会话知识掌握事实](changes/2026-11-10-conversation-knowledge-facts/design.md)：演练后异步维护会话当前掌握情况；自动化 L1/L2 已实现，真实 provider 语义验收待补。
 - [会话知识掌握卡片实施记录](changes/2026-11-10-knowledge-session-cards/design.md)：卡片列表读取轻量 facts 集合，详情在用户打开时单独读取。
 - [`/探索主题` 斜杠命令](changes/2026-11-10-deep-research-command/design.md)：固定先检索知识库，再用内置 skill 生成知识文档与 SVG 知识地图。

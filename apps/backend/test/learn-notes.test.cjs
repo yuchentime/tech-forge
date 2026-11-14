@@ -20,13 +20,13 @@ const { MessageEntity } = require(path.join(
   buildDirectory,
   'conversations/message.entity.js',
 ));
-const { FocusItemEntity } = require(path.join(
+const { LearnNoteEntity } = require(path.join(
   buildDirectory,
-  'focus-items/focus-item.entity.js',
+  'learn-notes/learn-note.entity.js',
 ));
-const { FocusItemsService } = require(path.join(
+const { LearnNotesService } = require(path.join(
   buildDirectory,
-  'focus-items/focus-items.service.js',
+  'learn-notes/learn-notes.service.js',
 ));
 const { ConversationsService } = require(path.join(
   buildDirectory,
@@ -42,7 +42,7 @@ async function createContext() {
     type: 'better-sqlite3',
     driver: BetterSqlite3,
     database: ':memory:',
-    entities: [ConversationEntity, MessageEntity, FocusItemEntity],
+    entities: [ConversationEntity, MessageEntity, LearnNoteEntity],
     synchronize: true,
     logging: false,
   });
@@ -51,7 +51,7 @@ async function createContext() {
   return {
     dataSource,
     conversations,
-    focus: new FocusItemsService(dataSource, conversations),
+    learnNotes: new LearnNotesService(dataSource, conversations),
   };
 }
 
@@ -99,7 +99,7 @@ test('saving an excerpt stores its message position and derives the conversation
   const ctx = await createContext();
   try {
     const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
-    const created = await ctx.focus.create({
+    const created = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -113,7 +113,7 @@ test('saving an excerpt stores its message position and derives the conversation
     assert.equal(created.note, null);
 
     const row = await ctx.dataSource
-      .getRepository(FocusItemEntity)
+      .getRepository(LearnNoteEntity)
       .findOneBy({ id: created.id });
     assert.equal(row.messageSequenceNo, 2);
   } finally {
@@ -125,13 +125,13 @@ test('the same normalized excerpt is saved once', async () => {
   const ctx = await createContext();
   try {
     const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
-    const first = await ctx.focus.create({
+    const first = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
       messageIndex: 2,
     });
-    const second = await ctx.focus.create({
+    const second = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: '  CAS + 唯一键\r\n',
@@ -139,7 +139,7 @@ test('the same normalized excerpt is saved once', async () => {
     });
 
     assert.equal(second.id, first.id);
-    assert.equal((await ctx.focus.list()).length, 1);
+    assert.equal((await ctx.learnNotes.list()).length, 1);
   } finally {
     await ctx.dataSource.destroy();
   }
@@ -152,7 +152,7 @@ test('only assistant messages from the requested conversation can be saved', asy
 
     await assert.rejects(
       () =>
-        ctx.focus.create({
+        ctx.learnNotes.create({
           conversationId,
           messageId: userId,
           quote: 'RabbitMQ 幂等',
@@ -162,7 +162,7 @@ test('only assistant messages from the requested conversation can be saved', asy
     );
     await assert.rejects(
       () =>
-        ctx.focus.create({
+        ctx.learnNotes.create({
           conversationId: randomUUID(),
           messageId: assistantId,
           quote: 'CAS + 唯一键',
@@ -172,7 +172,7 @@ test('only assistant messages from the requested conversation can be saved', asy
     );
     await assert.rejects(
       () =>
-        ctx.focus.create({
+        ctx.learnNotes.create({
           conversationId,
           messageId: assistantId,
           quote: '   ',
@@ -189,7 +189,7 @@ test('an excerpt can be saved together with its optional note', async () => {
   const ctx = await createContext();
   try {
     const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
-    const noted = await ctx.focus.create({
+    const noted = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -199,7 +199,7 @@ test('an excerpt can be saved together with its optional note', async () => {
     assert.equal(noted.note, '第一行\n第二行');
 
     // Re-adding the same quote updates the note instead of silently discarding what was typed.
-    const updated = await ctx.focus.create({
+    const updated = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -210,7 +210,7 @@ test('an excerpt can be saved together with its optional note', async () => {
     assert.equal(updated.note, '补充：唯一键要覆盖重试');
 
     // A blank note must not erase the existing one.
-    const kept = await ctx.focus.create({
+    const kept = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -218,11 +218,11 @@ test('an excerpt can be saved together with its optional note', async () => {
       note: '   ',
     });
     assert.equal(kept.note, '补充：唯一键要覆盖重试');
-    assert.equal((await ctx.focus.list()).length, 1);
+    assert.equal((await ctx.learnNotes.list()).length, 1);
 
     await assert.rejects(
       () =>
-        ctx.focus.create({
+        ctx.learnNotes.create({
           conversationId,
           messageId: assistantId,
           quote: '另一段',
@@ -240,7 +240,7 @@ test('study notes can be saved, cleared and bounded', async () => {
   const ctx = await createContext();
   try {
     const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
-    const created = await ctx.focus.create({
+    const created = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -248,19 +248,19 @@ test('study notes can be saved, cleared and bounded', async () => {
     });
     assert.equal(created.note, null);
 
-    const noted = await ctx.focus.updateNote(created.id, '  第一行\n第二行  ');
+    const noted = await ctx.learnNotes.updateNote(created.id, '  第一行\n第二行  ');
     assert.equal(noted.note, '第一行\n第二行');
-    assert.equal((await ctx.focus.list())[0].note, '第一行\n第二行');
+    assert.equal((await ctx.learnNotes.list())[0].note, '第一行\n第二行');
 
-    const cleared = await ctx.focus.updateNote(created.id, '   ');
+    const cleared = await ctx.learnNotes.updateNote(created.id, '   ');
     assert.equal(cleared.note, null);
 
     await assert.rejects(
-      () => ctx.focus.updateNote(created.id, '字'.repeat(2001)),
+      () => ctx.learnNotes.updateNote(created.id, '字'.repeat(2001)),
       /过长/,
     );
     await assert.rejects(
-      () => ctx.focus.updateNote(randomUUID(), '备注'),
+      () => ctx.learnNotes.updateNote(randomUUID(), '备注'),
       /不存在/,
     );
   } finally {
@@ -272,7 +272,7 @@ test('listing reflects conversation renames and deletion removes the saved excer
   const ctx = await createContext();
   try {
     const { conversationId, assistantId } = await seedConversation(ctx.dataSource);
-    const created = await ctx.focus.create({
+    const created = await ctx.learnNotes.create({
       conversationId,
       messageId: assistantId,
       quote: 'CAS + 唯一键',
@@ -282,12 +282,12 @@ test('listing reflects conversation renames and deletion removes the saved excer
     await ctx.dataSource
       .getRepository(ConversationEntity)
       .update({ id: conversationId }, { title: '幂等设计' });
-    const renamed = await ctx.focus.list();
+    const renamed = await ctx.learnNotes.list();
     assert.equal(renamed[0].conversationTitle, '幂等设计');
 
-    await ctx.focus.remove(created.id);
-    assert.deepEqual(await ctx.focus.list(), []);
-    await assert.rejects(() => ctx.focus.remove(created.id), /不存在/);
+    await ctx.learnNotes.remove(created.id);
+    assert.deepEqual(await ctx.learnNotes.list(), []);
+    await assert.rejects(() => ctx.learnNotes.remove(created.id), /不存在/);
   } finally {
     await ctx.dataSource.destroy();
   }

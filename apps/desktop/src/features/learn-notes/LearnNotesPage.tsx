@@ -18,23 +18,23 @@ import { PageHeader } from '../../components/PageHeader';
 import { showToast } from '../agent/toast';
 import type { ConversationSummary } from '../agent/conversation-store';
 import {
-  deleteFocusItem,
-  listFocusItems,
-  updateFocusItemNote,
-  type FocusItemView,
-} from './focus-api';
+  deleteLearnNote,
+  listLearnNotes,
+  updateLearnNote,
+  type LearnNoteView,
+} from './learn-notes-api';
 import {
   createStudyNote,
   deleteStudyNote,
   listStudyNotes,
   updateStudyNote,
   type StudyNoteView,
-} from './notes-api';
-import { AddNoteDialog } from './AddNoteDialog';
+} from './study-notes-api';
+import { AddStudyNoteDialog } from './AddStudyNoteDialog';
 
 /** One row of the page: a saved excerpt or a note the user wrote themselves. */
-type StudyNoteEntry =
-  | { kind: 'excerpt'; item: FocusItemView }
+type LearnNotesTimelineEntry =
+  | { kind: 'excerpt'; item: LearnNoteView }
   | { kind: 'note'; item: StudyNoteView };
 
 /**
@@ -44,7 +44,7 @@ type StudyNoteEntry =
  * The page owns its own fetch, writing and deletion; opening a conversation is delegated so the
  * chat view can load the full history and scroll to the stored message id.
  */
-export function FocusPointsPage({
+export function LearnNotesPage({
   conversations,
   onOpenConversation,
 }: {
@@ -53,7 +53,7 @@ export function FocusPointsPage({
   /** Opens a conversation, optionally scrolling to the saved message. */
   onOpenConversation: (conversationId: string, messageId?: string) => void;
 }) {
-  const [excerpts, setExcerpts] = useState<FocusItemView[]>([]);
+  const [excerpts, setExcerpts] = useState<LearnNoteView[]>([]);
   const [notes, setNotes] = useState<StudyNoteView[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function FocusPointsPage({
     setStatus('loading');
     try {
       const [savedExcerpts, savedNotes] = await Promise.all([
-        listFocusItems(),
+        listLearnNotes(),
         listStudyNotes(),
       ]);
       setExcerpts(savedExcerpts);
@@ -91,11 +91,11 @@ export function FocusPointsPage({
   }, [load]);
 
   /** Deletes one excerpt and keeps the rest of the list intact. */
-  const removeExcerpt = async (item: FocusItemView): Promise<void> => {
+  const removeExcerpt = async (item: LearnNoteView): Promise<void> => {
     if (deletingId) return;
     setDeletingId(item.id);
     try {
-      await deleteFocusItem(item.id);
+      await deleteLearnNote(item.id);
       setExcerpts((current) => current.filter(({ id }) => id !== item.id));
       if (editingNoteId === item.id) {
         setEditingNoteId(null);
@@ -151,7 +151,7 @@ export function FocusPointsPage({
   };
 
   /** Opens the inline note editor for one excerpt. */
-  const startNoteEdit = (item: FocusItemView): void => {
+  const startNoteEdit = (item: LearnNoteView): void => {
     setEditingNoteId(item.id);
     setNoteDraft(item.note ?? '');
   };
@@ -163,11 +163,11 @@ export function FocusPointsPage({
   };
 
   /** Saves the draft note; an empty draft clears the note. */
-  const saveNote = async (item: FocusItemView): Promise<void> => {
+  const saveNote = async (item: LearnNoteView): Promise<void> => {
     if (savingNoteId) return;
     setSavingNoteId(item.id);
     try {
-      const updated = await updateFocusItemNote(item.id, noteDraft);
+      const updated = await updateLearnNote(item.id, noteDraft);
       setExcerpts((current) =>
         current.map((entry) => (entry.id === item.id ? updated : entry)),
       );
@@ -184,7 +184,7 @@ export function FocusPointsPage({
   };
 
   // Both resources keep their own rows; the page is one timeline, newest first.
-  const entries: StudyNoteEntry[] = [
+  const entries: LearnNotesTimelineEntry[] = [
     ...excerpts.map((item) => ({ kind: 'excerpt' as const, item })),
     ...notes.map((item) => ({ kind: 'note' as const, item })),
   ].sort((left, right) =>
@@ -272,7 +272,7 @@ export function FocusPointsPage({
       </div>
 
       {noteDialog && (
-        <AddNoteDialog
+        <AddStudyNoteDialog
           conversations={conversations}
           key={noteDialog.note?.id ?? 'new'}
           note={noteDialog.note}
@@ -298,16 +298,16 @@ function ExcerptCard({
   onSaveNote,
   onOpenConversation,
 }: {
-  item: FocusItemView;
+  item: LearnNoteView;
   deletingId: string | null;
   editingNoteId: string | null;
   noteDraft: string;
   savingNoteId: string | null;
-  onDelete: (item: FocusItemView) => Promise<void>;
-  onStartNoteEdit: (item: FocusItemView) => void;
+  onDelete: (item: LearnNoteView) => Promise<void>;
+  onStartNoteEdit: (item: LearnNoteView) => void;
   onCancelNoteEdit: () => void;
   onNoteDraftChange: (draft: string) => void;
-  onSaveNote: (item: FocusItemView) => Promise<void>;
+  onSaveNote: (item: LearnNoteView) => Promise<void>;
   onOpenConversation: (conversationId: string, messageId?: string) => void;
 }) {
   const isEditing = editingNoteId === item.id;

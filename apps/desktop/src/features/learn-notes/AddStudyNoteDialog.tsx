@@ -1,7 +1,7 @@
 import { NotePencil } from '@phosphor-icons/react';
 import { useEffect, useId, useState } from 'react';
 import type { ConversationSummary } from '../agent/conversation-store';
-import type { StudyNoteView } from './notes-api';
+import type { StudyNoteView } from './study-notes-api';
 
 /** Matches the backend note limit; counted in Unicode code points so emoji count once. */
 const NOTE_MAX_CHARACTERS = 2000;
@@ -14,7 +14,7 @@ const NOTE_MAX_CHARACTERS = 2000;
  * while "取消", Esc or the backdrop discards the draft without writing. In edit mode the text and
  * the link start from the saved note, so saving can also re-link or unlink it.
  */
-export function AddNoteDialog({
+export function AddStudyNoteDialog({
   conversations,
   note,
   onCancel,
