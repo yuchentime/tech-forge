@@ -628,7 +628,8 @@ routes:
     token_budget: 24000
     code_globs:
       - "apps/backend/src/artifacts/**"
-      - "apps/backend/src/llm/tools/workspace-file-tools.ts"
+      - "apps/backend/src/llm/tools/workspace-file-*.ts"
+      - "apps/backend/src/llm/tools/external-write-grant.ts"
       - "apps/backend/src/llm/agents/**"
       - "apps/backend/src/chat/**"
       - "apps/backend/src/conversations/**"

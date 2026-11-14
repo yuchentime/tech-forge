@@ -65,7 +65,7 @@ backend 首次启动时在当前用户主目录创建 `.tech-forge/config.toml`�
 - Agent 视图入口：apps/desktop/src/features/agent/AgentChatPage.tsx、ConversationSidebar.tsx
 - HTTP DTO / Controller / 文件服务：apps/backend/src/settings/
 - Session cwd、模型提示词、工具注册与 skill 安装：apps/backend/src/llm/pi-agent-runtime.ts、apps/backend/src/llm/skills.ts
-- Agent 文件读写边界：apps/backend/src/llm/tools/workspace-file-tools.ts
+- Agent 文件读写边界入口与实现：`apps/backend/src/llm/tools/workspace-file-tools.ts`、`workspace-file-operations.ts`、`workspace-file-policy.ts`、`external-write-grant.ts`
 
 ## 验证
 

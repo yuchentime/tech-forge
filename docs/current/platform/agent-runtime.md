@@ -19,7 +19,7 @@ related:
   - docs/changes/2026-11-13-classroom-simulation/design.md
   - docs/decisions/2026-11-13-deepseek-output-budget.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-13
+last_verified: 2026-11-14
 ---
 
 # Agent Runtime 运行链路
@@ -41,7 +41,7 @@ last_verified: 2026-11-13
 | `PiAgentRuntime` / `CommonAgent` / `LearnAgent` | `PiAgentRuntime` 负责每次请求创建 Pi session：重新读取 DeepSeek 模型配置、IDENTIFY.md 与 PREFERENCE.md，确定本会话 workspace，组装系统提示词、工具、扩展钩子和 skill 资源，并恢复/保存 Pi 快照。`LearnAgent` 负责普通对话的 `stream()`；`CommonAgent.generate()` 提供非流式通用调用，供演练等场景复用，默认不装载记忆，也不启用网页工具。 |
 | `RehearsalsService` | 维护演练状态机、15 问限额、逐题评估、总体报告、transcript 与普通对话 digest；开场只读复用父会话 Pi 快照，后续 JSON 调用不写快照、不注册文件工具。 |
 | `MemoryService` | 用户级跨会话记忆：db0 core + sql.js 单文件 `<configDir>/memory/db0.sqlite`，复用本地 bge 512 维嵌入；注册 `memory_write`/`memory_search`/`memory_list`；每轮把 `## 长期记忆` 块拼进 user prefix；显式中文意图捕获；独占锁与每日备份；管理 API `GET/DELETE /api/memories`。详见[长期记忆](../domains/memory/index.md)。 |
-| `workspace-file-tools.ts` | 以工具实际文件操作强制读写边界：读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md 等）；知识库目录与其他普通目录同样可读；写入默认限制在当前会话工作区，并可使用本轮明确目标的一次性授权。 |
+| `workspace-file-tools.ts`、`workspace-file-operations.ts`、`workspace-file-policy.ts`、`external-write-grant.ts` | 入口负责组装 Pi 原生文件工具；操作适配层接管 `access`/`readFile`/`writeFile`/`mkdir`；路径策略在实际 I/O 前检查工作区边界、符号链接和应用托管文件；外部授权模块只从当前用户请求推导一个临时目标。读普通文件可来自任意位置，但拒绝应用托管路径（config.toml、IDENTIFY.md、PREFERENCE.md 等）；写入默认限制在当前会话工作区。 |
 | Pi SDK | 执行模型与工具循环并维护本次运行的内存会话；不直接读写 TeachForge 数据库。 |
 
 ## 运行日志
@@ -54,7 +54,7 @@ Pi 自动压缩由 SDK 触发，`CommonAgent` 在 `generate()`、`LearnAgent` �
 
 Renderer 的会话列表和历史读取失败会在浏览器控制台输出安全诊断字段（操作、错误分类、HTTP 状态和错误类型），不记录对话正文或认证 token。直接用普通浏览器打开 Vite 开发地址时没有 Electron preload 的 `window.teachforge` 桥接；前端会标记 `desktop_bridge_unavailable`，后端不会收到请求或产生对应 HTTP 日志。
 
-常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。`chat.tool.terminated` 在工具失败时升为 `error` 并附 `failureReason`：`output_limit_truncated`（响应触达输出上限，参数被截断）、`invalid_arguments`、`aborted`、`blocked`、`tool_not_found`、`file_policy_denied`、`tool_error`。前两类由 Pi 在工具代码执行前拒绝（`aborted`、`blocked` 同理），不会产生 `llm.file_tool.operation.failed`，失败原因只能从结果文案分类；文案本身（包含模型原始参数）不进入日志。`chat.message.terminated` 在消息落库为 `failed` 时同为 `error` 并附 `stopReason`（`length` 表示输出上限截断）。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`PiAgentRuntime` 在 `workspace-file-tools.ts` 的失败回调中输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
+常规阶段和终态使用 `log`、异常或取消使用 `warn`/`error`；消息与工具进度汇总到 `debug`，最多每 5 秒记录一次。`chat.tool.terminated` 在工具失败时升为 `error` 并附 `failureReason`：`output_limit_truncated`（响应触达输出上限，参数被截断）、`invalid_arguments`、`aborted`、`blocked`、`tool_not_found`、`file_policy_denied`、`tool_error`。前两类由 Pi 在工具代码执行前拒绝（`aborted`、`blocked` 同理），不会产生 `llm.file_tool.operation.failed`，失败原因只能从结果文案分类；文案本身（包含模型原始参数）不进入日志。`chat.message.terminated` 在消息落库为 `failed` 时同为 `error` 并附 `stopReason`（`length` 表示输出上限截断）。Pi 文件工具的 access/readFile/detectImageMimeType/mkdir/writeFile 操作失败时，`workspace-file-operations.ts` 调用 `PiAgentRuntime` 提供的失败回调，由运行时输出 `llm.file_tool.operation.failed`，记录工具名、操作阶段、目标位于 workspace 内外的分类、耗时、安全错误类型/错误码/syscall；`EWORKSPACE` 会标记为 `workspace_policy_denied`。该事件不记录目标路径、文件内容或原始异常 message，并用 `requestId`/`conversationId` 与 `chat.tool.*` 生命周期日志关联。读取目标的每次解析输出 `llm.file_tool.read.resolution`：成功为 `log`，被拒为 `warn`，字段含 `outcome`（`resolved`、`invalid_path`、`path_unavailable`、`not_a_file`、`managed_file_denied`、`guarded_directory_denied`）、目标位于 workspace 内外的分类、受保护路径数、守护目录数、本回合读取授权类型、授权是否抬升守护目录默认值、耗时。它与 `llm.file_tool.operation.failed` 互补：后者只知道 `EWORKSPACE`，前者指出是哪一道检查拒绝；同一目标被 Pi 多次解析（access/readFile/mime 检测）时重复内容只记录一次，同样不记录目标路径。网页工具调用输出 `llm.web_tool.started`、`llm.web_tool.completed`、`llm.web_tool.failed`、`llm.web_tool.cancelled`，字段包含工具名、query/URL 字符数、结果条数、HTTP 状态、重试次数和耗时；不记录 query、URL、正文或 API Key。记录可包含 ID、角色/工具名、状态、数量、耗时、provider/model ID、文本长度以及受限的 stack frame。日志不包含 prompt、assistant 正文、工具参数/结果、原始异常 message、provider payload、API key 或本地认证 token。`requestId` 不属于 SSE、HTTP DTO 或桌面桥接契约。
 
 ## 请求与持久化时序
 
@@ -195,7 +195,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 ## 文件读写边界
 
 - 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml`、`IDENTIFY.md` 与 `PREFERENCE.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
-- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件，唯一拒绝的是 SettingsService 托管的应用文件；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
+- Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件，唯一拒绝的是 SettingsService 托管的应用文件；`edit`、`write` 与 `mkdir` 的每次实际文件操作由 `workspace-file-tools.ts` 组装的适配器调用 `workspace-file-policy.ts` 校验，不依赖 prompt 作为安全机制。
 - 知识库目录 `<configDir>/knowledge` 与普通目录同等对待：`read` 可直接读取目录文件与上传原文，没有按轮次要授权的目录守卫；写入仍受工作区边界限制。`DocumentsService.onModuleInit` 在启动时按数据库重建目录文件 `index.md`（缺失才写，空库写成“资料库当前为空”）。`PiAgentRuntime.createSession()` 在 system prompt 中写入该目录文件的绝对路径，并指示模型在需要检索资料库时先读目录、再读必要原文；`/查询资料库`、`/探索主题` 轮仍把检索结果作为会话消息注入。旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
@@ -254,7 +254,7 @@ Pi SDK（当前 1.5.0）自身负责模型上下文的自动压缩，TeachForge 
 1. 对话持久化归 `ConversationsService` 所有。Pi 扩展不得直接访问 SQLite，也不得引入第二份 transcript 数据源。
 2. 新增或修改 Pi 消息/工具事件时，保留 awaited 持久化钩子。新增持久事件时，同时定义行格式、终态和中断处理、恢复行为及验收标准。
 3. 完整 Pi 消息、provider 响应和工具结果保留在 backend。当前投影会发送生命周期事件、文本增量和工具活动（包含用于提取路径的参数）；UI 只显示工具动作、相关路径、状态和耗时，不显示原始参数或结果。扩展输出必须经过 `ChatStreamEvent`、桥接校验和 adapter。
-4. 文件读写分离授权：读取可访问任意普通文件，唯一拒绝的是 SettingsService 托管的 config/IDENTIFY/PREFERENCE 等应用文件；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
+4. 文件读写分离授权：读取可访问任意普通文件，唯一拒绝的是 SettingsService 托管的 config/IDENTIFY/PREFERENCE 等应用文件；创建、编辑和建目录默认必须位于当前会话工作区。唯一例外由当前用户流式请求中的唯一明确绝对目标产生，并只对当前 session 有效。由 `workspace-file-tools.ts` 组装、`workspace-file-policy.ts` 在真实文件 I/O 前执行检查；不得通过 Pi cwd、提示词、bash 或扩展绕开。
 5. 保留按 conversation 串行化请求的行为；等待 provider 或工具期间不得持有数据库事务。
 6. 运行契约变化时，同步更新本文、相关领域页面、manifest 路由和验收标准。将已确认的当前行为与未来方案分开记录。
 7. 长期记忆归 `MemoryService` 所有：存储在 `<configDir>/memory/db0.sqlite`（sql.js 单写者，带独占锁与每日备份），嵌入复用本地 bge；模型只通过 `memory_write`/`memory_search`/`memory_list` 访问，`ChatService` 负责每轮注入与显式意图捕获。记忆目录加入受保护路径，文件工具不可读写；记忆内容不进入 SQLite 消息表与 SSE；快照清洗会剥离 `## 长期记忆` 块。删除会话不删除记忆，管理入口是设置页的 `GET/DELETE /api/memories`。
