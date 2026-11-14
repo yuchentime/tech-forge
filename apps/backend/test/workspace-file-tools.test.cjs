@@ -183,3 +183,44 @@ test('reads the generated catalog inside a guarded directory but keeps its sibli
   // The exemption names one file, so it never widens to the directory.
   await assert.rejects(executeTool(readTool, { path: sibling }, workspace));
 });
+
+/**
+ * Minimal PNG: signature plus one IHDR chunk. Enough for the SDK's sniffing to report image/png,
+ * and never opened by an image decoder because the read must answer in text.
+ */
+const PNG_BYTES = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.from([0x00, 0x00, 0x00, 0x0d]),
+  Buffer.from('IHDR', 'ascii'),
+  Buffer.alloc(13),
+]);
+
+test('never returns an image block: a read of a PNG answers with a note', async (t) => {
+  const { workspace } = await createWorkspace(t);
+  await fs.writeFile(path.join(workspace, 'shot.png'), PNG_BYTES);
+  const sdk = await piSdkPromise;
+  const tools = await createWorkspaceFileTools(sdk, workspace);
+  const readTool = tools.find((tool) => tool.name === 'read');
+
+  const result = await executeTool(readTool, { path: 'shot.png' }, workspace);
+
+  assert.equal(result.content.some((block) => block.type === 'image'), false);
+  assert.equal(result.content.length, 1);
+  assert.match(result.content[0].text, /\[image not loaded: image\/png\./);
+  assert.match(result.content[0].text, /Images are never read into the conversation/);
+  // The file bytes must not leak into the result in any form.
+  assert.equal(result.content[0].text.includes('iVBORw0KGgo'), false);
+  assert.ok(result.content[0].text.length < 200);
+});
+
+test('keeps text reads on the normal path', async (t) => {
+  const { workspace } = await createWorkspace(t);
+  await fs.writeFile(path.join(workspace, 'map.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const sdk = await piSdkPromise;
+  const tools = await createWorkspaceFileTools(sdk, workspace);
+  const readTool = tools.find((tool) => tool.name === 'read');
+
+  const result = await executeTool(readTool, { path: 'map.svg' }, workspace);
+
+  assert.match(result.content[0].text, /<svg/);
+});

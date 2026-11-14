@@ -217,6 +217,15 @@ export async function createWorkspaceFileTools(
           fileSystem,
           reportReadResolution,
         );
+        const imageMimeType = await sdk.detectSupportedImageMimeTypeFromFile(safePath);
+        if (imageMimeType) {
+          // Images are never handed to the model as bytes: one read of a PNG already put ~180 KB of
+          // base64 into a snapshot that every later turn replayed. The note keeps the read honest.
+          return Buffer.from(
+            `[image not loaded: ${imageMimeType}. Images are never read into the conversation.]\n`,
+            'utf8',
+          );
+        }
         return fileSystem.readFile(safePath);
       },
     ),
@@ -227,7 +236,9 @@ export async function createWorkspaceFileTools(
       'detectImageMimeType',
       filePath,
       async () => {
-        const safePath = await resolveReadableFile(
+        // Resolving still enforces the read policy and reports the decision, but the type is never
+        // returned: Pi would build an image block from the file bytes.
+        await resolveReadableFile(
           workspaceRoot,
           filePath,
           protectedPaths,
@@ -237,7 +248,7 @@ export async function createWorkspaceFileTools(
           fileSystem,
           reportReadResolution,
         );
-        return sdk.detectSupportedImageMimeTypeFromFile(safePath);
+        return undefined;
       },
     ),
   };
@@ -373,7 +384,17 @@ export async function createWorkspaceFileTools(
   };
 
   return [
-    sdk.createReadToolDefinition(workspaceRoot, { operations: readOperations }),
+    // The stock description promises "Images are sent as attachments", which this tool no longer
+    // does; leaving it would have the model plan a read that cannot deliver an image.
+    {
+      ...sdk.createReadToolDefinition(workspaceRoot, { operations: readOperations }),
+      description:
+        'Read the contents of a file. Text and SVG files return their text. Images are never attached and are not read: reading one returns a note that the file exists but cannot be loaded, because image bytes must not enter the conversation.',
+      promptGuidelines: [
+        'Use read to examine files instead of cat or sed.',
+        'Reading an image only reports that the file exists; do not retry it expecting content.',
+      ],
+    },
     sdk.createEditToolDefinition(workspaceRoot, { operations: editOperations }),
     sdk.createWriteToolDefinition(workspaceRoot, { operations: writeOperations }),
   ];
@@ -1017,7 +1038,7 @@ function classifyExternalTarget(
 }
 
 /** Checks that a resolved path is the root itself or a descendant. */
-function isPathWithin(root: string, candidate: string): boolean {
+export function isPathWithin(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return (
     pathFromRoot === '' ||

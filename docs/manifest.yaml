@@ -385,6 +385,24 @@ routes:
     history_on_demand:
       - docs/changes/2026-11-08-chat-api-rename/brief.md
       - docs/changes/2026-11-08-chat-api-rename/worklog.md
+  context-payload-trimming:
+    description: "Keep image payloads out of the replayed context: when the snapshot is saved, an image or SVG written by write loses its body and keeps a [content omitted: N B; read <path> to view it] placeholder, guarded by workspace containment plus file existence and idempotent across turns; read never returns an image block and answers image reads with a one-line not-loaded note instead of any vision call; the snapshot feeds the model only, so the desktop transcript, artifact sidebar and message file cards never change"
+    token_budget: 14000
+    code_globs:
+      - "apps/backend/src/llm/**"
+      - "apps/backend/test/snapshot-image-prune.test.cjs"
+      - "apps/backend/test/workspace-file-tools.test.cjs"
+    required:
+      - docs/current/index.md
+      - docs/current/platform/agent-runtime.md
+      - docs/current/domains/artifacts/index.md
+      - docs/changes/2026-11-14-context-payload-trimming/brief.md
+      - docs/changes/2026-11-14-context-payload-trimming/design.md
+    optional:
+      - docs/current/platform/architecture-and-code-placement.md
+      - docs/current/domains/conversations/backend-behavior.md
+      - docs/changes/2026-11-07-conversation-session-persistence/verification.md
+    history_on_demand: []
   deepseek-web-tools:
     description: "Expose DeepSeek Search and Fetch as web_search/web_fetch custom tools for ordinary DeepSeek chat turns, with output caps, retry, cancellation, and privacy-safe logs"
     token_budget: 12000

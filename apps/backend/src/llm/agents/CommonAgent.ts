@@ -9,8 +9,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { parsePersistedPiMessage } from "../../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../../conversations/pi-session-snapshots.service";
 import {
@@ -41,7 +42,9 @@ import {
 import {
   createWorkspaceFileTools,
   prepareWorkspaceDirectory,
+  isPathWithin,
 } from "../tools/workspace-file-tools";
+import { pruneImageWritePayloads } from "../snapshot-image-prune";
 
 type PiSdk = typeof PiSdkModule;
 type PiThinkingLevel = "off" | "low" | "medium" | "high";
@@ -891,10 +894,11 @@ export class CommonAgent {
     logContext: RequestLogContext;
   }): Promise<void> {
     if (!input.conversation || input.skip) return;
+    const conversation = input.conversation;
     // Map every historical user row back to its clean stored text so old injected blocks are
     // removed too, not only the current turn's.
     const userTextById = new Map<string, string>();
-    for (const message of input.conversation.history) {
+    for (const message of conversation.history) {
       if (message.role !== "user") continue;
       try {
         userTextById.set(
@@ -913,10 +917,27 @@ export class CommonAgent {
       userTextById,
     );
     if (entries.length === 0) return;
+    // An image or SVG the model just wrote is already on disk; replaying its body on every later
+    // turn only spends context, so the snapshot keeps a placeholder that still names the path.
+    const pruned = pruneImageWritePayloads(entries, (writtenPath) =>
+      this.isPrunableSessionFile(conversation.id, writtenPath),
+    );
+    if (pruned.prunedWrites > 0) {
+      writeStructuredEvent(
+        this.logger,
+        "log",
+        "llm.session_snapshot.image_payload_pruned",
+        {
+          ...input.logContext,
+          prunedWrites: pruned.prunedWrites,
+          bytesRemoved: pruned.bytesRemoved,
+        },
+      );
+    }
     try {
       await this.piSessionSnapshots.saveSnapshot(
-        input.conversation.id,
-        entries,
+        conversation.id,
+        pruned.entries,
       );
     } catch (error) {
       writeStructuredEvent(
@@ -929,6 +950,31 @@ export class CommonAgent {
           ...getSafeErrorLogFields(error),
         },
       );
+    }
+  }
+
+  /**
+   * Reports whether one written path is still a file inside this conversation's workspace.
+   *
+   * The prune guard: a body is only replaced when the file it describes still exists where the
+   * session can read it again. Relative paths resolve against the workspace, which is the working
+   * directory the model writes into.
+   */
+  private isPrunableSessionFile(
+    conversationId: string,
+    writtenPath: string,
+  ): boolean {
+    try {
+      const workspaceRoot = resolve(
+        this.settings.getSessionWorkspaceDirectory(conversationId),
+      );
+      const absolutePath = isAbsolute(writtenPath)
+        ? writtenPath
+        : resolve(workspaceRoot, writtenPath);
+      if (!isPathWithin(workspaceRoot, absolutePath)) return false;
+      return statSync(absolutePath, { throwIfNoEntry: false })?.isFile() ?? false;
+    } catch {
+      return false;
     }
   }
 
