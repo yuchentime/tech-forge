@@ -196,7 +196,7 @@ Pi 的 `message_start`、每个 `message_update`、`message_end` 及工具执行
 
 - 应用固定设置由 `SettingsService` 独占：`~/.tech-forge/config.toml`、`IDENTIFY.md` 与 `PREFERENCE.md` 不开放给 Agent 文件工具读取或修改。后端按路径、真实路径和文件身份拒绝直接访问、符号链接/硬链接别名，以及设置文件原子替换时的同目录临时文件。
 - Agent 默认输出根是当前会话工作区 `<configDir>/sessions/<conversationId>/workspace`。`read` 可读取任意来源的普通文件；知识库根（`<configDir>/knowledge`）默认拒绝，用户在该轮明确点名路径时放行（config/IDENTIFY/PREFERENCE 无此例外）；`edit`、`write` 与 `mkdir` 的每次实际文件操作必须通过 `workspace-file-tools.ts` 校验，不依赖 prompt 作为安全机制。
-- 知识库根里唯一的读取例外是生成的目录文件 `<configDir>/knowledge/index.md`：`CommonAgent` 把它交给 `workspace-file-tools.ts` 的 `readableGuardedPaths`，按精确路径放行，同目录上传原文仍被拒绝，且豁免不会扩展到父目录。`DocumentsService.onModuleInit` 在启动时按数据库重建该文件（缺失才写，空库写成“资料库当前为空”），因此会话按 `AGENTS.md` 读到它时不会得到 ENOENT。
+- 知识库根里唯一的读取例外是生成的目录文件 `<configDir>/knowledge/index.md`：`CommonAgent` 把它交给 `workspace-file-tools.ts` 的 `readableGuardedPaths`，按精确路径放行，同目录上传原文仍被拒绝，且豁免不会扩展到父目录。`DocumentsService.onModuleInit` 在启动时按数据库重建该文件（缺失才写，空库写成“资料库当前为空”）。资料库规则不经过 `AGENTS.md`：`CommonAgent.createSession()` 在 system prompt 的 `promptSections` 中声明目录只在显式 `/查询资料库`、`/探索主题` 轮作为会话消息注入，普通提问不得主动搜索资料库；旧安装残留的 `AGENTS.md` 不再被任何 session 加载，只保留在受保护路径列表中。
 - 当前流式用户请求只在包含明确写入意图且唯一绝对目标时，创建当前 session 的一次性外部写许可。命名目录的权限覆盖该目录及下级；命名文件仅允许该文件且其父目录须已存在。模糊路径、多个候选目标、历史消息、文件内容或模型输出都不会授予许可。
 - `bash`、`subagent`、`subagents_enable` 保持排除。新增工具或扩展若能写文件，必须经过同一边界评估并阻止绕过。
 

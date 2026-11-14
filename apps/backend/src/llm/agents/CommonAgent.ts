@@ -10,7 +10,6 @@ import type {
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { parsePersistedPiMessage } from "../../conversations/conversation-transcript";
 import { PiSessionSnapshotsService } from "../../conversations/pi-session-snapshots.service";
@@ -700,6 +699,7 @@ export class CommonAgent {
           this.settings.getStylePreference(),
           this.settings.getIdentitySetting(),
         ]);
+        const knowledgeBaseIndex = this.settings.getKnowledgeCatalogPath();
         const promptSections = [
           "\n\n## Adaptive teaching",
           "- Infer the user's familiarity with the current concept from conversation context, available memory, and demonstrated understanding. Distinguish exposure from mastery; do not assume expertise without evidence.",
@@ -713,6 +713,9 @@ export class CommonAgent {
           "- Write generated files to the working directory by default. Writing outside it requires an explicit destination in the current user request.",
           "- Choose the most appropriate file format, structure, and presentation based on the user's intent. Prioritize clarity and usability.",
           "- For mind maps, prefer SVG with a left-to-right tree layout.",
+          "\n\n## Knowledge library:",
+          `- The catalog of knowledge base: ${knowledgeBaseIndex}.`,
+          "- When the user needs to search the knowledge base, use the knowledge base catalog to locate and read the relevant original documents.",
         ];
         if (identity.trim()) {
           // User-authored context about who they are and what they are working toward. It steers
@@ -728,7 +731,6 @@ export class CommonAgent {
       // Bundled skill templates are copied into the config root once. The user can then inspect,
       // edit or replace them without depending on the backend install directory.
       await this.ensureInstalledSkills();
-      const agentsPolicy = await readFile(this.settings.getAgentsFilePath(), "utf8");
 
       const resourceLoader = new sdk.DefaultResourceLoader({
         cwd,
@@ -738,11 +740,8 @@ export class CommonAgent {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        // Context discovery stays disabled: only this protected, audited policy is loaded.
-        agentsFilesOverride: () => ({
-          agentsFiles: [{ path: this.settings.getAgentsFilePath(), content: agentsPolicy }],
-        }),
-        // `noExtensions` disables package discovery; extensionFactories still load explicitly.
+        // Context discovery stays disabled: every instruction this session needs comes from the
+        // system prompt above, so no workspace or ancestor AGENTS.md can steer a conversation.
         extensionFactories,
         // These stay anchored to the configured root instead of the session cwd, so per-session
         // workspaces never change where user-provided skills and prompt templates are looked up.

@@ -148,12 +148,6 @@ async function main() {
     }),
     'utf8',
   );
-  // Session creation loads this protected policy file; the check only needs a readable body.
-  await writeFile(
-    path.join(agentDir, 'AGENTS.md'),
-    '# Compaction check policy\n',
-    'utf8',
-  );
   // The SDK resolves its agent directory at process start, before any session is created.
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -189,7 +183,6 @@ async function main() {
       getKnowledgeCatalogPath: () =>
         path.join(workspaceRoot, 'knowledge', 'index.md'),
       getSkillsDirectory: () => path.join(agentDir, 'skills'),
-      getAgentsFilePath: () => path.join(agentDir, 'AGENTS.md'),
       getStylePreference: async () => '',
       getIdentitySetting: async () => '',
     };
