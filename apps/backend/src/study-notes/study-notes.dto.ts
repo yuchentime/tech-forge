@@ -21,3 +21,17 @@ export class CreateStudyNoteDto {
   @IsUUID('4')
   conversationId?: string;
 }
+
+/** Validates one edit of a saved note. */
+export class UpdateStudyNoteDto {
+  @IsString()
+  content!: string;
+
+  /**
+   * New conversation link: a UUID re-links, `null` clears it, and an absent field keeps the
+   * current link untouched.
+   */
+  @IsOptional()
+  @IsUUID('4')
+  conversationId?: string | null;
+}

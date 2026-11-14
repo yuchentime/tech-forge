@@ -6,7 +6,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { ConversationsService } from '../conversations/conversations.service';
-import type { CreateStudyNoteDto, StudyNoteDto } from './study-notes.dto';
+import type {
+  CreateStudyNoteDto,
+  StudyNoteDto,
+  UpdateStudyNoteDto,
+} from './study-notes.dto';
 import { StudyNoteEntity } from './study-note.entity';
 
 /** Longest note the page accepts; counted in Unicode code points so emoji count once. */
@@ -27,28 +31,36 @@ export class StudyNotesService {
 
   /** Stores one note, optionally attached to an existing conversation. */
   async create(input: CreateStudyNoteDto): Promise<StudyNoteDto> {
-    // Line endings are unified and the outside trimmed; the user's own indentation is kept.
-    const content = input.content.replace(/\r\n?/g, '\n').trim();
-    if (!content) {
-      throw new BadRequestException('笔记内容不能为空。');
-    }
-    if (Array.from(content).length > MAX_NOTE_CHARACTERS) {
-      throw new BadRequestException('笔记过长，请控制在 2000 字以内。');
-    }
-
+    const content = this.normalizeContent(input.content);
     const conversationId = input.conversationId ?? null;
-    if (conversationId) {
-      // A dangling id would render a "进入会话" button that can never load anything.
-      const titles = await this.conversations.getConversationDisplayTitles([
-        conversationId,
-      ]);
-      if (!titles.has(conversationId)) {
-        throw new NotFoundException('会话不存在，可能已被删除。');
-      }
-    }
+    if (conversationId) await this.assertConversationExists(conversationId);
 
     const repository = this.dataSource.getRepository(StudyNoteEntity);
     const note = repository.create({ id: randomUUID(), conversationId, content });
+    await repository.save(note);
+    return (await this.toDtos([note]))[0];
+  }
+
+  /**
+   * Replaces one note's text and, when the field is present, its conversation link.
+   *
+   * The creation time is kept so editing does not reorder the list; only `updatedAt` moves.
+   */
+  async update(id: string, input: UpdateStudyNoteDto): Promise<StudyNoteDto> {
+    const content = this.normalizeContent(input.content);
+    const repository = this.dataSource.getRepository(StudyNoteEntity);
+    const note = await repository.findOneBy({ id });
+    if (!note) {
+      throw new NotFoundException('这条笔记不存在，可能已被删除。');
+    }
+
+    if (input.conversationId !== undefined) {
+      if (input.conversationId !== null) {
+        await this.assertConversationExists(input.conversationId);
+      }
+      note.conversationId = input.conversationId;
+    }
+    note.content = content;
     await repository.save(note);
     return (await this.toDtos([note]))[0];
   }
@@ -70,6 +82,32 @@ export class StudyNotesService {
       throw new NotFoundException('这条笔记不存在，可能已被删除。');
     }
     return { id };
+  }
+
+  /**
+   * Normalizes one draft and enforces the shared limits.
+   *
+   * Line endings are unified and the outside trimmed; the user's own indentation is kept.
+   */
+  private normalizeContent(raw: string): string {
+    const content = raw.replace(/\r\n?/g, '\n').trim();
+    if (!content) {
+      throw new BadRequestException('笔记内容不能为空。');
+    }
+    if (Array.from(content).length > MAX_NOTE_CHARACTERS) {
+      throw new BadRequestException('笔记过长，请控制在 2000 字以内。');
+    }
+    return content;
+  }
+
+  /** Rejects a link to a conversation that does not exist, so "进入会话" always resolves. */
+  private async assertConversationExists(conversationId: string): Promise<void> {
+    const titles = await this.conversations.getConversationDisplayTitles([
+      conversationId,
+    ]);
+    if (!titles.has(conversationId)) {
+      throw new NotFoundException('会话不存在，可能已被删除。');
+    }
   }
 
   /** Maps rows to the wire shape, resolving the linked conversation titles in one query. */

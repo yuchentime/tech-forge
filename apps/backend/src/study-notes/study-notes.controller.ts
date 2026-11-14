@@ -7,9 +7,14 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
 } from '@nestjs/common';
-import { CreateStudyNoteDto, type StudyNoteDto } from './study-notes.dto';
+import {
+  CreateStudyNoteDto,
+  type StudyNoteDto,
+  UpdateStudyNoteDto,
+} from './study-notes.dto';
 import { StudyNotesService } from './study-notes.service';
 
 /**
@@ -33,6 +38,15 @@ export class StudyNotesController {
   @Get()
   list(): Promise<{ items: StudyNoteDto[] }> {
     return this.studyNotes.list().then((items) => ({ items }));
+  }
+
+  /** Replaces one note's text and, optionally, its conversation link. */
+  @Patch(':id')
+  update(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() input: UpdateStudyNoteDto,
+  ): Promise<StudyNoteDto> {
+    return this.studyNotes.update(id, input);
   }
 
   /** Deletes one note. */

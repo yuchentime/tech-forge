@@ -51,6 +51,24 @@ export async function createStudyNote(input: {
   return response.data;
 }
 
+/** Replaces one note's text and conversation link; `null` clears the link. */
+export async function updateStudyNote(
+  id: string,
+  input: { content: string; conversationId: string | null },
+): Promise<StudyNoteView> {
+  const response = await requestBackend(
+    `/api/study-notes/${encodeURIComponent(id)}`,
+    'PATCH',
+    input,
+  );
+  if (response.status !== 200 || !isStudyNoteView(response.data)) {
+    throw new StudyNoteApiError(
+      readBackendErrorMessage(response.data, '保存笔记失败，请重试。'),
+    );
+  }
+  return response.data;
+}
+
 /** Deletes one note. */
 export async function deleteStudyNote(id: string): Promise<void> {
   const response = await requestBackend(

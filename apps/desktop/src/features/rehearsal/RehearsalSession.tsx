@@ -51,6 +51,7 @@ export function RehearsalSession({
   // the status line carries the text that was sent.
   const [submittedPreview, setSubmittedPreview] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const questionId = detail.currentQuestion?.turnId ?? null;
 
   const busy =
@@ -88,6 +89,23 @@ export function RehearsalSession({
     const viewport = viewportRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [detail.turns.length, detail.status]);
+
+  // A question only becomes answerable by the model writing it, and the browser leaves focus on
+  // the body (the textarea remounted after an evaluation) or on the skip button. Claim the caret
+  // once per question so answering never starts with a click. `preventScroll` keeps the page still:
+  // the effect above owns scrolling the transcript to the newest question.
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!canAnswer || !composer) return;
+    const active = document.activeElement;
+    const typingElsewhere =
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active !== composer &&
+      (active.matches('input, textarea, [contenteditable="true"]') ||
+        active.isContentEditable);
+    if (!typingElsewhere) composer.focus({ preventScroll: true });
+  }, [canAnswer, questionId]);
 
   const submit = (): void => {
     if (!answer.trim() || busy) return;
@@ -232,6 +250,7 @@ export function RehearsalSession({
               }
             }}
             placeholder="用你自己的话回答，尽量给出具体例子…（Ctrl + Enter 提交）"
+            ref={composerRef}
             rows={3}
             value={answer}
           />

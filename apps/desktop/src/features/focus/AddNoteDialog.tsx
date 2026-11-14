@@ -1,35 +1,41 @@
 import { NotePencil } from '@phosphor-icons/react';
 import { useEffect, useId, useState } from 'react';
 import type { ConversationSummary } from '../agent/conversation-store';
+import type { StudyNoteView } from './notes-api';
 
 /** Matches the backend note limit; counted in Unicode code points so emoji count once. */
 const NOTE_MAX_CHARACTERS = 2000;
 
 /**
- * Captures one self-written note before it is saved.
+ * Captures one self-written note, for both a new note and an edit of a saved one.
  *
  * The conversation is optional: "不关联会话" saves a note that lives only on this page. The text
- * field starts three lines tall and Enter stays a newline; "保存笔记" or Ctrl/⌘+Enter submits,
- * while "取消", Esc or the backdrop discards the draft without writing.
+ * field starts six lines tall and Enter stays a newline; "保存笔记" or Ctrl/⌘+Enter submits,
+ * while "取消", Esc or the backdrop discards the draft without writing. In edit mode the text and
+ * the link start from the saved note, so saving can also re-link or unlink it.
  */
 export function AddNoteDialog({
   conversations,
+  note,
   onCancel,
   onSave,
 }: {
   /** Conversations offered in the optional link dropdown, newest first. */
   conversations: readonly ConversationSummary[];
+  /** The note being edited; omitted means a new note. */
+  note?: StudyNoteView;
   onCancel: () => void;
   /** Persists the draft; a rejection keeps the dialog open with the typed text. */
   onSave: (input: { content: string; conversationId: string | null }) => Promise<void>;
 }) {
-  const [content, setContent] = useState('');
-  const [conversationId, setConversationId] = useState('');
+  const [content, setContent] = useState(note?.content ?? '');
+  const [conversationId, setConversationId] = useState(note?.conversationId ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const contentId = useId();
   const conversationFieldId = useId();
   const canSave = content.trim().length > 0 && !isSaving;
+  const isEditing = note !== undefined;
 
   // Escape must cancel even after a click moved focus onto the select or the backdrop.
   useEffect(() => {
@@ -79,10 +85,12 @@ export function AddNoteDialog({
           </span>
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-ink-900" id={`${contentId}-title`}>
-              添加笔记
+              {isEditing ? '编辑笔记' : '添加笔记'}
             </h2>
             <p className="mt-1 text-xs leading-5 text-ink-500">
-              写自己的理解、疑问或复习要点，可以关联一个会话方便回看。
+              {isEditing
+                ? '修改正文或换一个关联会话，保存后立即生效。'
+                : '写自己的理解、疑问或复习要点，可以关联一个会话方便回看。'}
             </p>
           </div>
         </div>
@@ -135,7 +143,7 @@ export function AddNoteDialog({
               }
             }}
             placeholder="例如：幂等键要覆盖重试与重复投递，不要只依赖业务状态判断。"
-            rows={3}
+            rows={6}
             value={content}
           />
           <div className="mt-1 flex items-center justify-between gap-3 text-[11px] text-ink-500">

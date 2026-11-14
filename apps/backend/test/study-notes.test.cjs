@@ -151,3 +151,75 @@ test('removing a note deletes only that row and reports a missing one', async ()
     await ctx.dataSource.destroy();
   }
 });
+
+test('editing a note replaces its text and keeps its creation time', async () => {
+  const ctx = await createContext();
+  try {
+    const { conversationId } = await seedConversation(ctx.dataSource);
+    const created = await ctx.notes.create({ conversationId, content: '第一版' });
+
+    const updated = await ctx.notes.update(created.id, { content: '  第二版  ' });
+    assert.equal(updated.id, created.id);
+    assert.equal(updated.content, '第二版');
+    assert.equal(updated.createdAt, created.createdAt);
+    // 省略 conversationId 时保留原来的关联。
+    assert.equal(updated.conversationId, conversationId);
+  } finally {
+    await ctx.dataSource.destroy();
+  }
+});
+
+test('editing a note can re-link or unlink its conversation', async () => {
+  const ctx = await createContext();
+  try {
+    const { conversationId } = await seedConversation(ctx.dataSource);
+    const created = await ctx.notes.create({ content: '笔记' });
+
+    const linked = await ctx.notes.update(created.id, {
+      content: '笔记',
+      conversationId,
+    });
+    assert.equal(linked.conversationId, conversationId);
+    assert.equal(linked.conversationTitle, 'RabbitMQ 幂等');
+
+    const unlinked = await ctx.notes.update(created.id, {
+      content: '笔记',
+      conversationId: null,
+    });
+    assert.equal(unlinked.conversationId, null);
+    assert.equal(unlinked.conversationTitle, null);
+  } finally {
+    await ctx.dataSource.destroy();
+  }
+});
+
+test('editing rejects empty, oversized and dangling values', async () => {
+  const ctx = await createContext();
+  try {
+    const created = await ctx.notes.create({ content: '原始' });
+
+    await assert.rejects(
+      () => ctx.notes.update(created.id, { content: ' \n ' }),
+      /不能为空/,
+    );
+    await assert.rejects(
+      () => ctx.notes.update(created.id, { content: '字'.repeat(2001) }),
+      /过长/,
+    );
+    await assert.rejects(
+      () =>
+        ctx.notes.update(created.id, {
+          content: '改坏了',
+          conversationId: randomUUID(),
+        }),
+      /会话不存在/,
+    );
+    await assert.rejects(
+      () => ctx.notes.update(randomUUID(), { content: '不存在的行' }),
+      /不存在/,
+    );
+    assert.equal((await ctx.notes.list())[0].content, '原始');
+  } finally {
+    await ctx.dataSource.destroy();
+  }
+});

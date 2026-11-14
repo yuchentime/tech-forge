@@ -27,6 +27,7 @@ import {
   createStudyNote,
   deleteStudyNote,
   listStudyNotes,
+  updateStudyNote,
   type StudyNoteView,
 } from './notes-api';
 import { AddNoteDialog } from './AddNoteDialog';
@@ -60,7 +61,10 @@ export function FocusPointsPage({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  // `undefined` note means a new note; the mount key resets the dialog between notes.
+  const [noteDialog, setNoteDialog] = useState<
+    { note?: StudyNoteView } | null
+  >(null);
 
   /** Replaces both lists with the backend's current rows. */
   const load = useCallback(async (): Promise<void> => {
@@ -124,17 +128,25 @@ export function FocusPointsPage({
     }
   };
 
-  /** Saves a new note, prepends it and closes the dialog. */
-  const addNote = async (input: {
+  /** Saves the dialog draft: a new note is prepended, an edited one keeps its place in the list. */
+  const saveNoteDialog = async (input: {
     content: string;
     conversationId: string | null;
   }): Promise<void> => {
-    const created = await createStudyNote({
-      content: input.content,
-      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-    });
-    setNotes((current) => [created, ...current]);
-    setIsAddDialogOpen(false);
+    if (!noteDialog) return;
+    if (noteDialog.note) {
+      const updated = await updateStudyNote(noteDialog.note.id, input);
+      setNotes((current) =>
+        current.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+    } else {
+      const created = await createStudyNote({
+        content: input.content,
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+      });
+      setNotes((current) => [created, ...current]);
+    }
+    setNoteDialog(null);
     showToast('笔记已保存');
   };
 
@@ -185,7 +197,7 @@ export function FocusPointsPage({
         <h1 className="text-xl font-semibold tracking-tight text-ink-900">学习笔记</h1>
         <button
           className="inline-flex items-center gap-1.5 rounded-xl bg-brand-800 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
-          onClick={() => setIsAddDialogOpen(true)}
+          onClick={() => setNoteDialog({})}
           type="button"
         >
           <Plus aria-hidden="true" className="size-4" />
@@ -249,6 +261,7 @@ export function FocusPointsPage({
                     key={entry.item.id}
                     note={entry.item}
                     onDelete={removeNote}
+                    onEdit={(note) => setNoteDialog({ note })}
                     onOpenConversation={onOpenConversation}
                   />
                 ),
@@ -258,11 +271,13 @@ export function FocusPointsPage({
         </div>
       </div>
 
-      {isAddDialogOpen && (
+      {noteDialog && (
         <AddNoteDialog
           conversations={conversations}
-          onCancel={() => setIsAddDialogOpen(false)}
-          onSave={addNote}
+          key={noteDialog.note?.id ?? 'new'}
+          note={noteDialog.note}
+          onCancel={() => setNoteDialog(null)}
+          onSave={saveNoteDialog}
         />
       )}
     </section>
@@ -420,11 +435,13 @@ function NoteCard({
   note,
   deletingId,
   onDelete,
+  onEdit,
   onOpenConversation,
 }: {
   note: StudyNoteView;
   deletingId: string | null;
   onDelete: (note: StudyNoteView) => Promise<void>;
+  onEdit: (note: StudyNoteView) => void;
   onOpenConversation: (conversationId: string, messageId?: string) => void;
 }) {
   const { conversationId } = note;
@@ -471,6 +488,13 @@ function NoteCard({
           </span>
         )}
         <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
+        <button
+          className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-ink-500 transition hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
+          onClick={() => onEdit(note)}
+          type="button"
+        >
+          编辑
+        </button>
       </div>
     </li>
   );
