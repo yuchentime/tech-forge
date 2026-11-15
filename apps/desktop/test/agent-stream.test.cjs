@@ -5,6 +5,10 @@ const { decodeChatSseMessage } = require('../dist-electron/electron/main/stream-
 const { routeChatStreamEvent } = require('../dist-electron/electron/main/stream-routing.js');
 const { isChatStreamEvent } = require('../dist-electron/src/types/chat-stream-event.js');
 const { AgentEventBus } = require('../dist-electron/src/features/agent/agent-event-bus.js');
+const {
+  TURN_PROGRESS_SILENCE_MS,
+  shouldShowTurnProgress,
+} = require('../dist-electron/src/features/agent/turn-progress.js');
 const { agentChatAdapter } = require('../dist-electron/src/features/agent/agent-chat-adapter.js');
 const {
   assistantMessageAnchorStore,
@@ -236,6 +240,39 @@ test('Renderer AgentEventBus exposes live activity only to its source thread', (
 
   bus.clear('request-a');
   assert.equal(bus.getSnapshotForThread('local-thread-a').phase, 'idle');
+});
+
+test('Renderer AgentEventBus keeps its liveness timestamp moving while text streams', async () => {
+  const bus = new AgentEventBus();
+  bus.begin('turn-silence', 'request-silence');
+  bus.publish('request-silence', {
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta', delta: '我先建文档。' },
+  });
+  assert.equal(bus.getSnapshot().phase, 'responding');
+
+  const beforeNextDelta = bus.getLastEventAt('turn-silence');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  bus.publish('request-silence', {
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta', delta: '继续' },
+  });
+
+  assert.ok(
+    bus.getLastEventAt('turn-silence') > beforeNextDelta,
+    'a repeated text delta must refresh liveness even though the phase is already responding',
+  );
+});
+
+test('the waiting row covers silent stretches after streamed text', () => {
+  const now = 10_000;
+  assert.equal(shouldShowTurnProgress('working', now - 10, now), true);
+  assert.equal(shouldShowTurnProgress('responding', now - 100, now), false);
+  assert.equal(
+    shouldShowTurnProgress('responding', now - TURN_PROGRESS_SILENCE_MS, now),
+    true,
+  );
+  assert.equal(shouldShowTurnProgress('idle', now - 60_000, now), false);
 });
 
 test('Renderer AgentEventBus keeps finished artifacts under their thread until history loads', () => {

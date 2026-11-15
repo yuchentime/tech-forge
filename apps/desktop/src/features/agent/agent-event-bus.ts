@@ -34,6 +34,11 @@ export class AgentEventBus {
   private readonly activeRequestByThread = new Map<string, string>();
   /** Keeps each thread's finished turn so its artifact footer survives the stream ending. */
   private readonly lastTurnByThread = new Map<string, string>();
+  /**
+   * Timestamp of the newest accepted stream event per turn. Kept outside the immutable snapshot so
+   * a text delta does not notify React; the waiting row reads it on its own one-second tick.
+   */
+  private readonly lastEventAtByTurn = new Map<string, number>();
   private lastTurnId: string | null = null;
   private snapshot: AgentActivityState = {};
 
@@ -62,6 +67,15 @@ export class AgentEventBus {
 
   /** Returns the immutable per-turn map consumed by the message list. */
   getTurnSnapshots = (): AgentActivityState => this.snapshot;
+
+  /**
+   * Returns when this turn last published an event the UI can reflect, or 0 when it has none.
+   * The waiting row uses it to tell a paused model (thinking, generating tool arguments) from
+   * active text streaming; those silent gaps emit no visible event.
+   */
+  getLastEventAt(turnId: string): number {
+    return this.lastEventAtByTurn.get(turnId) ?? 0;
+  }
 
   /** Restores durable tool summaries under their persisted user message IDs. */
   restoreHistoryActivity(
@@ -109,6 +123,7 @@ export class AgentEventBus {
       this.lastTurnByThread.set(localThreadId, turnId);
     }
     this.lastTurnId = turnId;
+    this.lastEventAtByTurn.set(turnId, startedAt);
     this.updateTurnSnapshot({
       turnId,
       requestId: runRequestId,
@@ -124,6 +139,9 @@ export class AgentEventBus {
   publish(requestId: string, event: ChatStreamEvent): void {
     const activity = this.getActiveSnapshot(requestId);
     if (!activity) return;
+    // Every accepted frame counts as liveness, including repeated text deltas that leave the
+    // snapshot untouched: a streaming reply must never look silent to the waiting row.
+    this.lastEventAtByTurn.set(activity.turnId, Date.now());
 
     switch (event.type) {
       case 'tool_execution_start':

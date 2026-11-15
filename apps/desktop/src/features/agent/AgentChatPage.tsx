@@ -31,7 +31,11 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { agentEventBus } from './agent-event-bus';
+import {
+  agentEventBus,
+  type AgentActivitySnapshot,
+  type AgentToolActivity,
+} from './agent-event-bus';
 import { assistantMessageAnchorStore } from './assistant-message-anchor-store';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactSidebar } from './ArtifactSidebar';
@@ -64,6 +68,7 @@ import {
 import { composerCommandStore, sentCommandStore } from './composer-command-store';
 import { toThreadMessage } from './conversation-history';
 import { describeToolActivity } from './tool-activity-label';
+import { shouldShowTurnProgress } from './turn-progress';
 import { KnowledgeBasePage } from '../knowledge/KnowledgeBasePage';
 import { KnowledgeProfilePage } from '../knowledge-profile/KnowledgeProfilePage';
 import { ClassroomHome } from '../classroom/ClassroomHome';
@@ -1109,7 +1114,7 @@ function restoreHistoryCommands(messages: ConversationHistoryMessage[]): void {
 function AgentActivity({
   activity,
 }: {
-  activity: ReturnType<typeof agentEventBus.getTurnSnapshots>[string] | undefined;
+  activity: AgentActivitySnapshot | undefined;
 }) {
   // 历史活动已经是终态，挂载时直接收起；本轮运行中的活动保持展开。
   const [isExpanded, setIsExpanded] = useState(() => activity?.phase !== 'idle');
@@ -1164,16 +1169,24 @@ function AgentActivity({
 }
 
 /**
- * Fills the response area while a turn is still working and has streamed no text yet,
- * so a long model or document wait never leaves the thread blank.
+ * Fills the response area while a turn is still working and has streamed no text yet, and returns
+ * whenever streamed text is followed by a silent stretch (reasoning or a large tool call), so a
+ * long model or document wait never leaves the thread without any progress signal.
  */
 function TurnProgress({
   activity,
 }: {
-  activity: ReturnType<typeof agentEventBus.getSnapshot>;
+  activity: AgentActivitySnapshot;
 }) {
-  const isWaiting = activity.phase === 'working';
-  const elapsedMs = useElapsedMs(activity.startedAt, isWaiting);
+  const isActive = activity.phase === 'working' || activity.phase === 'responding';
+  useSecondTick(isActive);
+  const now = Date.now();
+  const elapsedMs = Math.max(0, now - activity.startedAt);
+  const isWaiting = shouldShowTurnProgress(
+    activity.phase,
+    agentEventBus.getLastEventAt(activity.turnId),
+    now,
+  );
   if (!isWaiting) return null;
 
   return (
@@ -1210,7 +1223,7 @@ function isLongWait(elapsedMs: number): boolean {
 
 /** Summarises the live turn in one sentence: the newest running tool, or plain thinking. */
 function describeTurnStatus(
-  tools: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'],
+  tools: readonly AgentToolActivity[],
 ): string {
   const running = [...tools].reverse().find((tool) => tool.status === 'running');
   if (!running) return '正在思考…';
@@ -1222,25 +1235,28 @@ function describeTurnStatus(
   return `${description.action}…`;
 }
 
-/** Ticks once a second while `isActive` so live durations stay current without a reload. */
-function useElapsedMs(startedAt: number, isActive: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+/** Ticks once a second while `isActive` so live durations and silence windows stay current. */
+function useSecondTick(isActive: boolean): void {
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!isActive) return;
-    setNow(Date.now());
-    const timerId = window.setInterval(() => setNow(Date.now()), 1000);
+    const timerId = window.setInterval(() => setTick((tick) => tick + 1), 1000);
     return () => window.clearInterval(timerId);
-  }, [isActive, startedAt]);
+  }, [isActive]);
+}
 
-  return Math.max(0, now - startedAt);
+/** Ticks once a second while `isActive` so live durations stay current without a reload. */
+function useElapsedMs(startedAt: number, isActive: boolean): number {
+  useSecondTick(isActive);
+  return Math.max(0, Date.now() - startedAt);
 }
 
 /** Presents one tool action with plain-language wording, target and lifecycle status. */
 function ToolActivityRow({
   tool,
 }: {
-  tool: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number];
+  tool: AgentToolActivity;
 }) {
   const description = describeToolActivity(tool.toolName, tool.status, tool.args);
 
@@ -1281,7 +1297,7 @@ function formatDuration(durationMs: number): string {
 function ToolStatusIcon({
   status,
 }: {
-  status: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number]['status'];
+  status: AgentToolActivity['status'];
 }) {
   if (status === 'running') {
     return (
@@ -1319,7 +1335,7 @@ function ToolStatusIcon({
 
 /** Names the lifecycle status for non-color context in each tool row. */
 function getToolStatusLabel(
-  status: ReturnType<typeof agentEventBus.getTurnSnapshots>[string]['tools'][number]['status'],
+  status: AgentToolActivity['status'],
 ): string {
   if (status === 'running') return '正在运行';
   if (status === 'completed') return '已完成';
@@ -1442,9 +1458,7 @@ function AssistantMessage({ messageId }: { messageId: string }) {
 function LiveArtifactFooter({
   files,
 }: {
-  files: NonNullable<
-    ReturnType<typeof agentEventBus.getSnapshot>['artifacts']
-  >;
+  files: AgentActivitySnapshot['artifacts'];
 }) {
   if (files.length === 0) return null;
   return (

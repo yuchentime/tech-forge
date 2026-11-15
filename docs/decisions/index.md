@@ -11,7 +11,8 @@ related:
   - docs/decisions/2026-11-11-long-term-memory.md
   - docs/decisions/2026-11-11-memory-injection-boundary.md
   - docs/decisions/2026-11-13-deepseek-output-budget.md
-last_verified: 2026-11-13
+  - docs/decisions/2026-11-15-chat-waiting-progress-signal.md
+last_verified: 2026-11-15
 ---
 
 # 已接受决策
@@ -24,5 +25,6 @@ last_verified: 2026-11-13
 | 长期记忆引擎 | `@db0-ai/core` + sql.js SQLite，注入本地 bge；不装 `@db0-ai/pi`；user 作用域、独占锁与每日备份 | [ADR](2026-11-11-long-term-memory.md) |
 | 记忆注入边界 | 保留每轮注入 + 快照剥离；阈值 0.72、2 条、150 字；捕获排在检索之后；注入头单一来源 | [ADR](2026-11-11-memory-injection-boundary.md) |
 | DeepSeek 模型上限 | 描述符按官方文档取 `contextWindow = 1M`、`maxTokens = 65_536`；Pi 总会发送 `max_tokens`，缺省值 16,384 不可接受 | [ADR](2026-11-13-deepseek-output-budget.md) |
+| 聊天等待进度信号 | 先采用前端静默判据（最近事件 1 秒无进展即显示等待行），不改 SSE 契约；后端阶段事件（B）保留为明确迁移路径与切换条件 | [ADR](2026-11-15-chat-waiting-progress-signal.md) |
 
 其他产品和数据模型取舍仍在[设计输入索引](../source/index.md)中，确认后再提升为 ADR。

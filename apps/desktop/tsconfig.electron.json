@@ -20,6 +20,7 @@
     "src/features/agent/conversation-history.ts",
     "src/features/agent/layout-budget.ts",
     "src/features/agent/tool-activity-label.ts",
+    "src/features/agent/turn-progress.ts",
     "src/features/knowledge-profile/knowledge-profile-cards.ts",
     "src/features/rehearsal/rehearsal-api.ts",
     "src/features/rehearsal/rehearsal-availability.ts",
