@@ -67,7 +67,7 @@ import {
   buildPlanPrompt,
   buildReportPrompt,
   buildSkipPrompt,
-} from './rehearsal-prompts';
+} from '../llm/prompts/rehearsal-prompts';
 import { RehearsalPreparingRegistry } from './rehearsal-preparing-registry';
 import { RehearsalRunRegistry } from './rehearsal-run-registry';
 import { RehearsalTurnEntity } from './rehearsal-turn.entity';

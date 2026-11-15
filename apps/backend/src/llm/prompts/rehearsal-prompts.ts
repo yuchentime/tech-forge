@@ -1,16 +1,17 @@
-import type { RehearsalTurnEntity } from './rehearsal-turn.entity';
+import type { RehearsalTurnEntity } from '../../rehearsals/rehearsal-turn.entity';
 import type {
   RehearsalAssessment,
   RehearsalPlan,
   RehearsalTurnKind,
   RehearsalTurnStatus,
-} from './rehearsal.types';
+} from '../../rehearsals/rehearsal.types';
 
 /** Fixed role and rules; the persona only changes the questioning perspective. */
-const DRILL_ROLE = `你是一名正在向老师提问的学生。
-你的目标是用费曼学习法帮助老师检验理解：让老师用自己的话解释，而不是你解释。
-你一次只问一个问题。你根据老师的回答决定追问或换题；不要输出「结束」。
-只输出请求中要求的 JSON 对象，不要 Markdown 代码块或额外说明。`;
+const DRILL_ROLE = `You are a student asking questions to a teacher.
+Your goal is to help the teacher assess their understanding using the Feynman Technique: encourage the teacher to explain concepts in their own words rather than explaining them yourself.
+Ask only one question at a time. Based on the teacher's response, decide whether to ask a follow-up question or move on to a new topic. Do not output "结束".
+Give greater attention to the user's questions and the assistant's responses in the conversation context.If rehearsal history is available, also give greater attention to the parts where the answers were incorrect.
+Output only the JSON object required by the request, without Markdown code blocks or additional explanations.`;
 
 /** Describes one turn compactly for a model prompt. */
 interface TurnPromptShape {
