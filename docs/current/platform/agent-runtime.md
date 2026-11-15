@@ -19,7 +19,7 @@ related:
   - docs/changes/2026-11-13-classroom-simulation/design.md
   - docs/decisions/2026-11-13-deepseek-output-budget.md
   - docs/source/agent-runtime-open-questions.md
-last_verified: 2026-11-14
+last_verified: 2026-11-15
 ---
 
 # Agent Runtime 运行链路
@@ -217,7 +217,7 @@ Assistant 消息（包括 toolCall block 和参数）以及原生 `toolResult` �
 演练是独立 Agent，不经过 `ChatService.stream()`，也不写 `messages`：
 
 - `RehearsalsService.start()` 用 `ConversationsService.getRestorableHistory()` 读取父会话历史，再调用 `OneShotLlmAgent.generate()`。该调用可传入父 `conversation`，由 `PiAgentRuntime.restoreEntries()` 复用父 Pi 快照（含 compaction），但 `generate()` 不保存快照。
-- `start()` 通过可选的 `onPhase` 回调把 session 引导、provider 调用与 JSON 修复重试写入进程内 `RehearsalPreparingRegistry`，只由只读端点 `GET /api/conversations/:id/rehearsals/preparing` 读取；该登记不参与状态机、不落库，重启即丢失。
+- `start()` 通过可选的 `onPhase` 回调把 session 引导和 provider 调用阶段写入进程内 `RehearsalPreparingRegistry`，只由只读端点 `GET /api/conversations/:id/rehearsals/preparing` 读取；演练结构化生成只调用一次 `OneShotLlmAgent.generate()`，provider 重试使用 Pi SDK 设置；该登记不参与状态机、不落库，重启即丢失。
 - 后续答题/跳过/报告调用使用新的临时 Pi session，只带 `learningSummary + plan + 已有问答`；不传 `conversation`，不写快照。
 - 演练 system prompt 由代码写死；不加载 IDENTIFY/PREFERENCE 文本、`tools: []`。因此演练 Agent 不能写文件、执行命令或读取知识库。
 - 每题动作只有 `follow_up` / `next_question`；第 15 问（含跳过）由后端转 `reporting`，模型不能提前结束。

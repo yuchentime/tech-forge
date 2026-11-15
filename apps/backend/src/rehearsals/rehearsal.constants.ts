@@ -12,7 +12,7 @@ export const PERSONA_FILE_NAME = 'rehearsal-persona.txt';
 /** Model budget for one planning/decision/report call. */
 export const GENERATE_TIMEOUT_MS = 90_000;
 
-/** Model calls allowed for one structured result: the first call plus two repaired retries. */
+/** Model calls allowed for one conversation knowledge fact: the first call plus two repairs. */
 export const MAX_GENERATE_ATTEMPTS = 3;
 
 /** A stale row is reconciled only when its process-local run is gone and it has not moved for this long. */

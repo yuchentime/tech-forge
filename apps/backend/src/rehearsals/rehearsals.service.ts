@@ -38,7 +38,6 @@ import {
   DIGEST_SUMMARY_CHARS,
   GENERATE_TIMEOUT_MS,
   MAX_FOLLOW_UPS,
-  MAX_GENERATE_ATTEMPTS,
   MAX_PERSONA_LENGTH,
   MAX_TOTAL_QUESTIONS,
   PERSONA_FILE_NAME,
@@ -184,7 +183,7 @@ function describeInvalidModelOutput(label: string): string {
     next: '请稍后重试。',
   };
   return (
-    `模型连续 ${MAX_GENERATE_ATTEMPTS} 次没有返回可解析的内容，${step.name}没有生成。` +
+    `模型没有返回可解析的内容，${step.name}没有生成。` +
     `${step.next}如果仍然失败，可以到设置里换一个模型再试。`
   );
 }
@@ -569,7 +568,7 @@ export class RehearsalsService {
 
       let decision;
       try {
-        decision = await this.generateValidated(
+        decision = await this.generateRehearsalsPlan(
           buildAnswerPrompt({
             plan,
             turns: latestTurns,
@@ -813,7 +812,7 @@ export class RehearsalsService {
       }
       let decision;
       try {
-        decision = await this.generateValidated(
+        decision = await this.generateRehearsalsPlan(
           buildSkipPrompt({
             plan,
             turns: latestTurns,
@@ -1286,7 +1285,7 @@ export class RehearsalsService {
 
     let plan: ParsedPlan;
     try {
-      plan = await this.generateValidated(
+      plan = await this.generateRehearsalsPlan(
         planPrompt,
         parsePlanResponse,
         {
@@ -1390,15 +1389,8 @@ export class RehearsalsService {
     );
   }
 
-  /**
-   * Calls the model for one structured result, repairing invalid JSON up to
-   * `MAX_GENERATE_ATTEMPTS` times.
-   *
-   * Only a structural failure is retried here: Pi's SDK already handles transport retries, so a
-   * provider failure goes straight back to the caller's error mapping. A cancelled call is never
-   * retried because the caller already ended the drill.
-   */
-  private async generateValidated<T>(
+  /** Calls Pi once for a structured result, then validates its JSON response. */
+  private async generateRehearsalsPlan<T>(
     prompt: string,
     parse: (value: unknown) => T,
     options: {
@@ -1426,39 +1418,10 @@ export class RehearsalsService {
         ? { conversation: options.conversation }
         : {}),
     };
-    return this.generateValidatedAttempt(
-      prompt,
-      prompt,
-      parse,
-      callOptions,
-      options,
-      1,
-    );
-  }
-
-  /**
-   * Runs one model attempt of `generateValidated` and recurses with the repaired prompt while the
-   * output stays unparseable.
-   *
-   * `basePrompt` stays untouched so a repair instruction never stacks across attempts;
-   * `attemptPrompt` is what this attempt actually sends.
-   */
-  private async generateValidatedAttempt<T>(
-    basePrompt: string,
-    attemptPrompt: string,
-    parse: (value: unknown) => T,
-    callOptions: LlmGenerateOptions,
-    options: {
-      logContext: RequestLogContext;
-      label: string;
-      signal?: AbortSignal;
-      onPhase?: RehearsalPhaseReporter;
-    },
-    attempt: number,
-  ): Promise<T> {
     let text: string;
     try {
-      text = await this.oneShotLlmAgent.generate(attemptPrompt, callOptions);
+      // Provider-level retries belong to Pi's configured settings manager; this layer makes one call.
+      text = await this.oneShotLlmAgent.generate(prompt, callOptions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // Transport retries belong to the Pi SDK; record the diagnostic detail and let the caller
@@ -1472,7 +1435,6 @@ export class RehearsalsService {
         {
           ...options.logContext,
           label: options.label,
-          attempt,
           timedOut: message.includes('timed out'),
           errorMessage: clipLogText(message, 500),
           ...getSafeErrorLogFields(error),
@@ -1484,36 +1446,22 @@ export class RehearsalsService {
     try {
       return parse(parseJsonObject(text));
     } catch (error) {
-      const exhausted = attempt >= MAX_GENERATE_ATTEMPTS;
       const parseError = error instanceof Error ? error.message : String(error);
       writeStructuredEvent(
         this.logger,
-        exhausted ? 'error' : 'warn',
+        'error',
         'rehearsal.model.json_invalid',
         {
           ...options.logContext,
           label: options.label,
-          attempt,
           outputLength: Array.from(text).length,
           outputPreview: clipLogText(text, 500),
           parseError: clipLogText(parseError, 500),
           ...getSafeErrorLogFields(error),
         },
       );
-      if (exhausted) {
-        throw new UnprocessableEntityException(
-          describeInvalidModelOutput(options.label),
-        );
-      }
-      options.onPhase?.('repair');
-      return this.generateValidatedAttempt(
-        basePrompt,
-        `${basePrompt}\n\n上一次输出无法解析：${parseError}。` +
-          '请只输出符合要求的 JSON 对象，不要附加解释或额外字段。',
-        parse,
-        callOptions,
-        options,
-        attempt + 1,
+      throw new UnprocessableEntityException(
+        describeInvalidModelOutput(options.label),
       );
     }
   }
@@ -1542,7 +1490,7 @@ export class RehearsalsService {
         throw new ConflictException('演练计划不存在，无法生成报告。');
       }
       try {
-        report = await this.generateValidated(
+        report = await this.generateRehearsalsPlan(
           buildReportPrompt({ plan, turns, endReason }),
           parseReportResponse,
           {

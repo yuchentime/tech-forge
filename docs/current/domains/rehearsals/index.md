@@ -12,7 +12,7 @@ related:
   - docs/current/platform/architecture-and-code-placement.md
   - docs/changes/2026-11-09-rehearsal-mode/design.md
   - docs/changes/2026-11-09-rehearsal-mode/verification.md
-last_verified: 2026-11-14
+last_verified: 2026-11-15
 ---
 
 # 演练模式（Rehearsal）
@@ -30,7 +30,7 @@ last_verified: 2026-11-14
 
 ### 准备画面
 
-- `POST` 是同步请求；桌面端在 `isStarting` 时显示独立准备画面：动图主图（`apps/desktop/src/assets/rehearsal-preparing.gif`）、标题、五段真实阶段清单（读取学习内容 / 回顾演练记录 / 加载上下文 / 生成演练题目 / 保存计划）、进度条、状态文案和底部说明，不显示已用时间或预计时长。清单每段都由后端 `phase` 推导：`repair` 归入「生成演练题目」，没有后端无法上报的阶段；动图只是情绪层，`aria-hidden`，不承载信息。状态文案来自只读端点 `GET /api/conversations/:id/rehearsals/preparing` 的 `phase`：`history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`。端点不读库、不做 reconciliation，未登记返回 `null`；轮询 1s（页面不可见 5s），start 结束即停止。
+- `POST` 是同步请求；桌面端在 `isStarting` 时显示独立准备画面：动图主图（`apps/desktop/src/assets/rehearsal-preparing.gif`）、标题、五段真实阶段清单（读取学习内容 / 回顾演练记录 / 加载上下文 / 生成演练题目 / 保存计划）、进度条、状态文案和底部说明，不显示已用时间或预计时长。清单每段都由后端 `phase` 推导，生成阶段只调用一次 `OneShotLlmAgent.generate()`；Pi SDK 的设置管理器负责 provider 重试，结构无效时返回 422。动图只是情绪层，`aria-hidden`，不承载信息。状态文案来自只读端点 `GET /api/conversations/:id/rehearsals/preparing` 的 `phase`：`history` / `prior_summaries` / `session` / `plan` / `saving`。端点不读库、不做 reconciliation，未登记返回 `null`；轮询 1s（页面不可见 5s），start 结束即停止。
 - 进度条与清单是两个独立信号：进度条按预计时长推进（`estimatePreparingPercent`，5s≈45%、20s≈83%），上限 90%，只用于安抚等待，不代表真实阶段。start 返回后进度条补到 100%、清单全部标记完成，标题换成「准备完成，马上开始演练」、状态行显示「准备完成，正在进入演练…」，约 450ms 后切换；失败回到开始页显示可执行文案，不提供取消。准备中切换会话时，旧 start 结果不会写入新会话：`RehearsalStore.start()` 在 await 返回后校验 `conversationId`。等待超过 45 秒时追加一行模型较慢的提示。
 
 ### 状态机
@@ -99,8 +99,8 @@ stateDiagram-v2
 
 ## 失败与恢复
 
-- 模型 JSON 非法时最多尝试 3 次（含首次），重试 prompt 追加本次解析错误；仍非法返回 422，保留答案供重试。模型调用本身失败（超时、网络等）不在此重试，重试由 Pi SDK 处理，本服务映射为 504/502/409。面向用户的错误只给「发生了什么 + 下一步按钮」：`answer` 提示点「重试评估」，`skip` 提示点「重试」，`report` 提示点「重试结束」，`plan` 提示再点「开始演练」。provider 原始文本与模型原始输出只进日志。
-- 开发者日志：`rehearsal.model.call_failed` 记录 `label`、`attempt`、`timedOut`、截断 `errorMessage` 与错误类型/堆栈；`rehearsal.model.json_invalid` 额外记录 `outputLength`、截断 `outputPreview` 与 `parseError`。
+- 演练计划、答题评估、跳过和总体报告各调用一次 `OneShotLlmAgent.generate()`；provider 重试由 Pi SDK 处理。模型 JSON 非法时返回 422，保留答案供用户重试。面向用户的错误只给「发生了什么 + 下一步按钮」：`answer` 提示点「重试评估」，`skip` 提示点「重试」，`report` 提示点「重试结束」，`plan` 提示再点「开始演练」。provider 原始文本与模型原始输出只进日志。
+- 开发者日志：`rehearsal.model.call_failed` 记录 `label`、`timedOut`、截断 `errorMessage` 与错误类型/堆栈；`rehearsal.model.json_invalid` 额外记录 `outputLength`、截断 `outputPreview` 与 `parseError`。
 - 回答评估失败：turn 转 `failed`，rehearsal 回 `awaiting_answer`；同一 `answerRequestId` 可重试。跳过生成失败：turn 保持 `skipped`，rehearsal 保持 `preparing_next`；同一 `turnId` 可重试。报告失败：rehearsal 转 `failed`，保留逐题数据并可重试 `end`。
 - 进程中断后，读取时 reconciliation 无活跃 run 的行：`evaluating`/`preparing_next` 立即回 `awaiting_answer`，`reporting` 立即转 `failed`；`preparing` 等 120 秒后转 `failed`。回答在提交时已写入 `rehearsal_turns.answer`；重启后 `latest` 恢复题面与历史问答。没有进行中的评估时，上次评估未完成会显示已保存回答与「重试评估」，并预填回答框，用同一回答 + 新请求键继续，不重复创建 turn；正常提交与重试期间只显示「正在进行评估…」，不显示该提示。
 - 每个 Rehearsal 在进程内串行；`end` 会 abort 进行中的模型调用并等待退出，迟到结果不写入。

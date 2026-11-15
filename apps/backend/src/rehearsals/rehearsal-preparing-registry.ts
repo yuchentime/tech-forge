@@ -5,7 +5,7 @@ import type {
   RehearsalPreparingView,
 } from './rehearsal.types';
 
-/** Entries older than this are dropped; covers the longest start (three 90s calls plus retries). */
+/** Entries older than this are dropped; covers a model-call timeout plus cleanup margin. */
 const PREPARING_TTL_MS = 10 * 60_000;
 
 /** One claimed start, keyed by conversation because a conversation has one active rehearsal. */

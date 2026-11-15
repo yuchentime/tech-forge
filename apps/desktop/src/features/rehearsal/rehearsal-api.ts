@@ -116,7 +116,6 @@ export type RehearsalPreparingPhase =
   | 'prior_summaries'
   | 'session'
   | 'plan'
-  | 'repair'
   | 'saving';
 
 /** Read-only preparing snapshot; null means the request has not registered or already settled. */

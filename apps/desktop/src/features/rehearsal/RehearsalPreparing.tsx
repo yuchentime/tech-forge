@@ -13,15 +13,13 @@ const PHASE_COPY: Record<RehearsalPreparingPhase, string> = {
   prior_summaries: '正在回顾之前的演练记录',
   session: '正在加载模型和对话上下文',
   plan: '正在生成演练计划和第一道题',
-  repair: '模型输出格式不对，正在重试',
   saving: '正在保存演练计划',
 };
 
 /**
  * Ordered stages shown as the waiting checklist.
  *
- * Every stage maps onto real backend phases and nothing else: `repair` retries plan generation, so
- * it belongs to the plan stage, and no stage exists that the backend cannot report.
+ * Every stage maps onto a real backend phase, and no stage exists that the backend cannot report.
  */
 const PREPARING_STEPS: ReadonlyArray<{
   label: string;
@@ -30,7 +28,7 @@ const PREPARING_STEPS: ReadonlyArray<{
   { label: '读取学习内容', phases: ['history'] },
   { label: '回顾演练记录', phases: ['prior_summaries'] },
   { label: '加载上下文', phases: ['session'] },
-  { label: '生成演练题目', phases: ['plan', 'repair'] },
+  { label: '生成演练题目', phases: ['plan'] },
   { label: '保存计划', phases: ['saving'] },
 ];
 

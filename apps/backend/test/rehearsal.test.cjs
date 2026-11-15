@@ -934,15 +934,13 @@ test('the student persona persists in one local file shared by every conversatio
   }
 });
 
-test('a malformed plan is retried with the parse error attached and never stacked', async () => {
+test('a valid plan is parsed from one model call', async () => {
   const ctx = await createContext();
   const conversationId = await seedConversation(ctx);
   const prompts = [];
   try {
     ctx.llm.generate = async (prompt) => {
       prompts.push(prompt);
-      if (prompts.length === 1) return '这里不是 JSON';
-      if (prompts.length === 2) return JSON.stringify({ topic: '金字塔原理' });
       return JSON.stringify(PLAN);
     };
     const detail = await ctx.service.start(
@@ -951,15 +949,13 @@ test('a malformed plan is retried with the parse error attached and never stacke
       { requestId: randomUUID(), conversationId },
     );
     assert.equal(detail.currentQuestion.text, PLAN.firstQuestion);
-    assert.equal(prompts.length, 3);
-    assert.ok(prompts[2].startsWith(prompts[0]));
-    assert.equal(prompts[2].split('上一次输出无法解析').length - 1, 1);
+    assert.equal(prompts.length, 1);
   } finally {
     await ctx.close();
   }
 });
 
-test('three malformed plan answers end as 422 instead of inventing a plan', async () => {
+test('a malformed plan ends as 422 after one model call', async () => {
   const ctx = await createContext();
   const conversationId = await seedConversation(ctx);
   let calls = 0;
@@ -977,12 +973,12 @@ test('three malformed plan answers end as 422 instead of inventing a plan', asyn
         ),
       (error) => {
         assert.equal(error.getStatus(), 422);
-        assert.match(error.message, /连续 3 次没有返回可解析的内容/);
+        assert.match(error.message, /没有返回可解析的内容/);
         assert.match(error.message, /「开始演练」/);
         return true;
       },
     );
-    assert.equal(calls, 3);
+    assert.equal(calls, 1);
   } finally {
     await ctx.close();
   }
@@ -1103,8 +1099,8 @@ test('the preparing registry maps phases and isolates tokens', () => {
   registry.finish('conversation-1', 'foreign-token');
   assert.ok(registry.read('conversation-1'));
 
-  registry.setPhase('conversation-1', token, 'repair');
-  assert.equal(registry.read('conversation-1').phase, 'repair');
+  registry.setPhase('conversation-1', token, 'plan');
+  assert.equal(registry.read('conversation-1').phase, 'plan');
   registry.setPhase('conversation-1', token, 'saving');
   assert.equal(registry.read('conversation-1').phase, 'saving');
 

@@ -10,7 +10,7 @@ related:
   - docs/current/domains/conversations/api-contract.md
   - docs/current/platform/agent-runtime.md
   - docs/changes/2026-11-09-rehearsal-mode/design.md
-last_verified: 2026-11-10
+last_verified: 2026-11-15
 ---
 
 # 演练 API 契约
@@ -50,7 +50,7 @@ last_verified: 2026-11-10
   - `rehearsalId`、`conversationId`、`status`、`topic`、`persona`、`plan`、`progress`、`currentQuestion`、`turns`、`report`、`endReason`、`startedAt`、`endedAt`、`createdAt`。
   - 首次成功时 `status = awaiting_answer`，`currentQuestion` 是第一条基础题。
   - 同一 `startRequestId` 重放返回已有状态；失败且无 turn 的旧行会原地重试规划。
-- **错误**：400 画像超长；404 conversation 不存在；409 已有进行中演练或普通对话仍有 pending turn；422 没有足够普通历史/模型输出非法（3 次尝试后仍非法）；502 Provider 失败；504 超时（供应方暂不可用）。
+- **错误**：400 画像超长；404 conversation 不存在；409 已有进行中演练或普通对话仍有 pending turn；422 没有足够普通历史/模型输出非法；502 Provider 失败；504 超时（供应方暂不可用）。provider 重试由 Pi SDK 配置管理，结构无效的输出不会额外发起修复请求。
 
 ### Read the in-flight preparing phase
 
@@ -59,7 +59,7 @@ last_verified: 2026-11-10
 - **响应**：`{ "rehearsalId": "uuid", "phase": "plan" }`，或 `null`。
 - **语义**：
   - 只读诊断端点：不读数据库、不执行 reconciliation、不写任何行；轮询不会更新 `updatedAt`。
-  - `phase` 取 `history` / `prior_summaries` / `session` / `plan` / `repair` / `saving`，只用于准备画面的状态文案；进度条本身按预计时长推进，不使用这些阶段。
+  - `phase` 取 `history` / `prior_summaries` / `session` / `plan` / `saving`，只用于准备画面的状态文案；进度条本身按预计时长推进，不使用这些阶段。
   - 没有进行中的 start、未知 conversation、进程重启导致内存态丢失时返回 `null`，不返回 404。
   - 响应只用于准备画面；不改变任何状态或错误映射。
 

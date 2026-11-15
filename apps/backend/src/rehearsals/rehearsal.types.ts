@@ -246,7 +246,6 @@ export type RehearsalPreparingPhase =
   | 'prior_summaries'
   | 'session'
   | 'plan'
-  | 'repair'
   | 'saving';
 
 /** Read-only phase snapshot for one in-flight start; never persisted. */
